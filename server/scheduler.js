@@ -20,6 +20,7 @@ const { classifyArticle, assignClusters } = require('./services/newsRelevance');
 const { generateAlerts } = require('./services/materiality');
 const { recomputeImpacts } = require('./services/impactScoring');
 const { pollSmartMoney } = require('./services/smartMoney');
+const { captureException } = require('./observability');
 
 let isRunning = false;
 
@@ -117,6 +118,7 @@ async function runNewsPipeline() {
     console.log(`   ✅ Pipeline complete\n`);
   } catch (err) {
     console.error('Pipeline error:', err);
+    captureException(err);
   } finally {
     isRunning = false;
   }
@@ -131,6 +133,7 @@ async function runSmartMoneyPoll() {
     await pollSmartMoney();
   } catch (err) {
     console.error('Smart-money poll error:', err);
+    captureException(err);
   }
 }
 
