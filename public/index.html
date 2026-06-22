@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="AI Portfolio News Copilot — Real-time portfolio monitoring with NLP sentiment analysis and intelligent alerts">
+  <title>AI Portfolio News Copilot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <!-- ═══ AUTH VIEW ═══ -->
+  <div id="auth-view" class="view">
+    <div class="auth-container">
+      <div class="auth-glow"></div>
+      <div class="auth-card glass">
+        <div class="auth-logo">
+          <div class="logo-icon">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <defs>
+                <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" style="stop-color:#6366f1"/>
+                  <stop offset="100%" style="stop-color:#06b6d4"/>
+                </linearGradient>
+              </defs>
+              <circle cx="24" cy="24" r="22" stroke="url(#logoGrad)" stroke-width="2.5" fill="none"/>
+              <path d="M14 28 L20 20 L26 24 L34 16" stroke="url(#logoGrad)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="34" cy="16" r="3" fill="#6366f1"/>
+            </svg>
+          </div>
+          <h1>AI Portfolio Copilot</h1>
+          <p class="auth-subtitle">Real-time sentiment intelligence for your investments</p>
+        </div>
+
+        <div id="auth-tabs" class="auth-tabs">
+          <button class="auth-tab active" data-tab="login">Sign In</button>
+          <button class="auth-tab" data-tab="signup">Create Account</button>
+        </div>
+
+        <form id="login-form" class="auth-form">
+          <div class="form-group">
+            <label for="login-email">Email</label>
+            <input type="email" id="login-email" placeholder="you@example.com" required>
+          </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" placeholder="••••••••" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-full" id="login-btn">
+            <span>Sign In</span>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+        </form>
+
+        <form id="signup-form" class="auth-form hidden">
+          <div class="form-group">
+            <label for="signup-name">Full Name</label>
+            <input type="text" id="signup-name" placeholder="John Doe" required>
+          </div>
+          <div class="form-group">
+            <label for="signup-email">Email</label>
+            <input type="email" id="signup-email" placeholder="you@example.com" required>
+          </div>
+          <div class="form-group">
+            <label for="signup-password">Password</label>
+            <input type="password" id="signup-password" placeholder="Min 6 characters" required minlength="6">
+          </div>
+          <button type="submit" class="btn btn-primary btn-full" id="signup-btn">
+            <span>Create Account</span>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+        </form>
+
+        <div id="auth-error" class="auth-error hidden"></div>
+        <p class="disclaimer" data-disclaimer></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ DASHBOARD VIEW ═══ -->
+  <div id="dashboard-view" class="view hidden">
+    <!-- Top Nav -->
+    <nav class="topnav glass">
+      <div class="topnav-left">
+        <div class="nav-logo">
+          <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+            <circle cx="24" cy="24" r="22" stroke="url(#logoGrad)" stroke-width="2.5" fill="none"/>
+            <path d="M14 28 L20 20 L26 24 L34 16" stroke="url(#logoGrad)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="34" cy="16" r="3" fill="#6366f1"/>
+          </svg>
+          <span class="nav-title">AI Portfolio Copilot</span>
+        </div>
+      </div>
+      <div class="topnav-right">
+        <div class="live-indicator">
+          <span class="live-dot"></span>
+          <span>Live</span>
+        </div>
+        <button class="btn btn-ghost" id="refresh-btn" title="Refresh data">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+        </button>
+        <div class="user-menu">
+          <button class="btn btn-ghost user-btn" id="user-menu-btn">
+            <div class="user-avatar" id="user-avatar">A</div>
+            <span id="user-name">User</span>
+          </button>
+          <div class="user-dropdown hidden" id="user-dropdown">
+            <button id="logout-btn" class="dropdown-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="dashboard-main">
+      <!-- Primary page tabs -->
+      <nav class="main-tabs">
+        <button class="main-tab active" data-page="dashboard">📊 Dashboard</button>
+        <button class="main-tab" data-page="institutions">🏛️ Institutions</button>
+        <button class="main-tab" data-page="congress">🗳️ Congress</button>
+      </nav>
+
+      <!-- ═══ PAGE: Dashboard (portfolio + news) ═══ -->
+      <div id="page-dashboard" class="page">
+      <!-- Top Stats Row -->
+      <section class="stats-row">
+        <div class="stat-card glass animate-in" style="--delay: 0">
+          <div class="stat-label">Portfolio Score</div>
+          <div class="stat-value gradient-text" id="portfolio-score">—</div>
+          <div class="stat-sub" id="portfolio-score-label">Loading...</div>
+          <div class="score-ring" id="score-ring">
+            <svg viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="52" stroke="rgba(99,102,241,0.15)" stroke-width="8" fill="none"/>
+              <circle cx="60" cy="60" r="52" stroke="url(#scoreGrad)" stroke-width="8" fill="none"
+                stroke-dasharray="327" stroke-dashoffset="327" stroke-linecap="round" id="score-circle"
+                transform="rotate(-90 60 60)"/>
+              <defs>
+                <linearGradient id="scoreGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" style="stop-color:#6366f1"/>
+                  <stop offset="100%" style="stop-color:#06b6d4"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+        </div>
+
+        <div class="stat-card glass animate-in" style="--delay: 1">
+          <div class="stat-label">Holdings</div>
+          <div class="stat-value" id="holdings-count">0</div>
+          <div class="stat-sub">stocks tracked</div>
+        </div>
+
+        <div class="stat-card glass animate-in" style="--delay: 2">
+          <div class="stat-label">Alerts Today</div>
+          <div class="stat-value" id="alerts-count">0</div>
+          <div class="stat-sub" id="alerts-unread">0 unread</div>
+        </div>
+
+        <div class="stat-card glass animate-in" style="--delay: 3">
+          <div class="stat-label">News Analyzed</div>
+          <div class="stat-value" id="news-count">0</div>
+          <div class="stat-sub">articles processed</div>
+        </div>
+      </section>
+
+      <!-- Active Filter Bar -->
+      <section class="filter-bar hidden" id="filter-bar">
+        <div class="filter-bar-inner glass">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          <span>Filtering by:</span>
+          <span class="filter-ticker" id="filter-ticker-label">AAPL</span>
+          <button class="btn btn-ghost btn-xs" id="clear-filter-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Show All
+          </button>
+        </div>
+      </section>
+
+      <!-- Portfolio Impact (North Star) -->
+      <section class="impact-section animate-in" style="--delay: 3.5" id="impact-section">
+        <div class="section-header">
+          <h2>Today's Most Important Events</h2>
+          <span class="impact-subtitle">Ranked by impact on your portfolio</span>
+        </div>
+        <div class="impact-hero glass" id="impact-hero">
+          <div class="empty-state"><p>Impact appears once the pipeline has scored recent news for your holdings.</p></div>
+        </div>
+        <div class="impact-list" id="impact-list"></div>
+      </section>
+
+      <!-- Portfolio + Add Stock -->
+      <section class="portfolio-section animate-in" style="--delay: 4">
+        <div class="section-header">
+          <h2>Your Portfolio</h2>
+          <div class="portfolio-controls">
+            <div class="ticker-search" id="ticker-search-wrapper">
+              <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <input type="text" id="ticker-search" placeholder="Search tickers..." autocomplete="off">
+              <div class="ticker-search-dropdown hidden" id="ticker-search-dropdown"></div>
+            </div>
+            <button class="btn btn-primary btn-sm" id="add-stock-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Stock
+            </button>
+          </div>
+        </div>
+        <div class="holdings-grid" id="holdings-grid">
+          <div class="empty-state" id="empty-portfolio">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+            <p>No stocks yet. Add your first holding!</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Two Column: News + Alerts -->
+      <section class="two-col animate-in" style="--delay: 5">
+        <div class="news-section glass">
+          <div class="news-section-header">
+            <div class="news-header-top">
+              <h2>Live News Feed</h2>
+              <span class="badge badge-live"><span class="live-dot small"></span> Real-time</span>
+            </div>
+            <div class="news-search-bar" id="news-search-wrapper">
+              <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <input type="text" id="news-search" placeholder="Search headline or topic..." autocomplete="off">
+              <button class="news-search-clear hidden" id="news-search-clear" title="Clear search">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="news-feed" id="news-feed">
+            <div class="loading-skeleton">
+              <div class="skeleton-line"></div>
+              <div class="skeleton-line short"></div>
+              <div class="skeleton-line"></div>
+            </div>
+          </div>
+          <button class="btn-view-all hidden" id="news-view-all">
+            <span id="news-view-all-label">View All</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+        </div>
+
+        <div class="alerts-section glass">
+          <div class="section-header">
+            <h2>Recent Alerts</h2>
+            <div class="alerts-header-right">
+              <button class="btn btn-ghost btn-xs hidden" id="mark-all-read-btn" title="Mark all alerts as read">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                Mark all read
+              </button>
+              <span class="badge" id="alert-badge">0 new</span>
+            </div>
+          </div>
+          <div class="alerts-feed" id="alerts-feed">
+            <div class="empty-state small">
+              <p>No alerts yet. We'll notify you when something important happens.</p>
+            </div>
+          </div>
+          <button class="btn-view-all hidden" id="alerts-view-all">
+            <span id="alerts-view-all-label">View All Alerts</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- Sentiment Chart -->
+      <section class="chart-section glass animate-in" style="--delay: 6">
+        <div class="section-header">
+          <h2>Sentiment Overview</h2>
+        </div>
+        <div class="chart-container">
+          <canvas id="sentiment-chart"></canvas>
+        </div>
+      </section>
+
+      <!-- Sentiment Analyzer Tool -->
+      <section class="analyzer-section glass animate-in" style="--delay: 7">
+        <div class="section-header">
+          <h2>🔬 Sentiment Analyzer</h2>
+          <span class="badge">NLP Engine</span>
+        </div>
+        <div class="analyzer-content">
+          <textarea id="analyze-input" class="analyzer-textarea" placeholder="Paste a headline, full article, or a URL..."></textarea>
+          <button class="btn btn-primary" id="analyze-btn">Analyze Sentiment</button>
+          <div class="analyzer-result hidden" id="analyze-result"></div>
+        </div>
+      </section>
+      </div><!-- /page-dashboard -->
+
+      <!-- ═══ PAGE: Institutions (13F big firms) ═══ -->
+      <div id="page-institutions" class="page hidden">
+        <section class="smartmoney-section">
+          <div class="section-header">
+            <h2>🏛️ Institutions — Big Firms</h2>
+            <span class="impact-subtitle">Quarterly 13F holdings of the funds you follow</span>
+          </div>
+          <div class="sm-freshness">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span>13F filings are legally delayed ~45 days after quarter end. "New" means newly <em>disclosed</em>, not newly traded.</span>
+          </div>
+          <div class="sm-pane" id="sm-pane-institutions">
+            <div class="inst-grid" id="inst-grid">
+              <div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+            </div>
+            <div class="inst-detail glass hidden" id="inst-detail"></div>
+          </div>
+        </section>
+      </div><!-- /page-institutions -->
+
+      <!-- ═══ PAGE: Congress (politician trades) ═══ -->
+      <div id="page-congress" class="page hidden">
+        <section class="smartmoney-section">
+          <div class="section-header">
+            <h2>🗳️ Congress — Politician Trades</h2>
+            <span class="impact-subtitle">STOCK Act disclosures from politicians you follow</span>
+          </div>
+          <div class="sm-freshness">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span>Congressional disclosures arrive up to ~45 days after the trade. "New" means newly <em>disclosed</em>, not newly traded.</span>
+          </div>
+          <div class="sm-pane" id="sm-pane-politicians">
+            <div class="congress-controls">
+              <div class="scope-toggle">
+                <button class="scope-btn active" data-scope="mine">My holdings &amp; follows</button>
+                <button class="scope-btn" data-scope="all">All (firehose)</button>
+              </div>
+              <span class="sm-sample-badge hidden" id="congress-sample-badge">sample data</span>
+            </div>
+            <div class="congress-list" id="congress-list">
+              <div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+            </div>
+          </div>
+
+          <!-- Webhooks (Pro) -->
+          <details class="sm-webhooks" id="sm-webhooks">
+            <summary>Developer · Outbound webhooks <span class="badge pro-badge">Pro</span></summary>
+            <p class="form-hint">Register a URL and we POST each smart-money event to it (HMAC-signed with <code>X-SenIQ-Signature</code>). SEC/Congress don't push, so inbound is a poller — this outbound delivery is the real webhook.</p>
+            <div class="webhook-add">
+              <input type="text" id="webhook-url" placeholder="https://your-app.com/hooks/seniq" autocomplete="off">
+              <button class="btn btn-primary btn-sm" id="webhook-add-btn">Add Webhook</button>
+            </div>
+            <div class="webhook-list" id="webhook-list"></div>
+          </details>
+        </section>
+      </div><!-- /page-congress -->
+
+      <!-- Global Disclaimer -->
+      <footer class="app-footer">
+        <p class="disclaimer" data-disclaimer></p>
+      </footer>
+    </main>
+
+    <!-- Add Asset Modal -->
+    <div class="modal-overlay hidden" id="add-stock-modal">
+      <div class="modal glass">
+        <div class="modal-header">
+          <h3>Add Asset to Portfolio</h3>
+          <button class="btn btn-ghost modal-close" id="modal-close">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group" style="position: relative;">
+            <label for="stock-ticker">Search by name or ticker</label>
+            <div class="modal-search-input">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <input type="text" id="stock-ticker" placeholder='e.g. Apple, TSLA, Bitcoin, RELIANCE' autocomplete="off">
+            </div>
+            <div class="asset-autocomplete hidden" id="asset-autocomplete"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="asset-class">Asset class</label>
+              <select id="asset-class">
+                <option value="equity">Equity</option>
+                <option value="crypto">Crypto</option>
+                <option value="commodity">Commodity</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="asset-quantity">Quantity <span class="label-hint">(optional)</span></label>
+              <input type="number" id="asset-quantity" min="0" step="any" placeholder="e.g. 10" autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label for="asset-cost-basis">Cost basis <span class="label-hint">(optional)</span></label>
+              <input type="number" id="asset-cost-basis" min="0" step="any" placeholder="per unit" autocomplete="off">
+            </div>
+          </div>
+          <p class="form-hint">Quantity powers exposure weighting — what share of your portfolio each event affects. Skip it and holdings are weighted equally.</p>
+          <div class="quick-add">
+            <span class="quick-label">Popular:</span>
+            <button class="chip" data-ticker="AAPL"><span class="chip-name">Apple</span><span class="chip-tag stock">AAPL</span></button>
+            <button class="chip" data-ticker="TSLA"><span class="chip-name">Tesla</span><span class="chip-tag stock">TSLA</span></button>
+            <button class="chip" data-ticker="BTC"><span class="chip-name">Bitcoin</span><span class="chip-tag crypto">BTC</span></button>
+            <button class="chip" data-ticker="NVDA"><span class="chip-name">Nvidia</span><span class="chip-tag stock">NVDA</span></button>
+            <button class="chip" data-ticker="ETH"><span class="chip-name">Ethereum</span><span class="chip-tag crypto">ETH</span></button>
+            <button class="chip" data-ticker="RELIANCE"><span class="chip-name">Reliance</span><span class="chip-tag india">NSE</span></button>
+            <button class="chip" data-ticker="HDFCBANK"><span class="chip-name">HDFC Bank</span><span class="chip-tag india">NSE</span></button>
+            <button class="chip" data-ticker="GOOGL"><span class="chip-name">Google</span><span class="chip-tag stock">GOOGL</span></button>
+            <button class="chip" data-ticker="AMZN"><span class="chip-name">Amazon</span><span class="chip-tag stock">AMZN</span></button>
+            <button class="chip" data-ticker="SOL"><span class="chip-name">Solana</span><span class="chip-tag crypto">SOL</span></button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+          <button class="btn btn-primary" id="modal-add">Add to Portfolio</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+  </div>
+
+  <script>
+    // Populate the disclaimer from the server (single source of truth: server/config.js)
+    fetch('/api/config')
+      .then(r => r.json())
+      .then(({ disclaimer }) => {
+        document.querySelectorAll('[data-disclaimer]').forEach(el => { el.textContent = disclaimer; });
+      })
+      .catch(() => {});
+  </script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
