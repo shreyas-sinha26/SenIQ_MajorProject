@@ -1,0 +1,55 @@
+# ─── Dependencies ────────────────────────────────────────────
+node_modules/
+.npm/
+.pnp.*
+
+# ─── Secrets / environment ───────────────────────────────────
+# Never commit real credentials. .env.example is the tracked template.
+.env
+.env.local
+.env.*.local
+*.pem
+
+# ─── Logs ────────────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+server.out.log
+server.err.log
+boot.log
+boot.err.log
+
+# ─── Legacy local SQLite DB (app runs on Postgres now) ───────
+# Keep data/congress_sample.json — the smart-money pipeline depends on it.
+data/*.db
+data/*.db-shm
+data/*.db-wal
+*.sqlite
+*.sqlite3
+
+# ─── Local tooling / editor / IDE ────────────────────────────
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── OS cruft ────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Build / coverage / cache ────────────────────────────────
+dist/
+build/
+coverage/
+.cache/
+*.tsbuildinfo
+
+# ─── Python (roadmap PDF script) ─────────────────────────────
+__pycache__/
+*.pyc
+.venv/
+venv/
