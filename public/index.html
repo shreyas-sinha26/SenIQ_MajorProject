@@ -4,79 +4,172 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="AI Portfolio News Copilot — Real-time portfolio monitoring with NLP sentiment analysis and intelligent alerts">
-  <title>AI Portfolio News Copilot</title>
+  <title>SenIQ — Portfolio Intelligence Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <!-- ═══ AUTH VIEW ═══ -->
   <div id="auth-view" class="view">
-    <div class="auth-container">
-      <div class="auth-glow"></div>
-      <div class="auth-card glass">
-        <div class="auth-logo">
-          <div class="logo-icon">
-            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-              <defs>
-                <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" style="stop-color:#6366f1"/>
-                  <stop offset="100%" style="stop-color:#06b6d4"/>
-                </linearGradient>
-              </defs>
-              <circle cx="24" cy="24" r="22" stroke="url(#logoGrad)" stroke-width="2.5" fill="none"/>
-              <path d="M14 28 L20 20 L26 24 L34 16" stroke="url(#logoGrad)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-              <circle cx="34" cy="16" r="3" fill="#6366f1"/>
+    <div class="auth-split">
+
+      <!-- ── LEFT: Brand panel ── -->
+      <div class="auth-left">
+        <div class="auth-left-inner">
+
+          <!-- Logo -->
+          <a href="/" class="auth-brand">
+            <svg width="36" height="36" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M34 12H18c-3.3 0-6 2.7-6 6v6h8v-6h14v-6z" fill="#0ea5e9"/>
+              <path d="M28 18h8L20 36h-8l16-18z" fill="#a855f7"/>
+              <path d="M14 36h16c3.3 0 6-2.7 6-6v-6h-8v6H14v6z" fill="#0ea5e9"/>
             </svg>
+            <span class="auth-brand-name">Sen<span>IQ</span></span>
+          </a>
+
+          <!-- Headline -->
+          <div class="auth-hero-text">
+            <h2>Stop reading news.<br>Start reading <span class="auth-grad">signal.</span></h2>
+            <p>SenIQ ranks every headline by its real impact on your portfolio — before the market reacts.</p>
           </div>
-          <h1>AI Portfolio Copilot</h1>
-          <p class="auth-subtitle">Real-time sentiment intelligence for your investments</p>
+
+          <!-- Feature list -->
+          <ul class="auth-features">
+            <li>
+              <span class="af-icon material-symbols-outlined">newspaper</span>
+              <div><strong>Impact-ranked feed</strong><span>Headlines sorted by how much they move your holdings</span></div>
+            </li>
+            <li>
+              <span class="af-icon material-symbols-outlined">account_balance</span>
+              <div><strong>Smart Money tracking</strong><span>Follow Berkshire, ARK, Bridgewater &amp; more</span></div>
+            </li>
+            <li>
+              <span class="af-icon material-symbols-outlined">policy</span>
+              <div><strong>Congress trades</strong><span>STOCK Act disclosures auto-matched to your book</span></div>
+            </li>
+            <li>
+              <span class="af-icon material-symbols-outlined">psychology</span>
+              <div><strong>AI sentiment engine</strong><span>NLP scored across news, filings &amp; social chatter</span></div>
+            </li>
+          </ul>
+
+          <!-- Live stat strip -->
+          <div class="auth-stats">
+            <div class="auth-stat"><span class="auth-stat-val">27</span><span>articles today</span></div>
+            <div class="auth-stat-div"></div>
+            <div class="auth-stat"><span class="auth-stat-val">4</span><span>asset classes</span></div>
+            <div class="auth-stat-div"></div>
+            <div class="auth-stat"><span class="auth-stat-val">Free</span><span>to start</span></div>
+          </div>
         </div>
 
-        <div id="auth-tabs" class="auth-tabs">
-          <button class="auth-tab active" data-tab="login">Sign In</button>
-          <button class="auth-tab" data-tab="signup">Create Account</button>
+        <!-- Decorative chart -->
+        <div class="auth-chart-deco" aria-hidden="true">
+          <svg viewBox="0 0 400 120" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="acG" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#ff2d78" stop-opacity=".8"/>
+                <stop offset="50%" stop-color="#a855f7" stop-opacity=".9"/>
+                <stop offset="100%" stop-color="#0ea5e9"/>
+              </linearGradient>
+              <linearGradient id="acFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#a855f7" stop-opacity=".25"/>
+                <stop offset="100%" stop-color="#a855f7" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path d="M0,90 C30,85 50,70 80,60 C110,50 130,65 160,45 C190,25 210,35 240,20 C270,5 300,30 330,25 C360,20 380,15 400,10 L400,120 L0,120Z" fill="url(#acFill)"/>
+            <path d="M0,90 C30,85 50,70 80,60 C110,50 130,65 160,45 C190,25 210,35 240,20 C270,5 300,30 330,25 C360,20 380,15 400,10" fill="none" stroke="url(#acG)" stroke-width="2.5" stroke-linecap="round"/>
+          </svg>
         </div>
-
-        <form id="login-form" class="auth-form">
-          <div class="form-group">
-            <label for="login-email">Email</label>
-            <input type="email" id="login-email" placeholder="you@example.com" required>
-          </div>
-          <div class="form-group">
-            <label for="login-password">Password</label>
-            <input type="password" id="login-password" placeholder="••••••••" required>
-          </div>
-          <button type="submit" class="btn btn-primary btn-full" id="login-btn">
-            <span>Sign In</span>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-          </button>
-        </form>
-
-        <form id="signup-form" class="auth-form hidden">
-          <div class="form-group">
-            <label for="signup-name">Full Name</label>
-            <input type="text" id="signup-name" placeholder="John Doe" required>
-          </div>
-          <div class="form-group">
-            <label for="signup-email">Email</label>
-            <input type="email" id="signup-email" placeholder="you@example.com" required>
-          </div>
-          <div class="form-group">
-            <label for="signup-password">Password</label>
-            <input type="password" id="signup-password" placeholder="Min 6 characters" required minlength="6">
-          </div>
-          <button type="submit" class="btn btn-primary btn-full" id="signup-btn">
-            <span>Create Account</span>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-          </button>
-        </form>
-
-        <div id="auth-error" class="auth-error hidden"></div>
-        <p class="disclaimer" data-disclaimer></p>
       </div>
+
+      <!-- ── RIGHT: Form panel ── -->
+      <div class="auth-right">
+        <div class="auth-form-wrap">
+
+          <!-- Tab switcher -->
+          <div id="auth-tabs" class="auth-tabs">
+            <button class="auth-tab active" data-tab="login" id="tab-login">Sign In</button>
+            <button class="auth-tab" data-tab="signup" id="tab-signup">Create Account</button>
+          </div>
+
+          <!-- ─ Login form ─ -->
+          <form id="login-form" class="auth-form">
+            <div class="auth-form-header">
+              <h3>Welcome back</h3>
+              <p>Sign in to your SenIQ dashboard</p>
+            </div>
+            <div class="form-group">
+              <label for="login-email">
+                <span class="material-symbols-outlined">mail</span> Email
+              </label>
+              <input type="email" id="login-email" placeholder="you@example.com" autocomplete="email" required>
+            </div>
+            <div class="form-group">
+              <label for="login-password">
+                <span class="material-symbols-outlined">lock</span> Password
+              </label>
+              <div class="input-pw-wrap">
+                <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" required>
+                <button type="button" class="pw-toggle" data-target="login-password" aria-label="Toggle password">
+                  <span class="material-symbols-outlined">visibility</span>
+                </button>
+              </div>
+            </div>
+            <div id="auth-error" class="auth-error hidden"></div>
+            <button type="submit" class="btn btn-primary btn-full auth-submit" id="login-btn">
+              <span>Sign In</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </button>
+            <p class="auth-switch-hint">No account? <button type="button" class="auth-link" data-tab="signup">Create one free &rarr;</button></p>
+          </form>
+
+          <!-- ─ Signup form ─ -->
+          <form id="signup-form" class="auth-form hidden">
+            <div class="auth-form-header">
+              <h3>Create your account</h3>
+              <p>Free forever &middot; No credit card required</p>
+            </div>
+            <div class="form-group">
+              <label for="signup-name">
+                <span class="material-symbols-outlined">person</span> Full Name
+              </label>
+              <input type="text" id="signup-name" placeholder="Jane Smith" autocomplete="name" required>
+            </div>
+            <div class="form-group">
+              <label for="signup-email">
+                <span class="material-symbols-outlined">mail</span> Email
+              </label>
+              <input type="email" id="signup-email" placeholder="you@example.com" autocomplete="email" required>
+            </div>
+            <div class="form-group">
+              <label for="signup-password">
+                <span class="material-symbols-outlined">lock</span> Password
+              </label>
+              <div class="input-pw-wrap">
+                <input type="password" id="signup-password" placeholder="Min 6 characters" autocomplete="new-password" required minlength="6">
+                <button type="button" class="pw-toggle" data-target="signup-password" aria-label="Toggle password">
+                  <span class="material-symbols-outlined">visibility</span>
+                </button>
+              </div>
+            </div>
+            <div id="auth-error-signup" class="auth-error hidden"></div>
+            <button type="submit" class="btn btn-primary btn-full auth-submit" id="signup-btn">
+              <span>Create Free Account</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </button>
+            <p class="auth-switch-hint">Already have an account? <button type="button" class="auth-link" data-tab="login">Sign in &rarr;</button></p>
+          </form>
+
+          <!-- Disclaimer -->
+          <p class="disclaimer auth-disclaimer" data-disclaimer></p>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -86,12 +179,12 @@
     <nav class="topnav glass">
       <div class="topnav-left">
         <div class="nav-logo">
-          <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
-            <circle cx="24" cy="24" r="22" stroke="url(#logoGrad)" stroke-width="2.5" fill="none"/>
-            <path d="M14 28 L20 20 L26 24 L34 16" stroke="url(#logoGrad)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-            <circle cx="34" cy="16" r="3" fill="#6366f1"/>
+          <svg width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M34 12H18c-3.3 0-6 2.7-6 6v6h8v-6h14v-6z" fill="#0ea5e9"/>
+            <path d="M28 18h8L20 36h-8l16-18z" fill="#a855f7"/>
+            <path d="M14 36h16c3.3 0 6-2.7 6-6v-6h-8v6H14v6z" fill="#0ea5e9"/>
           </svg>
-          <span class="nav-title">AI Portfolio Copilot</span>
+           <span class="nav-title">Sen<span style="color:#0ea5e9">IQ</span></span>
         </div>
       </div>
       <div class="topnav-right">
@@ -119,11 +212,24 @@
 
     <!-- Main Content -->
     <main class="dashboard-main">
-      <!-- Primary page tabs -->
-      <nav class="main-tabs">
-        <button class="main-tab active" data-page="dashboard">📊 Dashboard</button>
-        <button class="main-tab" data-page="institutions">🏛️ Institutions</button>
-        <button class="main-tab" data-page="congress">🗳️ Congress</button>
+      <!-- Primary navigation (sidebar on desktop, horizontal bar on mobile) -->
+      <nav class="main-nav">
+        <div class="main-nav-brand">
+           <h2 class="gradient-text">SenIQ</h2>
+           <span>Portfolio Intelligence</span>
+        </div>
+        <button class="main-tab active" data-page="dashboard">
+          <span class="material-symbols-outlined">dashboard</span>
+          <span class="main-tab-label">Dashboard</span>
+        </button>
+        <button class="main-tab" data-page="institutions">
+          <span class="material-symbols-outlined">account_balance</span>
+          <span class="main-tab-label">Institutions</span>
+        </button>
+        <button class="main-tab" data-page="congress">
+          <span class="material-symbols-outlined">policy</span>
+          <span class="main-tab-label">Congress</span>
+        </button>
       </nav>
 
       <!-- ═══ PAGE: Dashboard (portfolio + news) ═══ -->
@@ -131,41 +237,28 @@
       <!-- Top Stats Row -->
       <section class="stats-row">
         <div class="stat-card glass animate-in" style="--delay: 0">
-          <div class="stat-label">Portfolio Score</div>
+          <div class="stat-label">Portfolio Health</div>
           <div class="stat-value gradient-text" id="portfolio-score">—</div>
           <div class="stat-sub" id="portfolio-score-label">Loading...</div>
-          <div class="score-ring" id="score-ring">
-            <svg viewBox="0 0 120 120">
-              <circle cx="60" cy="60" r="52" stroke="rgba(99,102,241,0.15)" stroke-width="8" fill="none"/>
-              <circle cx="60" cy="60" r="52" stroke="url(#scoreGrad)" stroke-width="8" fill="none"
-                stroke-dasharray="327" stroke-dashoffset="327" stroke-linecap="round" id="score-circle"
-                transform="rotate(-90 60 60)"/>
-              <defs>
-                <linearGradient id="scoreGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" style="stop-color:#6366f1"/>
-                  <stop offset="100%" style="stop-color:#06b6d4"/>
-                </linearGradient>
-              </defs>
-            </svg>
-          </div>
+          <div class="stat-hint">AI-scored sentiment index · 0–100</div>
         </div>
 
         <div class="stat-card glass animate-in" style="--delay: 1">
-          <div class="stat-label">Holdings</div>
+          <div class="stat-label">Assets Tracked</div>
           <div class="stat-value" id="holdings-count">0</div>
-          <div class="stat-sub">stocks tracked</div>
+          <div class="stat-sub">holdings monitored</div>
         </div>
 
         <div class="stat-card glass animate-in" style="--delay: 2">
-          <div class="stat-label">Alerts Today</div>
+          <div class="stat-label">Alerts</div>
           <div class="stat-value" id="alerts-count">0</div>
           <div class="stat-sub" id="alerts-unread">0 unread</div>
         </div>
 
         <div class="stat-card glass animate-in" style="--delay: 3">
-          <div class="stat-label">News Analyzed</div>
+          <div class="stat-label">Events Today</div>
           <div class="stat-value" id="news-count">0</div>
-          <div class="stat-sub">articles processed</div>
+          <div class="stat-sub">from news pipeline</div>
         </div>
       </section>
 
@@ -210,13 +303,20 @@
             </button>
           </div>
         </div>
-        <div class="holdings-grid" id="holdings-grid">
-          <div class="empty-state" id="empty-portfolio">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-            </svg>
-            <p>No stocks yet. Add your first holding!</p>
-          </div>
+        <div class="holdings-table-wrap glass">
+          <table class="holdings-tbl">
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Exposure</th>
+                <th>Sentiment</th>
+                <th>Score</th>
+                <th>Top Driver</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="holdings-grid"></tbody>
+          </table>
         </div>
       </section>
 
@@ -285,7 +385,7 @@
       <!-- Sentiment Analyzer Tool -->
       <section class="analyzer-section glass animate-in" style="--delay: 7">
         <div class="section-header">
-          <h2>🔬 Sentiment Analyzer</h2>
+          <h2>Sentiment Analyzer</h2>
           <span class="badge">NLP Engine</span>
         </div>
         <div class="analyzer-content">
@@ -300,7 +400,7 @@
       <div id="page-institutions" class="page hidden">
         <section class="smartmoney-section">
           <div class="section-header">
-            <h2>🏛️ Institutions — Big Firms</h2>
+            <h2>Institutions — 13F Filings</h2>
             <span class="impact-subtitle">Quarterly 13F holdings of the funds you follow</span>
           </div>
           <div class="sm-freshness">
@@ -320,7 +420,7 @@
       <div id="page-congress" class="page hidden">
         <section class="smartmoney-section">
           <div class="section-header">
-            <h2>🗳️ Congress — Politician Trades</h2>
+            <h2>Congress — STOCK Act Disclosures</h2>
             <span class="impact-subtitle">STOCK Act disclosures from politicians you follow</span>
           </div>
           <div class="sm-freshness">

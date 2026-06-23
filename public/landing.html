@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="SenIQ ranks every headline by its real impact on your portfolio — stocks, crypto, commodities &amp; ETFs — and alerts you before the market reacts. Institutional-grade signal from news, SEC filings, Congress trades and AI sentiment.">
+  <title>SenIQ — Never Miss The News That Moves Your Portfolio</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/landing.css">
+</head>
+<body>
+  <div class="cursor-glow" id="cursor-glow" aria-hidden="true"></div>
+  <div class="scroll-progress" id="scroll-progress" aria-hidden="true"></div>
+
+  <div class="bg-fx" aria-hidden="true">
+    <div class="grid-overlay"></div>
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+    <div class="scanlines"></div>
+    <div class="noise"></div>
+  </div>
+
+  <!-- ═══ NAV ═══ -->
+  <nav class="nav" id="nav">
+    <a href="#top" class="brand" data-magnetic>
+      <span class="brand-mark">
+        <svg width="28" height="28" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M34 12H18c-3.3 0-6 2.7-6 6v6h8v-6h14v-6z" fill="#0ea5e9"/>
+          <path d="M28 18h8L20 36h-8l16-18z" fill="#a855f7"/>
+          <path d="M14 36h16c3.3 0 6-2.7 6-6v-6h-8v6H14v6z" fill="#0ea5e9"/>
+        </svg>
+      </span>
+      <span class="brand-text">Sen<span class="brand-iq">IQ</span></span>
+    </a>
+
+    <div class="nav-links" id="nav-links">
+      <a href="#problem">Why SenIQ</a>
+      <a href="#preview">Terminal</a>
+      <a href="#smart-money">Smart Money</a>
+      <a href="#market">Markets</a>
+    </div>
+
+    <div class="nav-cta">
+      <a href="/app?auth=login" class="btn btn-ghost mono">Sign In</a>
+      <a href="/app?auth=signup" class="btn btn-term" data-magnetic>
+        <span class="prompt">&gt;_</span> Start Free
+      </a>
+    </div>
+
+    <button class="nav-burger" id="nav-burger" aria-label="Menu"><span></span><span></span><span></span></button>
+  </nav>
+
+  <!-- ═══ HERO ═══ -->
+  <header class="hero" id="top">
+    <!-- Floating ticker chips -->
+    <div class="ticker-field" aria-hidden="true">
+      <span class="tchip up" data-float="1">NVDA <b>+6.2%</b></span>
+      <span class="tchip up" data-float="2">BTC <b>+2.8%</b></span>
+      <span class="tchip down" data-float="3">AAPL <b>-0.4%</b></span>
+      <span class="tchip up" data-float="1">TSLA <b>+3.1%</b></span>
+      <span class="tchip up" data-float="2">ETH <b>+2.6%</b></span>
+      <span class="tchip down" data-float="3">COIN <b>-1.2%</b></span>
+      <span class="tchip up" data-float="2">GOLD <b>+0.7%</b></span>
+    </div>
+
+    <div class="hero-inner">
+      <div class="hero-copy">
+        <div class="pill" data-hero>
+          <span class="pill-dot"></span>
+          <span class="mono">REAL-TIME</span>
+          <span class="pill-sep">::</span>
+          <span class="mono dim">LIVE FEED ACTIVE</span>
+        </div>
+
+        <h1 class="hero-title">
+          <span class="line"><span class="word">Never</span> <span class="word">miss</span> <span class="word">the</span></span>
+          <span class="line"><span class="word">news</span> <span class="word">that</span></span>
+          <span class="line hero-grad-line"><span class="word grad">moves</span> <span class="word grad">your</span></span>
+          <span class="line hero-grad-line"><span class="word grad">portfolio</span></span>
+        </h1>
+
+        <p class="hero-sub" data-hero>
+          Track stocks, crypto, commodities and ETFs. SenIQ ranks every headline by its
+          actual impact on your holdings — and alerts you <em>before</em> the market reacts.
+        </p>
+
+        <div class="hero-actions" data-hero>
+          <a href="/app?auth=signup" class="btn btn-primary btn-lg" data-magnetic>
+            <span>Start Free Reading</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
+        </div>
+
+        <div class="trust-bar" data-hero>
+          <span class="trust-label mono">// POWERED_BY</span>
+          <div class="trust-vals mono">
+            <span>LIVE_NEWS</span><i>+</i><span>SEC_FILINGS</span><i>+</i><span>CONGRESS_TRADES</span><i>+</i><span>AI_SENTIMENT</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hero Visual: Animated Wave Chart -->
+      <div class="hero-visual" data-hero>
+        <div class="glow-ring"></div>
+        <div class="hero-chart-wrap glass" data-tilt>
+          <div class="scanbar"></div>
+          <!-- Animated SVG wave chart -->
+          <svg class="hero-wave-svg" viewBox="0 0 440 220" preserveAspectRatio="none" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="waveGrad1" x1="0" y1="0" x2="440" y2="0" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#ff2d78"/>
+                <stop offset="50%" stop-color="#a855f7"/>
+                <stop offset="100%" stop-color="#0ea5e9"/>
+              </linearGradient>
+              <linearGradient id="waveGrad2" x1="0" y1="0" x2="440" y2="0" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#0ea5e9"/>
+                <stop offset="100%" stop-color="#a855f7"/>
+              </linearGradient>
+              <linearGradient id="fillGrad1" x1="0" y1="0" x2="0" y2="220" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#ff2d78" stop-opacity="0.22"/>
+                <stop offset="100%" stop-color="#ff2d78" stop-opacity="0"/>
+              </linearGradient>
+              <linearGradient id="fillGrad2" x1="0" y1="0" x2="0" y2="220" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.18"/>
+                <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0"/>
+              </linearGradient>
+              <filter id="glow1">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
+                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+              </filter>
+            </defs>
+            <!-- Background fill -->
+            <path class="wave-fill wave-fill-1" d="M0 170 C55 140,110 100,165 120 C220 140,275 90,330 70 C385 50,420 80,440 60 L440 220 L0 220 Z" fill="url(#fillGrad1)"/>
+            <path class="wave-fill wave-fill-2" d="M0 140 C60 160,120 130,180 100 C240 70,300 110,360 90 C400 76,430 100,440 85 L440 220 L0 220 Z" fill="url(#fillGrad2)"/>
+            <!-- Wave lines -->
+            <path class="wave-line wave-line-1" d="M0 170 C55 140,110 100,165 120 C220 140,275 90,330 70 C385 50,420 80,440 60" stroke="url(#waveGrad1)" stroke-width="2.5" filter="url(#glow1)"/>
+            <path class="wave-line wave-line-2" d="M0 140 C60 160,120 130,180 100 C240 70,300 110,360 90 C400 76,430 100,440 85" stroke="url(#waveGrad2)" stroke-width="1.8" stroke-dasharray="5 3"/>
+            <!-- Data nodes with glow -->
+            <circle class="wave-node" cx="165" cy="120" r="5" fill="#a855f7" filter="url(#glow1)"/>
+            <circle class="wave-node" cx="275" cy="90" r="5" fill="#ff2d78" filter="url(#glow1)"/>
+            <circle class="wave-node" cx="330" cy="70" r="6" fill="#0ea5e9" filter="url(#glow1)"/>
+            <circle class="wave-node" cx="440" cy="60" r="5" fill="#ff2d78" filter="url(#glow1)"/>
+            <circle class="wave-node" cx="180" cy="100" r="4" fill="#0ea5e9" filter="url(#glow1)"/>
+            <circle class="wave-node" cx="360" cy="90" r="4" fill="#a855f7" filter="url(#glow1)"/>
+            <!-- Vertical grid lines -->
+            <line x1="110" y1="20" x2="110" y2="200" stroke="rgba(14,165,233,0.08)" stroke-width="1"/>
+            <line x1="220" y1="20" x2="220" y2="200" stroke="rgba(14,165,233,0.08)" stroke-width="1"/>
+            <line x1="330" y1="20" x2="330" y2="200" stroke="rgba(14,165,233,0.08)" stroke-width="1"/>
+            <line x1="440" y1="20" x2="440" y2="200" stroke="rgba(14,165,233,0.08)" stroke-width="1"/>
+          </svg>
+
+          <!-- Floating ticker chip overlays on the chart -->
+          <div class="chart-chip chip-btc">
+            <span class="chip-dot up"></span>
+            <span class="mono">BTC</span>
+            <b class="up">+2.8%</b>
+          </div>
+          <div class="chart-chip chip-nvda">
+            <span class="chip-dot up"></span>
+            <span class="mono">NVDA</span>
+            <b class="up">+6.2%</b>
+          </div>
+          <div class="chart-chip chip-aapl">
+            <span class="chip-dot dn"></span>
+            <span class="mono">AAPL</span>
+            <b class="dn">-0.4%</b>
+          </div>
+          <div class="chart-chip chip-coin">
+            <span class="chip-dot dn"></span>
+            <span class="mono">COIN</span>
+            <b class="dn">-1.2%</b>
+          </div>
+
+          <!-- Chart bottom label row -->
+          <div class="chart-timeline mono">
+            <span>9:30</span><span>11:00</span><span>12:30</span><span>14:00</span><span>15:30</span>
+          </div>
+        </div>
+
+        <!-- Floating alert badge -->
+        <div class="dash-badge glass" data-float="2">
+          <span class="material-symbols-outlined">notifications_active</span>
+          <div><b class="mono">ALERT</b><span class="mono dim">NVDA_IMPACT_HIGH</span></div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══ POWERED-BY STRIP ═══ -->
+  <div class="powered">
+    <span class="powered-label mono">// POWERED_BY</span>
+    <div class="powered-items mono">
+      <span class="material-symbols-outlined">newspaper</span> LIVE_NEWS
+      <i>+</i>
+      <span class="material-symbols-outlined">description</span> SEC_FILINGS
+      <i>+</i>
+      <span class="material-symbols-outlined">policy</span> CONGRESS_TRADES
+      <i>+</i>
+      <span class="material-symbols-outlined">psychology</span> AI_SENTIMENT
+    </div>
+  </div>
+
+  <!-- ═══ PROBLEM ═══ -->
+  <section class="section problem" id="problem">
+    <div class="section-head" data-reveal>
+      <span class="eyebrow mono">// THE_PROBLEM</span>
+      <h2>Signal vs Noise</h2>
+      <p>Financial media is optimized for engagement, not investment. The story that hits your book is buried under the firehose.</p>
+    </div>
+
+    <div class="problem-grid">
+      <div class="prob glass" data-reveal data-tilt>
+        <div class="prob-top"><span class="prob-ico material-symbols-outlined">filter_none</span><span class="mod mono">ERR_01</span></div>
+        <h3>News apps show everything</h3>
+        <p>Generic feeds surface every headline equally — huge stories you don't hold drown out the ones you do.</p>
+      </div>
+      <div class="prob glass" data-reveal data-tilt>
+        <div class="prob-top"><span class="prob-ico material-symbols-outlined">forum</span><span class="mod mono">ERR_02</span></div>
+        <h3>Social creates noise</h3>
+        <p>Social feeds spike loudest exactly when it matters most — drowning real signal in hype and speculation.</p>
+      </div>
+      <div class="prob glass" data-reveal data-tilt>
+        <div class="prob-top"><span class="prob-ico material-symbols-outlined">schedule</span><span class="mod mono">ERR_03</span></div>
+        <h3>Alerts come too late</h3>
+        <p>By the time you read the headline, the market has already priced it in and moved on.</p>
+      </div>
+      <div class="prob glass" data-reveal data-tilt>
+        <div class="prob-top"><span class="prob-ico material-symbols-outlined">device_unknown</span><span class="mod mono">ERR_04</span></div>
+        <h3>No portfolio context</h3>
+        <p>Generic news has no idea what you own — every alert feels equally urgent, nothing is ranked.</p>
+      </div>
+    </div>
+
+    <p class="problem-answer" data-reveal>
+      SenIQ filters the firehose and surfaces <span class="grad">only what affects your portfolio.</span>
+    </p>
+  </section>
+
+  <!-- ═══ PRODUCT PREVIEW / TERMINAL ═══ -->
+  <section class="section preview" id="preview">
+    <div class="section-head" data-reveal>
+      <span class="eyebrow mono">// THE_TERMINAL</span>
+      <h2>Your portfolio command center</h2>
+      <p>A live preview of the SenIQ terminal — every headline ranked by its real impact on what you hold.</p>
+    </div>
+
+    <div class="cmd glass" data-reveal>
+      <div class="cmd-topbar">
+        <div class="dash-dots"><i></i><i></i><i></i></div>
+        <span class="cmd-url mono">app.seniq.io/terminal</span>
+        <span class="dash-live mono"><span class="live-dot"></span>LIVE</span>
+      </div>
+
+      <div class="cmd-body">
+        <div class="cmd-col cmd-holdings">
+          <div class="cmd-col-h mono">IMPACT_RANKED_FEED</div>
+
+          <!-- Holdings tabs -->
+          <div class="term-tabs mono">
+            <span class="term-tab active">News</span>
+            <span class="term-tab">Filings</span>
+            <span class="term-tab">Congress</span>
+            <span class="term-tab">Sentiment</span>
+          </div>
+
+          <div class="term-feed">
+            <div class="term-row">
+              <span class="term-dot up"></span>
+              <div class="term-content">
+                <div class="term-title">Nvidia receives analyst upgrade on AI demand</div>
+                <div class="term-meta mono">NVDA · Reuters <span class="mono dim">· 18m ago</span></div>
+              </div>
+              <div class="term-sentiment">
+                <span class="mono dim xs">IMPACT</span>
+                <div class="senti-pill">
+                  <span class="mono xs">92 —</span>
+                  <span class="senti-badge pos mono">+6.2</span>
+                </div>
+              </div>
+            </div>
+            <div class="term-row">
+              <span class="term-dot dn"></span>
+              <div class="term-content">
+                <div class="term-title">Apple supplier cuts quarterly guidance</div>
+                <div class="term-meta mono">AAPL · Bloomberg <span class="mono dim">· 41m ago</span></div>
+              </div>
+              <div class="term-sentiment">
+                <div class="senti-pill">
+                  <span class="mono xs">78 —</span>
+                  <span class="senti-badge neg mono">-0.6</span>
+                </div>
+              </div>
+            </div>
+            <div class="term-row">
+              <span class="term-dot up"></span>
+              <div class="term-content">
+                <div class="term-title">Bitcoin ETFs log record daily inflows</div>
+                <div class="term-meta mono">BTC · CoinDesk <span class="mono dim">· 1h ago</span></div>
+              </div>
+              <div class="term-sentiment">
+                <div class="senti-pill">
+                  <span class="mono xs">71 —</span>
+                  <span class="senti-badge pos-sm mono">+0.9</span>
+                </div>
+              </div>
+            </div>
+            <div class="term-row">
+              <span class="term-dot neutral"></span>
+              <div class="term-content">
+                <div class="term-title">Fed holds rates steady, signals caution</div>
+                <div class="term-meta mono">SPY · WSJ <span class="mono dim">· 2h ago</span></div>
+              </div>
+              <div class="term-sentiment">
+                <div class="senti-pill">
+                  <span class="mono xs">64 —</span>
+                  <span class="senti-badge neg-sm mono">-0.2</span>
+                </div>
+              </div>
+            </div>
+            <div class="term-row dim-row">
+              <span class="term-dot dn"></span>
+              <div class="term-content">
+                <div class="term-title">Tesla recall flagged by regulator</div>
+                <div class="term-meta mono">TSLA · CNBC <span class="mono dim">· 3h ago</span></div>
+              </div>
+              <div class="term-sentiment">
+                <div class="senti-pill">
+                  <span class="mono xs">58 —</span>
+                  <span class="senti-badge neg-sm mono">-1.2</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Portfolio Sentiment Column -->
+        <div class="cmd-col cmd-sentiment">
+          <div class="cmd-col-h mono">PORTFOLIO_SENTIMENT</div>
+
+          <!-- Gauge dial (semicircle) -->
+          <div class="dial-wrap">
+            <svg class="dial-svg" viewBox="0 0 200 110" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="dialGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#ff2d78"/>
+                  <stop offset="50%" stop-color="#fbbf24"/>
+                  <stop offset="100%" stop-color="#22c55e"/>
+                </linearGradient>
+              </defs>
+              <!-- Background arc -->
+              <path d="M 20 100 A 80 80 0 0 1 180 100" stroke="rgba(255,255,255,0.08)" stroke-width="12" fill="none" stroke-linecap="round"/>
+              <!-- Colored arc -->
+              <path class="dial-arc" d="M 20 100 A 80 80 0 0 1 180 100" stroke="url(#dialGrad)" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="251" stroke-dashoffset="63"/>
+              <!-- Needle -->
+              <g class="dial-needle" transform-origin="100 100">
+                <line x1="100" y1="100" x2="100" y2="30" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+                <circle cx="100" cy="100" r="6" fill="white"/>
+                <circle cx="100" cy="100" r="3" fill="#0ea5e9"/>
+              </g>
+              <!-- Scale labels -->
+              <text x="14" y="108" fill="rgba(255,255,255,0.4)" font-size="9" font-family="JetBrains Mono,monospace">0</text>
+              <text x="182" y="108" fill="rgba(255,255,255,0.4)" font-size="9" font-family="JetBrains Mono,monospace">100</text>
+            </svg>
+            <div class="dial-value">
+              <span class="dial-num mono grad">72</span>
+              <span class="dial-den mono">/ 100 · <span class="dial-tag pos">POSITIVE</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SMART MONEY ═══ -->
+  <section class="section" id="smart-money">
+    <div class="section-head" data-reveal>
+      <span class="eyebrow mono">// INSTITUTIONAL_CAPABILITIES</span>
+      <h2>Smart Money</h2>
+    </div>
+
+    <div class="sm-cards">
+      <div class="sm-card glass" data-reveal data-tilt>
+        <div class="sm-card-top">
+          <div class="sm-card-fund">Berkshire Hathaway</div>
+          <div class="sm-card-move pos mono">+ 2.8% <span class="material-symbols-outlined">north_east</span></div>
+        </div>
+        <div class="sm-sparkline">
+          <svg viewBox="0 0 160 60" preserveAspectRatio="none" fill="none">
+            <defs>
+              <linearGradient id="spark1" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.3"/>
+                <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path d="M0 45 C20 40,40 50,60 35 C80 20,100 30,120 15 C140 5,155 20,160 10 L160 60 L0 60 Z" fill="url(#spark1)"/>
+            <path d="M0 45 C20 40,40 50,60 35 C80 20,100 30,120 15 C140 5,155 20,160 10" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="160" cy="10" r="3.5" fill="#22c55e"/>
+          </svg>
+        </div>
+      </div>
+      <div class="sm-card glass" data-reveal data-tilt>
+        <div class="sm-card-top">
+          <div class="sm-card-fund">ARK Invest</div>
+          <div class="sm-card-move pos mono">+ 6.2% <span class="material-symbols-outlined">north_east</span></div>
+        </div>
+        <div class="sm-sparkline">
+          <svg viewBox="0 0 160 60" preserveAspectRatio="none" fill="none">
+            <defs>
+              <linearGradient id="spark2" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#a855f7" stop-opacity="0.3"/>
+                <stop offset="100%" stop-color="#a855f7" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path d="M0 50 C20 45,40 30,60 40 C80 50,100 20,120 10 C140 2,155 15,160 5 L160 60 L0 60 Z" fill="url(#spark2)"/>
+            <path d="M0 50 C20 45,40 30,60 40 C80 50,100 20,120 10 C140 2,155 15,160 5" stroke="#a855f7" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="160" cy="5" r="3.5" fill="#22c55e"/>
+          </svg>
+        </div>
+      </div>
+      <div class="sm-card glass" data-reveal data-tilt>
+        <div class="sm-card-top">
+          <div class="sm-card-fund">Bridgewater</div>
+          <div class="sm-card-move neg mono">- 0.2% <span class="material-symbols-outlined">south_east</span></div>
+        </div>
+        <div class="sm-sparkline">
+          <svg viewBox="0 0 160 60" preserveAspectRatio="none" fill="none">
+            <defs>
+              <linearGradient id="spark3" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#ff4d6d" stop-opacity="0.3"/>
+                <stop offset="100%" stop-color="#ff4d6d" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path d="M0 20 C20 15,40 25,60 18 C80 10,100 28,120 35 C140 42,155 38,160 50 L160 60 L0 60 Z" fill="url(#spark3)"/>
+            <path d="M0 20 C20 15,40 25,60 18 C80 10,100 28,120 35 C140 42,155 38,160 50" stroke="#ff4d6d" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="160" cy="50" r="3.5" fill="#ff4d6d"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ GLOBAL MARKET SENTIMENT ═══ -->
+  <section class="section market" id="market">
+    <div class="market-head" data-reveal>
+      <span class="material-symbols-outlined">language</span>
+      <h2 class="mono">GLOBAL_MARKET_SENTIMENT</h2>
+      <span class="market-rule"></span>
+      <span class="mono dim xs market-clock" id="market-clock">--:--:-- UTC</span>
+    </div>
+
+    <div class="market-grid">
+      <div class="mkt glass" data-reveal data-tilt>
+        <div class="mkt-top"><span class="mono">BTC/USD</span><span class="mkt-pct up mono" data-pct="4.2">+4.2%</span></div>
+        <div class="mkt-state"><span class="mono">BULLISH_SIGNAL</span></div>
+      </div>
+      <div class="mkt glass" data-reveal data-tilt>
+        <div class="mkt-top"><span class="mono">ETH/USD</span><span class="mkt-pct up mono" data-pct="2.8">+2.8%</span></div>
+        <div class="mkt-state"><span class="mono">STABLE_ACCUM</span></div>
+      </div>
+      <div class="mkt glass" data-reveal data-tilt>
+        <div class="mkt-top"><span class="mono">AAPL</span><span class="mkt-pct up mono" data-pct="1.4">+1.4%</span></div>
+        <div class="mkt-state"><span class="mono">NEUTRAL_BIAS</span></div>
+      </div>
+      <div class="mkt glass hot" data-reveal data-tilt>
+        <div class="mkt-top"><span class="mono">NVDA</span><span class="mkt-pct up mono" data-pct="6.7">+6.7%</span></div>
+        <div class="mkt-state hot"><span class="mono glow-c">HIGH_VOL_BREAKOUT</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ FINAL CTA ═══ -->
+  <section class="cta-final">
+    <div class="cta-card glass" data-reveal>
+      <div class="cta-glow"></div>
+      <div class="cta-inner">
+        <div class="cta-left">
+          <h2>Stop reading the news.<br><span class="grad">Start reading the signal.</span></h2>
+          <p>SenIQ turns thousands of headlines into a ranked feed tailored to your portfolio.</p>
+        </div>
+        <div class="cta-right">
+          <a href="/app?auth=signup" class="btn btn-primary btn-lg" data-magnetic>
+            <span class="prompt">&gt;_</span><span>Create Free Account</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ FOOTER ═══ -->
+  <footer class="footer">
+    <div class="footer-grid">
+      <div class="footer-brand-col">
+        <a href="#top" class="brand footer-brand">
+          <span class="brand-mark">
+            <svg width="24" height="24" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M34 12H18c-3.3 0-6 2.7-6 6v6h8v-6h14v-6z" fill="#0ea5e9"/>
+              <path d="M28 18h8L20 36h-8l16-18z" fill="#a855f7"/>
+              <path d="M14 36h16c3.3 0 6-2.7 6-6v-6h-8v6H14v6z" fill="#0ea5e9"/>
+            </svg>
+          </span>
+          <span class="brand-text">Sen<span class="brand-iq">IQ</span></span>
+        </a>
+        <p class="footer-desc">SenIQ turns the market's firehose of news into a ranked feed of what actually moves your portfolio.</p>
+      </div>
+
+      <div class="footer-links-col">
+        <h4 class="footer-col-head mono">Links</h4>
+        <nav class="footer-col-links">
+          <a href="#problem">About</a>
+          <a href="#">Privacy</a>
+          <a href="#">Contact Us</a>
+        </nav>
+      </div>
+
+      <div class="footer-links-col">
+        <h4 class="footer-col-head mono">Product</h4>
+        <nav class="footer-col-links">
+          <a href="#preview">Terminal</a>
+          <a href="#market">Markets</a>
+          <a href="/app?auth=login">Sign In</a>
+        </nav>
+      </div>
+
+      <div class="footer-cta-col">
+        <p class="footer-cta-headline">Stop reading the news. Start reading the signal.</p>
+        <a href="/app?auth=signup" class="btn btn-term btn-lg footer-cta-btn" data-magnetic>Create Free Account</a>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <p class="footer-copy mono">© <span id="year">2026</span> SenIQ. All rights reserved.</p>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+  <script src="/js/landing.js"></script>
+</body>
+</html>
