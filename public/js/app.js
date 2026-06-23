@@ -308,6 +308,7 @@ function applyFilterToViews() {
   renderFilteredNews();
   renderFilteredAlerts();
   renderFilteredSentiment();
+  renderDashboardSummary();
 }
 
 // ─── Ticker Search Filter ────────────────────────────────────
@@ -480,6 +481,7 @@ async function loadNewsFeed() {
     cachedArticles = data.articles || [];
     cachedBuckets = data.buckets || { holdings: [], market: [], world: [] };
     renderFilteredNews();
+    renderDashboardSummary();
   } catch (err) {
     console.error('News feed error:', err);
   }
@@ -586,6 +588,7 @@ async function loadAlerts() {
     const data = await api('/api/news/alerts');
     cachedAlerts = data.alerts || [];
     renderFilteredAlerts();
+    renderDashboardSummary();
   } catch (err) {
     console.error('Alerts error:', err);
   }
@@ -697,11 +700,11 @@ async function loadImpactFeed() {
 function renderImpactFeed(top, feed) {
   const hero = document.getElementById('impact-hero');
   const list = document.getElementById('impact-list');
-  if (!hero || !list) return;
+  if (!hero) return;
 
   if (!top) {
     hero.innerHTML = '<div class="empty-state"><p>No portfolio-impacting events yet. They appear after the pipeline scores recent news for your holdings.</p></div>';
-    list.innerHTML = '';
+    if (list) list.innerHTML = '';
     return;
   }
 
@@ -720,7 +723,7 @@ function renderImpactFeed(top, feed) {
       <span class="impact-time">${timeAgo(new Date(top.published_at))}</span>
     </div>`;
 
-  list.innerHTML = feed.slice(1).map(e => {
+  if (list) list.innerHTML = feed.slice(1).map(e => {
     const d = e.direction || 'neutral';
     const inner = `
         <span class="impact-dir ${d}">${DIR_ICON[d]}</span>
@@ -730,7 +733,7 @@ function renderImpactFeed(top, feed) {
       ? `<a class="impact-row glass" href="${escapeHtml(e.url)}" target="_blank" rel="noopener">${inner}</a>`
       : `<div class="impact-row glass no-link">${inner}</div>`;
   }).join('');
-}
+}  // end renderImpactFeed
 
 function renderFilteredSentiment() {
   let score, label, sentimentsForChart;
@@ -975,12 +978,25 @@ function closeModal() {
 }
 
 // ─── User Menu ───────────────────────────────────────────────
+let previousPage = 'dashboard';
+
 function initUserMenu() {
   const btn = document.getElementById('user-menu-btn');
   const dropdown = document.getElementById('user-dropdown');
 
   btn.addEventListener('click', (e) => { e.stopPropagation(); dropdown.classList.toggle('hidden'); });
   document.addEventListener('click', () => dropdown.classList.add('hidden'));
+
+  document.getElementById('profile-btn').addEventListener('click', () => {
+    // Remember where we came from so Back can return there.
+    const active = document.querySelector('.main-tab.active');
+    previousPage = active ? active.dataset.page : 'dashboard';
+    openProfilePage();
+  });
+
+  document.getElementById('profile-back-btn').addEventListener('click', () => {
+    switchToPage(previousPage);
+  });
 
   document.getElementById('logout-btn').addEventListener('click', () => {
     token = null; currentUser = null;
@@ -996,6 +1012,90 @@ function initUserMenu() {
     await Promise.all([loadNewsFeed(), loadAlerts(), loadPortfolioSentiment()]);
     showToast('Data refreshed!', 'success');
   });
+
+  // Password visibility toggles on profile page
+  document.querySelectorAll('.pw-toggle[data-target]').forEach(toggle => {
+    toggle.addEventListener('click', () => {
+      const input = document.getElementById(toggle.dataset.target);
+      if (!input) return;
+      const isHidden = input.type === 'password';
+      input.type = isHidden ? 'text' : 'password';
+      toggle.querySelector('.material-symbols-outlined').textContent = isHidden ? 'visibility_off' : 'visibility';
+    });
+  });
+
+  // Save name
+  document.getElementById('profile-save-btn').addEventListener('click', async () => {
+    const nameInput = document.getElementById('profile-name-input');
+    const msgEl = document.getElementById('profile-name-msg');
+    const name = nameInput.value.trim();
+    if (!name) return showProfileMsg(msgEl, 'Name cannot be empty', 'error');
+    try {
+      document.getElementById('profile-save-btn').disabled = true;
+      const { user } = await api('/api/auth/me', { method: 'PATCH', body: JSON.stringify({ name }) });
+      currentUser = user;
+      populateProfilePage(user);
+      document.getElementById('user-name').textContent = user.name;
+      document.getElementById('user-avatar').textContent = user.name[0].toUpperCase();
+      showProfileMsg(msgEl, 'Name updated successfully', 'success');
+    } catch (err) {
+      showProfileMsg(msgEl, err.message, 'error');
+    } finally {
+      document.getElementById('profile-save-btn').disabled = false;
+    }
+  });
+
+  // Change password
+  document.getElementById('profile-pw-btn').addEventListener('click', async () => {
+    const cur = document.getElementById('profile-cur-pw').value;
+    const nw = document.getElementById('profile-new-pw').value;
+    const conf = document.getElementById('profile-confirm-pw').value;
+    const msgEl = document.getElementById('profile-pw-msg');
+    if (!cur || !nw || !conf) return showProfileMsg(msgEl, 'All password fields are required', 'error');
+    if (nw !== conf) return showProfileMsg(msgEl, 'New passwords do not match', 'error');
+    if (nw.length < 6) return showProfileMsg(msgEl, 'New password must be at least 6 characters', 'error');
+    try {
+      document.getElementById('profile-pw-btn').disabled = true;
+      await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: nw }) });
+      document.getElementById('profile-cur-pw').value = '';
+      document.getElementById('profile-new-pw').value = '';
+      document.getElementById('profile-confirm-pw').value = '';
+      showProfileMsg(msgEl, 'Password changed successfully', 'success');
+    } catch (err) {
+      showProfileMsg(msgEl, err.message, 'error');
+    } finally {
+      document.getElementById('profile-pw-btn').disabled = false;
+    }
+  });
+}
+
+function showProfileMsg(el, text, type) {
+  el.textContent = text;
+  el.className = `profile-msg ${type}`;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+function openProfilePage() {
+  document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
+  document.getElementById('page-profile').classList.remove('hidden');
+  populateProfilePage(currentUser);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function populateProfilePage(user) {
+  if (!user) return;
+  const initial = (user.name || user.email || 'U')[0].toUpperCase();
+  document.getElementById('profile-avatar-lg').textContent = initial;
+  document.getElementById('profile-hero-name').textContent = user.name || '—';
+  document.getElementById('profile-hero-email').textContent = user.email || '';
+  document.getElementById('profile-name-input').value = user.name || '';
+  document.getElementById('profile-email-display').value = user.email || '';
+  if (user.created_at) {
+    const d = new Date(user.created_at);
+    document.getElementById('profile-since').textContent = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
 }
 
 // ─── Smart Money (Phase 3) ───────────────────────────────────
@@ -1230,19 +1330,55 @@ async function deleteWebhook(id) {
   } catch (err) { showToast(err.message, 'error'); }
 }
 
-// Top-level page tabs: Dashboard (portfolio + news) / Institutions / Congress.
+// Top-level page switcher (called from nav tabs and inline onclick).
+function switchToPage(page) {
+  document.querySelectorAll('.main-tab').forEach(t => t.classList.toggle('active', t.dataset.page === page));
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('hidden', p.id !== `page-${page}`));
+  if (page === 'analytics') updateSentimentChart(activeFilter && cachedSentiments[activeFilter] ? { [activeFilter]: cachedSentiments[activeFilter] } : cachedSentiments);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function initMainTabs() {
   document.querySelectorAll('.main-tab').forEach(tab => {
+    tab.addEventListener('click', () => switchToPage(tab.dataset.page));
+  });
+}
+
+function initIntelTabs() {
+  document.querySelectorAll('.intel-tab').forEach(tab => {
     tab.addEventListener('click', () => {
-      const page = tab.dataset.page;
-      document.querySelectorAll('.main-tab').forEach(t => t.classList.toggle('active', t === tab));
-      document.querySelectorAll('.page').forEach(p => p.classList.toggle('hidden', p.id !== `page-${page}`));
-      // Refresh the smart-money pages on entry so they're current.
-      if (page === 'institutions') loadInstitutions();
-      if (page === 'congress') loadCongress();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      const panel = tab.dataset.intel;
+      document.querySelectorAll('.intel-tab').forEach(t => t.classList.toggle('active', t === tab));
+      document.querySelectorAll('.intel-panel').forEach(p => p.classList.toggle('hidden', p.id !== `intel-panel-${panel}`));
+      if (panel === 'institutions') loadInstitutions();
+      if (panel === 'congress') loadCongress();
     });
   });
+}
+
+// Renders top 3 news + top 5 alerts into the dashboard preview areas.
+function renderDashboardSummary() {
+  const newsEl = document.getElementById('dash-news-preview');
+  if (newsEl) {
+    const allNews = [...(cachedBuckets.holdings || []), ...(cachedBuckets.market || []), ...(cachedBuckets.world || [])];
+    const filtered = activeFilter ? allNews.filter(a => (a.matchedTickers || []).includes(activeFilter)) : allNews;
+    const top3 = filtered.slice(0, 3);
+    newsEl.innerHTML = top3.length
+      ? top3.map(a => renderNewsItem(a)).join('')
+      : '<div class="empty-state small"><p>No news yet — the pipeline will populate your feed shortly.</p></div>';
+  }
+
+  const alertsEl = document.getElementById('dash-alerts-preview');
+  if (alertsEl) {
+    let alerts = activeFilter ? cachedAlerts.filter(a => a.ticker === activeFilter || a.ticker === 'MARKET') : cachedAlerts;
+    const top5 = alerts.slice(0, 5);
+    alertsEl.innerHTML = top5.length
+      ? top5.map(a => {
+          const urgency = a.alert_type.includes('negative') ? 'high' : a.alert_type.includes('positive') ? 'medium' : 'low';
+          return `<div class="alert-item ${urgency}${a.read ? ' read' : ''}"><div>${escapeHtml(a.message)}</div><div class="alert-time">${timeAgo(new Date(a.created_at))}</div></div>`;
+        }).join('')
+      : '<div class="empty-state small"><p>No alerts yet. We\'ll notify you when something important happens.</p></div>';
+  }
 }
 
 function initSmartMoney() {
@@ -1284,6 +1420,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initUserMenu();
   initAnalyzer();
   initMainTabs();
+  initIntelTabs();
   initSmartMoney();
 
   // Filter clear button
