@@ -50,7 +50,8 @@ app.use((req, res, next) => {
 // ─── Middleware ──────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// index: false so "/" is handled explicitly below (landing page, not the app).
+app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 
 // ─── API Routes ─────────────────────────────────────────────
 app.use('/api/auth', authRouter);
@@ -68,7 +69,14 @@ app.get('/api/config', (req, res) => {
   res.json({ disclaimer: DISCLAIMER });
 });
 
-// ─── SPA Fallback ───────────────────────────────────────────
+// ─── Marketing Landing Page ─────────────────────────────────
+// Root serves the public marketing page; the app itself lives at /app.
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'landing.html'));
+});
+
+// ─── SPA Fallback (the app: auth + dashboard) ───────────────
+// Everything else (e.g. /app, /app?auth=signup, deep links) loads index.html.
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
