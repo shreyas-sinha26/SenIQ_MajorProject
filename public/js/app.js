@@ -91,23 +91,59 @@ function showToast(message, type = 'info') {
 }
 
 // ─── Auth Logic ──────────────────────────────────────────────
+function selectAuthTab(name) {
+  const tab = document.querySelector(`.auth-tab[data-tab="${name}"]`);
+  if (tab) tab.click();
+}
+
 function initAuth() {
-  // Tab switching
+  // ── Tab switching (tabs + cross-form links) ──
+  function switchTab(name) {
+    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+    const tab = document.querySelector(`.auth-tab[data-tab="${name}"]`);
+    if (tab) tab.classList.add('active');
+    document.getElementById('login-form').classList.toggle('hidden', name !== 'login');
+    document.getElementById('signup-form').classList.toggle('hidden', name !== 'signup');
+    document.getElementById('auth-error').classList.add('hidden');
+    const signupErr = document.getElementById('auth-error-signup');
+    if (signupErr) signupErr.classList.add('hidden');
+  }
+
   document.querySelectorAll('.auth-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      document.getElementById('login-form').classList.toggle('hidden', tab.dataset.tab !== 'login');
-      document.getElementById('signup-form').classList.toggle('hidden', tab.dataset.tab !== 'signup');
-      document.getElementById('auth-error').classList.add('hidden');
+    tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+  });
+
+  // Cross-form link buttons ("Create one free →" / "Sign in →")
+  document.querySelectorAll('.auth-link[data-tab]').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+
+  // Deep link from the landing page: /app?auth=signup opens the Create Account tab.
+  const wanted = new URLSearchParams(location.search).get('auth');
+  if (wanted === 'signup') switchTab('signup');
+
+  // ── Password visibility toggles ──
+  document.querySelectorAll('.pw-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const input = document.getElementById(btn.dataset.target);
+      if (!input) return;
+      const isText = input.type === 'text';
+      input.type = isText ? 'password' : 'text';
+      const icon = btn.querySelector('.material-symbols-outlined');
+      if (icon) icon.textContent = isText ? 'visibility' : 'visibility_off';
     });
   });
 
-  // Login
+  // ── Login ──
   document.getElementById('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const errEl = document.getElementById('auth-error');
     errEl.classList.add('hidden');
+    const btn = document.getElementById('login-btn');
+    btn.disabled = true;
+    const span = btn.querySelector('span');
+    const origText = span.textContent;
+    span.textContent = 'Signing in…';
     try {
       const data = await api('/api/auth/login', {
         method: 'POST',
@@ -123,14 +159,22 @@ function initAuth() {
     } catch (err) {
       errEl.textContent = err.message;
       errEl.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+      span.textContent = origText;
     }
   });
 
-  // Signup
+  // ── Signup ──
   document.getElementById('signup-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const errEl = document.getElementById('auth-error');
+    const errEl = document.getElementById('auth-error-signup') || document.getElementById('auth-error');
     errEl.classList.add('hidden');
+    const btn = document.getElementById('signup-btn');
+    btn.disabled = true;
+    const span = btn.querySelector('span');
+    const origText = span.textContent;
+    span.textContent = 'Creating account…';
     try {
       const data = await api('/api/auth/signup', {
         method: 'POST',
@@ -144,13 +188,17 @@ function initAuth() {
       localStorage.setItem('copilot_token', token);
       currentUser = data.user;
       showDashboard();
-      showToast('Welcome to AI Portfolio Copilot! 🚀', 'success');
+      showToast('Welcome to SenIQ! 🚀', 'success');
     } catch (err) {
       errEl.textContent = err.message;
       errEl.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+      span.textContent = origText;
     }
   });
 }
+
 
 // ─── Dashboard ───────────────────────────────────────────────
 async function showDashboard() {
@@ -192,37 +240,37 @@ function renderHoldings() {
 
   if (holdings.length === 0) {
     grid.innerHTML = `
-      <div class="empty-state">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+      <tr><td class="empty-state-td" colspan="6">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
           <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
         </svg>
-        <p>No stocks yet. Add your first holding!</p>
-      </div>`;
+        <p style="margin-top:10px;font-size:.88rem">No holdings yet — add your first asset above.</p>
+      </td></tr>`;
     return;
   }
 
   grid.innerHTML = holdings.map(h => {
-    let cardClass = 'holding-card';
+    let rowClass = '';
     if (activeFilter) {
-      cardClass += h.ticker === activeFilter ? ' active' : ' dimmed';
+      rowClass = h.ticker === activeFilter ? 'row-active' : 'row-dimmed';
     }
     const cls = h.asset_class || 'equity';
     const clsLabel = { equity: 'Equity', crypto: 'Crypto', commodity: 'Commodity' }[cls] || cls;
-    const qtyLine = h.quantity != null
-      ? `<div class="holding-qty">${h.quantity} units${h.weight_pct != null ? ` · ${h.weight_pct}%` : ''}</div>`
-      : '';
+    const exposure = h.weight_pct != null
+      ? `${h.weight_pct}%`
+      : h.quantity != null ? `${h.quantity} units` : '—';
     return `
-    <div class="${cardClass}" data-ticker="${h.ticker}" onclick="toggleFilter('${h.ticker}')">
-      <button class="holding-remove" onclick="event.stopPropagation(); removeStock('${h.ticker}')" title="Remove">&times;</button>
-      <div class="holding-ticker">${h.ticker} <span class="asset-class-badge ${cls}">${clsLabel}</span></div>
-      <div class="holding-name">${h.company_name || h.ticker}</div>
-      ${qtyLine}
-      <div class="holding-sentiment">
-        <div class="sentiment-bar"><div class="sentiment-fill neutral" id="fill-${h.ticker}" style="width:50%"></div></div>
-        <span class="sentiment-score neutral" id="score-${h.ticker}">—</span>
-      </div>
-      <div class="holding-headline" id="headline-${h.ticker}">Loading news...</div>
-    </div>
+    <tr class="${rowClass}" data-ticker="${h.ticker}" onclick="toggleFilter('${h.ticker}')">
+      <td>
+        <div class="ht-ticker">${h.ticker} <span class="asset-class-badge ${cls}">${clsLabel}</span></div>
+        <div class="ht-name">${h.company_name || h.ticker}</div>
+      </td>
+      <td class="ht-exposure">${exposure}</td>
+      <td><span class="ht-senti-label neutral" id="senti-label-${h.ticker}">—</span></td>
+      <td><span class="ht-score neutral" id="score-${h.ticker}">—</span></td>
+      <td><span class="ht-headline" id="headline-${h.ticker}">—</span></td>
+      <td><button class="ht-remove" onclick="event.stopPropagation(); removeStock('${h.ticker}')" title="Remove">×</button></td>
+    </tr>
   `}).join('');
 }
 
@@ -242,10 +290,9 @@ function setFilter(ticker) {
   renderHoldings();
   applyFilterToViews();
 
-  // Scroll slider to active card
   setTimeout(() => {
-    const card = document.querySelector(`.holding-card[data-ticker="${ticker}"]`);
-    if (card) card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
+    if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, 50);
 }
 
@@ -363,9 +410,8 @@ function selectSearchResult(ticker) {
   dropdown.classList.add('hidden');
   setFilter(ticker);
 
-  // Scroll the slider to bring the active card into view
-  const card = document.querySelector(`.holding-card[data-ticker="${ticker}"]`);
-  if (card) card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
+  if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 async function addStock(ticker, opts = {}) {
@@ -445,6 +491,9 @@ function renderNewsItem(a) {
   const time = timeAgo(new Date(a.published_at));
   const tickers = (a.matchedTickers || []).filter(t => t !== '__MARKET__').slice(0, 3);
   const sources = a.source_count > 1 ? `<span class="news-source-count">+${a.source_count - 1} more</span>` : '';
+  const score = Math.round(a.sentiment.score * 100);
+  const impactSign = a.sentiment.label === 'positive' ? '+' : a.sentiment.label === 'negative' ? '−' : '';
+  const impactVal = a.sentiment.label === 'negative' ? 100 - score : score;
   return `
     <div class="news-item">
       <div class="news-sentiment-dot ${a.sentiment.label}"></div>
@@ -455,7 +504,12 @@ function renderNewsItem(a) {
           <span>${escapeHtml(a.source || '')}</span>
           ${sources}
           <span>${time}</span>
-          <span class="sentiment-score ${a.sentiment.label}">${Math.round(a.sentiment.score * 100)}%</span>
+        </div>
+        <div class="news-impact-row">
+          <span class="ni-label">Impact</span>
+          <span class="ni-score ${a.sentiment.label}">${impactSign}${impactVal}</span>
+          <span class="ni-sep">·</span>
+          <span class="ni-conf">Confidence ${score}%</span>
         </div>
       </div>
     </div>`;
@@ -511,9 +565,9 @@ function renderFilteredNews() {
   };
 
   feed.innerHTML =
-    section('📌 Your Holdings', 'news about what you own', cachedBuckets.holdings) +
-    section('📊 Markets', 'broad market-moving news', cachedBuckets.market) +
-    section('🌍 World', 'major world affairs', cachedBuckets.world);
+    section('Your Holdings', 'news about what you own', cachedBuckets.holdings) +
+    section('Markets', 'broad market-moving news', cachedBuckets.market) +
+    section('World', 'major world affairs', cachedBuckets.world);
 
   // View All toggles the per-bucket cap.
   const capped = !newsExpanded && [cachedBuckets.holdings, cachedBuckets.market, cachedBuckets.world].some(b => b.length > 4);
@@ -603,21 +657,22 @@ async function loadPortfolioSentiment() {
     cachedSentiments = data.sentiments || {};
     cachedOverallScore = data.overallScore || 50;
 
-    // Update individual holding cards (always, regardless of filter)
+    // Update individual holding rows (always, regardless of filter)
     for (const [ticker, s] of Object.entries(cachedSentiments)) {
-      const fillEl = document.getElementById(`fill-${ticker}`);
+      const sentiEl = document.getElementById(`senti-label-${ticker}`);
       const scoreEl = document.getElementById(`score-${ticker}`);
       const headlineEl = document.getElementById(`headline-${ticker}`);
-      if (fillEl) {
-        fillEl.style.width = `${Math.round(s.score * 100)}%`;
-        fillEl.className = `sentiment-fill ${s.label}`;
+      if (sentiEl) {
+        const lbl = s.label === 'positive' ? 'Bullish' : s.label === 'negative' ? 'Bearish' : 'Neutral';
+        sentiEl.textContent = lbl;
+        sentiEl.className = `ht-senti-label ${s.label}`;
       }
       if (scoreEl) {
-        scoreEl.textContent = `${Math.round(s.score * 100)}%`;
-        scoreEl.className = `sentiment-score ${s.label}`;
+        scoreEl.textContent = Math.round(s.score * 100);
+        scoreEl.className = `ht-score ${s.label}`;
       }
       if (headlineEl) {
-        headlineEl.textContent = s.recentHeadline || 'No recent news';
+        headlineEl.textContent = s.recentHeadline || '—';
       }
     }
 
@@ -747,10 +802,10 @@ function updateSentimentChart(sentiments) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: 'rgba(17,24,39,0.95)',
-          titleColor: '#e5e7eb',
-          bodyColor: '#9ca3af',
-          borderColor: 'rgba(99,102,241,0.3)',
+          backgroundColor: 'rgba(17,17,32,0.95)',
+          titleColor: '#e2e2e8',
+          bodyColor: '#a0a0b0',
+          borderColor: 'rgba(255,45,120,0.3)',
           borderWidth: 1,
           cornerRadius: 8,
           padding: 12,
@@ -761,11 +816,11 @@ function updateSentimentChart(sentiments) {
         y: {
           min: 0, max: 100,
           grid: { color: 'rgba(255,255,255,0.04)' },
-          ticks: { color: '#6b7280', font: { family: 'Inter' } }
+          ticks: { color: '#666677', font: { family: 'Sora' } }
         },
         x: {
           grid: { display: false },
-          ticks: { color: '#9ca3af', font: { family: 'Inter', weight: 600 } }
+          ticks: { color: '#a0a0b0', font: { family: 'Sora', weight: 600 } }
         }
       },
       animation: { duration: 1200, easing: 'easeOutQuart' }
