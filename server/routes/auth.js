@@ -87,4 +87,44 @@ router.get('/me', authMiddleware, async (req, res) => {
   }
 });
 
+// ─── PATCH /api/auth/me — update display name ────────────────
+router.patch('/me', authMiddleware, async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+    const trimmed = name.trim();
+    if (trimmed.length > 80) return res.status(400).json({ error: 'Name too long' });
+    const user = await queryOne(
+      'UPDATE users SET name = $1 WHERE id = $2 RETURNING id, email, name, created_at',
+      [trimmed, req.user.id]
+    );
+    res.json({ user });
+  } catch (err) {
+    console.error('Update name error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── POST /api/auth/change-password ─────────────────────────
+router.post('/change-password', authMiddleware, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both passwords are required' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+
+    const user = await queryOne('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const valid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    await queryOne('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, req.user.id]);
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error('Change password error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = { router, authMiddleware };
