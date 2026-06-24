@@ -1,20 +1,27 @@
 /**
  * FinBERT classifier — via Hugging Face Inference API.
  *
- * Uses ProsusAI/finbert on the HF Inference API instead of loading the model
- * locally, reducing memory from ~250MB to near zero.
+ * Uses ProsusAI/finbert on the HF Serverless Inference API instead of loading
+ * the model locally, reducing memory from ~250MB to near zero.
  *
  * Requires HF_API_TOKEN (free at huggingface.co → Settings → Access Tokens).
- * If the token is absent or the API is down, falls back to the lexicon — never a hard fail.
+ * Falls back to the lexicon classifier if the API is unavailable — never a hard fail.
  *
  * Output matches the lexicon classifier: { label, score (0-1, 0.5=neutral), confidence }.
  */
 
 const { FEATURES, INGEST } = require('../config');
 
-const HF_API_URL = 'https://api-inference.huggingface.co/models/ProsusAI/finbert';
-
+let hf = null;
 let loadFailed = false;
+
+function getClient() {
+  if (!hf && process.env.HF_API_TOKEN) {
+    const { HfInference } = require('@huggingface/inference');
+    hf = new HfInference(process.env.HF_API_TOKEN);
+  }
+  return hf;
+}
 
 // FinBERT label + probability → the shared 0-1 sentiment scale.
 function toScore(label, prob) {
@@ -26,34 +33,6 @@ function toScore(label, prob) {
 
 const round = (n) => Math.round(n * 100) / 100;
 
-async function callInferenceAPI(inputs, retried = false) {
-  const token = process.env.HF_API_TOKEN;
-  if (!token) throw new Error('HF_API_TOKEN not set');
-
-  const res = await fetch(HF_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ inputs }),
-  });
-
-  if (res.status === 503 && !retried) {
-    // Model is cold-starting — wait the suggested time and retry once.
-    const body = await res.json().catch(() => ({}));
-    const wait = Math.min((body.estimated_time || 20) * 1000, 30_000);
-    await new Promise((r) => setTimeout(r, wait));
-    return callInferenceAPI(inputs, true);
-  }
-
-  if (!res.ok) {
-    throw new Error(`HF API ${res.status}: ${await res.text()}`);
-  }
-
-  return res.json();
-}
-
 /**
  * Classify many texts. Returns an array aligned to `texts`, or null if FinBERT
  * isn't available (caller falls back to the lexicon).
@@ -61,28 +40,32 @@ async function callInferenceAPI(inputs, retried = false) {
 async function classifyBatch(texts) {
   if (!FEATURES.FINBERT_CLASSIFY) return null;
   if (loadFailed) return null;
-  if (!process.env.HF_API_TOKEN) return null;
+  const client = getClient();
+  if (!client) return null;
 
   const inputs = texts.map((t) => String(t || '').slice(0, INGEST.MAX_TEXT_CHARS));
   const out = [];
-  const CHUNK = 8; // keep individual API requests reasonable
+  const CHUNK = 8;
 
   try {
     for (let i = 0; i < inputs.length; i += CHUNK) {
       const slice = inputs.slice(i, i + CHUNK);
-      const res = await callInferenceAPI(slice);
-      // Batch response: [[{label, score}, ...], ...] — one inner array per input.
-      // Single-item edge-case: API may return [{label, score}, ...] — wrap it.
+      // textClassification returns [{label, score}] for single or an array of those for batch.
+      const res = await client.textClassification({
+        model: 'ProsusAI/finbert',
+        inputs: slice,
+      });
+      // Normalise: single input → wrap in array; batch → already array of arrays.
       const rows = Array.isArray(res[0]) ? res : [res];
       for (const row of rows) {
-        const top = row[0]; // results are sorted by score desc; [0] is top-1
+        const top = Array.isArray(row) ? row[0] : row;
         const { label, score, confidence } = toScore(top.label, top.score);
         out.push({ label, score: round(score), confidence: round(confidence), model: 'finbert' });
       }
     }
     return out;
   } catch (err) {
-    console.warn('   ⚠️  FinBERT API error, falling back to lexicon:', err.message, err.cause?.message ?? '');
+    console.warn('   ⚠️  FinBERT API error, falling back to lexicon:', err.message);
     loadFailed = true;
     return null;
   }
