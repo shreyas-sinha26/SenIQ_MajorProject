@@ -199,7 +199,11 @@ router.get('/impact', async (req, res) => {
 router.get('/alerts', async (req, res) => {
   try {
     const alerts = await query(
-      'SELECT * FROM alerts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50',
+      `SELECT al.*, ar.url AS article_url
+         FROM alerts al
+         LEFT JOIN articles ar ON ar.id = al.article_id
+        WHERE al.user_id = $1
+        ORDER BY al.created_at DESC LIMIT 50`,
       [req.user.id]
     );
     res.json({ alerts });
