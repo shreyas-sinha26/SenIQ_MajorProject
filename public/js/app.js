@@ -500,7 +500,9 @@ function renderNewsItem(a) {
     <div class="news-item">
       <div class="news-sentiment-dot ${a.sentiment.label}"></div>
       <div class="news-content">
-        <div class="news-title">${escapeHtml(a.title)}</div>
+        <div class="news-title">${a.url
+          ? `<a href="${escapeHtml(a.url)}" target="_blank" rel="noopener noreferrer" class="news-title-link">${escapeHtml(a.title)}</a>`
+          : escapeHtml(a.title)}</div>
         <div class="news-meta">
           ${tickers.map(t => `<span class="news-ticker">${t}</span>`).join('')}
           <span>${escapeHtml(a.source || '')}</span>
@@ -636,9 +638,12 @@ function renderFilteredAlerts() {
 
   feed.innerHTML = visible.map(a => {
     const urgency = a.alert_type.includes('negative') ? 'high' : a.alert_type.includes('positive') ? 'medium' : 'low';
+    const msg = a.article_url
+      ? `<a href="${escapeHtml(a.article_url)}" target="_blank" rel="noopener noreferrer" class="alert-title-link">${escapeHtml(a.message)}</a>`
+      : escapeHtml(a.message);
     return `
       <div class="alert-item ${urgency}${a.read ? ' read' : ''}">
-        <div>${escapeHtml(a.message)}</div>
+        <div>${msg}</div>
         <div class="alert-time">${timeAgo(new Date(a.created_at))}</div>
       </div>
     `;
@@ -1375,7 +1380,10 @@ function renderDashboardSummary() {
     alertsEl.innerHTML = top5.length
       ? top5.map(a => {
           const urgency = a.alert_type.includes('negative') ? 'high' : a.alert_type.includes('positive') ? 'medium' : 'low';
-          return `<div class="alert-item ${urgency}${a.read ? ' read' : ''}"><div>${escapeHtml(a.message)}</div><div class="alert-time">${timeAgo(new Date(a.created_at))}</div></div>`;
+          const msg = a.article_url
+            ? `<a href="${escapeHtml(a.article_url)}" target="_blank" rel="noopener noreferrer" class="alert-title-link">${escapeHtml(a.message)}</a>`
+            : escapeHtml(a.message);
+          return `<div class="alert-item ${urgency}${a.read ? ' read' : ''}"><div>${msg}</div><div class="alert-time">${timeAgo(new Date(a.created_at))}</div></div>`;
         }).join('')
       : '<div class="empty-state small"><p>No alerts yet. We\'ll notify you when something important happens.</p></div>';
   }
