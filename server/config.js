@@ -55,7 +55,7 @@ const FEATURES = {
   RSS_INGEST: true,      // Phase 2b: Indian financial RSS feeds
   REDDIT_INGEST: true,   // Phase 2b: Reddit (needs REDDIT_CLIENT_ID/SECRET to actually fetch)
   X_INGEST: false,       // deferred — interface stubbed only
-  FINBERT_CLASSIFY: process.env.FINBERT_CLASSIFY === '1', // local CPU batch classifier
+  FINBERT_CLASSIFY: process.env.FINBERT_CLASSIFY === '1', // HF Inference API batch classifier (needs HF_API_TOKEN)
   SMART_MONEY: true,     // Phase 3: 13F (EDGAR) + Congress tabs + instant filing alerts
   CLAUDE_REPORTS: false,
   BILLING: false,
