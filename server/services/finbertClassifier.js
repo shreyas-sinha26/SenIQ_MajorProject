@@ -82,7 +82,7 @@ async function classifyBatch(texts) {
     }
     return out;
   } catch (err) {
-    console.warn('   ⚠️  FinBERT API error, falling back to lexicon:', err.message);
+    console.warn('   ⚠️  FinBERT API error, falling back to lexicon:', err.message, err.cause?.message ?? '');
     loadFailed = true;
     return null;
   }
