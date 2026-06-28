@@ -1253,3 +1253,6 @@ tr:hover .ht-info { opacity: 1; }
 .ask-answer-meta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; }
 .ask-writer { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent-light); background: rgba(99,102,241,0.1); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
 .ask-disclaimer { font-size: 0.72rem; color: var(--text-muted); }
+
+/* Smart-money search bars (Institutions / Congress) */
+.sm-search { margin: 0 0 14px; max-width: 440px; }
