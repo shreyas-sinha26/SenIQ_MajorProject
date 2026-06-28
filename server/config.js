@@ -87,11 +87,43 @@ const SOURCE_WEIGHTS = {
   byPlatform: { news: 0.7, macro: 0.8, reddit: 0.35, x: 0.3 },
 };
 
-// ─── Portfolio Impact Scoring (Phase 2e) ─────────────────────
+// ─── Event typing (Engine Phase E2) ──────────────────────────
+// Each event gets a TYPE (earnings, legal, M&A, …) and a SEVERITY weight = how much
+// that kind of event tends to matter. Severity feeds the 6-factor impact score.
+const EVENT_TYPES = {
+  SEVERITY: {
+    ma: 1.0,            // M&A / takeover — the biggest mover
+    legal: 0.9,         // lawsuit / fraud / regulator / fine
+    disruption: 0.9,    // recall / breach / shutdown / strike
+    earnings: 0.8,      // results, profit, revenue
+    guidance: 0.8,      // outlook / forecast / warning
+    executive: 0.7,     // CEO/CFO change — key-person risk
+    insider: 0.6,       // promoter / block / pledge
+    macro: 0.6,         // broad market / world
+    product: 0.5,       // launches / unveils
+    rating: 0.4,        // analyst upgrade/downgrade — opinion, not fact
+    other: 0.3,
+    unknown: 0.3,
+  },
+};
+
+// ─── Portfolio Impact Scoring (Phase 2e + E2 6-factor) ───────
+// impact(holding) = exposure × relevance × severity × novelty × confidence × recency
+//   exposure   : the holding's % weight (0..1)
+//   relevance  : 1.0 direct hold · SECTOR_RELEVANCE sector-only · MACRO_BROAD_FACTOR macro
+//   severity   : event-type weight × sentiment magnitude (|score-0.5|×2)  (0..1 core)
+//   novelty    : z-surprise vs the asset's 90-day baseline  (mult ~0.8..1.2; null→1.0)
+//   confidence : classifier/source confidence              (mult CONFIDENCE_FLOOR..1)
+//   recency    : time decay on the event's last_seen        (mult RECENCY_FLOOR..1)
 const IMPACT = {
   EVENT_WINDOW_HOURS: 72,     // only recent events compete for "today's most important"
-  MACRO_BROAD_FACTOR: 0.5,    // a macro event touches the whole portfolio, but diluted
-  Z_BOOST: 0.25,              // how much a surprising z-score amplifies impact
+  MACRO_BROAD_FACTOR: 0.5,    // relevance of a macro event to a non-matching holding
+  SECTOR_RELEVANCE: 0.4,      // relevance of a sector event to a holding in that sector
+  Z_BOOST: 0.25,              // (materiality alerts) surprising z amplifies
+  NOVELTY_BASE: 0.8,          // novelty mult = BASE + GAIN×min(|z|,3)/3 ; null z → 1.0
+  NOVELTY_GAIN: 0.4,
+  CONFIDENCE_FLOOR: 0.5,      // confidence mult = FLOOR + (1-FLOOR)×confidence
+  RECENCY_FLOOR: 0.5,         // recency mult = FLOOR + (1-FLOOR)×decay(age)
   TOP_N_PER_USER: 25,         // persist this many ranked events per user
 };
 
@@ -133,6 +165,32 @@ const NEWS_RELEVANCE = {
   },
 };
 
+// ─── Alert budgets + outcomes (Engine Phase E3) ──────────────
+// Anti-fatigue: every material event is still recorded, but only the top
+// MAX_REALTIME_PER_DAY (by priority) push in real time; the rest are 'digest'.
+// A ticker can't push more than once per PER_TICKER_COOLDOWN_HOURS. Quiet hours
+// hold pushes to digest (off until we capture each user's timezone).
+const ALERT_BUDGET = {
+  MAX_REALTIME_PER_DAY: 5,
+  PER_TICKER_COOLDOWN_HOURS: 12,
+  QUIET_HOURS_ENABLED: false,   // needs per-user TZ; global window until then
+  QUIET_START: 22,              // local hour pushes pause (inclusive)
+  QUIET_END: 7,                 // local hour pushes resume
+  QUIET_TZ_OFFSET: 0,           // hours from UTC for the quiet window
+};
+
+// Outcome labelling: a |price move| ≥ this over 1–3 days = "materially moved".
+const OUTCOMES = {
+  MATERIAL_MOVE_PCT: 0.03,
+};
+
+// ─── Durable events (Engine Phase E1b) ───────────────────────
+// An event lives this long: duplicates within the window join it; after it, the event
+// (and its impacts) is pruned. Matches the impact/alert windows below.
+const EVENTS = {
+  WINDOW_DAYS: 7,
+};
+
 // ─── Materiality alerting (Phase 3.5, pulled forward from Phase 7) ─────
 // Replaces the crude per-article threshold/keyword engine. An alert fires on a
 // real EVENT (cluster), once per user, scored by how much it actually matters:
@@ -147,6 +205,59 @@ const MATERIALITY = {
   VOLUME_BOOST: 0.15,        // each extra source covering the event adds this (log-scaled)
   MIN_CONFIDENCE: 0.2,       // ignore near-zero-confidence classifications
   LOOKBACK_HOURS: 24,        // only score events from the last day for alerting
+};
+
+// ─── New-holding onboarding (Engine Phase E4) ────────────────
+// On add we (1) compute the holding's impact silently over events already stored
+// (no alert blast for history), (2) hand back a short, deterministic company brief
+// assembled from engine data — company reference + recent events + current sentiment —
+// shaped so E5 can later feed it to Claude for prose, and (3) stamp a monitoring-since
+// watermark so only post-add events can alert. No Claude call here (that's E5).
+const ONBOARDING = {
+  BRIEF_EVENTS: 5,        // recent events to surface in the brief
+  BRIEF_EVENT_DAYS: 7,    // how far back the brief's "recent context" looks
+  BRIEF_SMART_MONEY: 3,   // institutions / congress rows to include per side
+};
+
+// ─── The analyst voice — daily brief (Engine Phase E5) ───────
+// Claude (Haiku by default) writes a daily brief grounded ENTIRELY in the user's own
+// holdings, led by "what changed since yesterday" + the single most important event.
+// The engine builds the grounding packet (grounding.js) and computes the diff; Claude
+// only writes the prose. Non-negotiable cost guardrails (the user is firm about not
+// letting the Claude key run a bill): server-scheduled only (never an on-demand
+// loopable button), per-user daily quota checked BEFORE any call, hard token caps per
+// call, a global daily spend kill-switch, and every call logged with tokens + cost.
+// When CLAUDE_REPORTS is off or no ANTHROPIC_API_KEY is set, generation degrades to the
+// local Ollama writer, then to a deterministic template — both free, so a brief still
+// ships every day; Claude is the upgrade.
+const REPORTS = {
+  MODEL: 'claude-haiku-4-5',     // cheapest-viable; Sonnet/Opus reserved for major events later
+  CRON: '30 5 * * *',            // server-scheduled daily (05:30 server time); never user-triggered on demand
+  MAX_OUTPUT_TOKENS: 1800,       // hard per-call output cap
+  TOP_HOLDINGS: 12,              // trim the packet to the top-N holdings by exposure
+  TOP_EVENTS: 6,                 // and the top-N impact events
+  MAX_NEWS_CHARS: 280,           // clamp each untrusted headline/summary before prompting
+  PER_USER_DAILY_QUOTA: 1,       // Plus=1, Pro=2 (+1 manual) once tiers land; blocked before any call
+  GLOBAL_DAILY_USD_CEILING: 5,   // global kill-switch: stop calling Claude past this day's spend
+  // Haiku 4.5 pricing ($/1M tokens) for the cost estimate logged per call.
+  PRICE_PER_MTOK: { input: 1.0, output: 5.0 },
+};
+
+// ─── Ask it anything — portfolio Q&A (Engine Phase E6) ───────
+// Natural-language questions answered by Claude (Haiku), grounded STRICTLY on the engine's
+// own data for that user — no outside knowledge, every claim cites a number. Q&A is
+// inherently on-demand (the exact "loopable button" risk), so it carries a hard per-user
+// daily question cap checked BEFORE any call, shares REPORTS' global $/day kill-switch and
+// per-call cost logging (claude_calls.kind='qa'), and clamps the question + caps output.
+// Same FEATURES.CLAUDE_REPORTS flag gates it; with no key / flag off / over cap it degrades
+// to a deterministic grounded data summary (no NL reasoning, but it cites the numbers).
+const QA = {
+  MODEL: 'claude-haiku-4-5',
+  MAX_OUTPUT_TOKENS: 1000,
+  PER_USER_DAILY_QUESTIONS: 10,  // becomes Plus tier later (Free 0 / Pro ~30) with billing
+  MAX_QUESTION_CHARS: 500,       // clamp the (untrusted) question before prompting
+  TOP_EVENTS: 10,                // extended grounding: fuller impact feed than the daily brief
+  MAX_HOLDINGS: 30,              // all holdings up to this cap (not just top-N)
 };
 
 // ─── Ingestion sources (Phase 2b) ────────────────────────────
@@ -189,4 +300,4 @@ const SMART_MONEY = {
   WEBHOOK_MAX_FAILURES: 10,      // auto-disable a webhook after this many consecutive fails
 };
 
-module.exports = { DISCLAIMER, TIERS, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, NEWS_RELEVANCE, MATERIALITY, INGEST, SMART_MONEY };
+module.exports = { DISCLAIMER, TIERS, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, INGEST, SMART_MONEY };

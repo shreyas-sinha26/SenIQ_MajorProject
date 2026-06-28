@@ -5,9 +5,11 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node --watch server/index.js"
+    "dev": "node --watch server/index.js",
+    "test": "node test/entityResolver.test.js && node test/engine.test.js && node test/reports.test.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.106.0",
     "@huggingface/inference": "^4.13.19",
     "@sentry/node": "^8.55.0",
     "bcryptjs": "^2.4.3",
