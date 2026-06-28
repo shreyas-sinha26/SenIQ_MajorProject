@@ -1111,6 +1111,9 @@ function populateProfilePage(user) {
 // ─── Smart Money (Phase 3) ───────────────────────────────────
 let congressScope = 'mine';
 let cachedInstitutions = [];
+let cachedCongress = [];
+let instSearchQuery = '';
+let congressSearchQuery = '';
 let cachedFollows = new Set(); // `${type}:${ref}`
 let openInstSlug = null;
 
@@ -1170,7 +1173,15 @@ function renderInstitutions() {
     grid.innerHTML = '<div class="empty-state small"><p>No institutional filings ingested yet.</p></div>';
     return;
   }
-  grid.innerHTML = cachedInstitutions.map(i => {
+  const q = instSearchQuery.toLowerCase();
+  const shown = q
+    ? cachedInstitutions.filter(i => `${i.name || ''} ${i.manager || ''}`.toLowerCase().includes(q))
+    : cachedInstitutions;
+  if (shown.length === 0) {
+    grid.innerHTML = `<div class="empty-state small"><p>No fund matches “${escapeHtml(instSearchQuery)}”.</p></div>`;
+    return;
+  }
+  grid.innerHTML = shown.map(i => {
     const following = cachedFollows.has(followKey('institution', i.slug));
     const period = i.period_of_report ? `${fmtDate(i.period_of_report)}` : 'no filing yet';
     const filed = i.filed_at ? `filed ${fmtDate(i.filed_at)}` : '';
@@ -1244,15 +1255,24 @@ function renderInstitutionDetail(data) {
 async function loadCongress() {
   try {
     const { trades } = await api(`/api/smart-money/congress?scope=${congressScope}&limit=60`);
-    renderCongress(trades || []);
+    cachedCongress = trades || [];
+    renderCongress();
   } catch (err) { console.error('Congress load error:', err); }
 }
 
-function renderCongress(trades) {
+function renderCongress() {
   const list = document.getElementById('congress-list');
   if (!list) return;
-  if (trades.length === 0) {
+  if (cachedCongress.length === 0) {
     list.innerHTML = `<div class="empty-state small"><p>${congressScope === 'mine' ? 'No disclosures touching your holdings or followed politicians yet. Switch to "All" or follow someone.' : 'No congressional disclosures ingested yet.'}</p></div>`;
+    return;
+  }
+  const q = congressSearchQuery.toLowerCase();
+  const trades = q
+    ? cachedCongress.filter(t => `${t.politician || ''} ${t.ticker || ''} ${t.asset_description || ''}`.toLowerCase().includes(q))
+    : cachedCongress;
+  if (trades.length === 0) {
+    list.innerHTML = `<div class="empty-state small"><p>No disclosures match “${escapeHtml(congressSearchQuery)}”.</p></div>`;
     return;
   }
   list.innerHTML = trades.map(t => {
@@ -1407,6 +1427,31 @@ function initSmartMoney() {
   if (whBtn) whBtn.addEventListener('click', addWebhook);
   const wh = document.getElementById('sm-webhooks');
   if (wh) wh.addEventListener('toggle', () => { if (wh.open) loadWebhooks(); });
+
+  // Client-side search filters (no refetch — filters the already-loaded list).
+  wireSmartMoneySearch('inst-search', 'inst-search-clear', (v) => { instSearchQuery = v; renderInstitutions(); });
+  wireSmartMoneySearch('congress-search', 'congress-search-clear', (v) => { congressSearchQuery = v; renderCongress(); });
+}
+
+// Wire a search input + its clear button to a setter, debounced.
+function wireSmartMoneySearch(inputId, clearId, apply) {
+  const input = document.getElementById(inputId);
+  const clear = document.getElementById(clearId);
+  if (!input) return;
+  let timer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const v = input.value.trim();
+      if (clear) clear.classList.toggle('hidden', !v);
+      apply(v);
+    }, 150);
+  });
+  if (clear) clear.addEventListener('click', () => {
+    input.value = '';
+    clear.classList.add('hidden');
+    apply('');
+  });
 }
 
 // ─── Utilities ───────────────────────────────────────────────
