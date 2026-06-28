@@ -56,19 +56,30 @@ const pick = (row, ...keys) => {
 };
 
 // Map one source row (any of the supported shapes) → our normalized trade.
+// Supported shapes: our bundled sample, the stock-watcher House/Senate fields, and
+// Financial Modeling Prep (firstName/lastName, symbol, assetDescription, dateRecieved).
 function normalizeRow(row, { isSample }) {
-  const politician = pick(row, 'politician', 'representative', 'senator', 'name');
+  let politician = pick(row, 'politician', 'representative', 'senator', 'name');
+  if (!politician) {
+    // FMP splits the name — recombine it.
+    const fn = pick(row, 'firstName', 'first_name');
+    const ln = pick(row, 'lastName', 'last_name');
+    if (fn || ln) politician = [fn, ln].filter(Boolean).join(' ');
+  }
   if (!politician) return null;
 
-  const chamberRaw = pick(row, 'chamber') || (row.senator ? 'senate' : row.representative ? 'house' : null);
+  // chamber: explicit field (stock-watcher `chamber`, or stamped from the source URL for
+  // FMP, whose rows carry no chamber), else the stock-watcher senator/representative keys.
+  const chamberRaw = pick(row, 'chamber')
+    || (row.senator ? 'senate' : row.representative ? 'house' : null);
   const chamber = chamberRaw ? String(chamberRaw).toLowerCase() : 'house';
-  const ticker = (pick(row, 'ticker') || '').toString().trim().toUpperCase().replace(/[^A-Z.\-]/g, '') || null;
+  const ticker = (pick(row, 'ticker', 'symbol') || '').toString().trim().toUpperCase().replace(/[^A-Z.\-]/g, '') || null;
   const transaction_date = normDate(pick(row, 'transaction_date', 'transactionDate'));
-  const disclosure_date = normDate(pick(row, 'disclosure_date', 'disclosureDate', 'disclosure_year'));
+  const disclosure_date = normDate(pick(row, 'disclosure_date', 'disclosureDate', 'dateRecieved', 'disclosure_year'));
   const amountRaw = pick(row, 'amount', 'amount_range', 'value');
   const { min, max } = parseAmount(amountRaw);
   const transaction_type = normType(pick(row, 'type', 'transaction_type'));
-  const asset_description = (pick(row, 'asset_description', 'asset', 'description') || '').toString().slice(0, 300);
+  const asset_description = (pick(row, 'asset_description', 'asset', 'description', 'assetDescription') || '').toString().slice(0, 300);
 
   const source_id = hashId('cong', politician, ticker || asset_description, transaction_date || '', transaction_type, String(amountRaw || ''));
 
@@ -107,19 +118,33 @@ async function fetchCongressTrades() {
   let rows = null;
   let isSample = false;
 
-  if (SMART_MONEY.CONGRESS_TRADES_URL) {
-    try {
-      const res = await fetchWithTimeout(
-        SMART_MONEY.CONGRESS_TRADES_URL,
-        { headers: { 'User-Agent': SMART_MONEY.SEC_USER_AGENT, Accept: 'application/json' } },
-        12000
-      );
-      if (!res.ok) throw new Error(`congress source ${res.status}`);
-      const data = await res.json();
-      rows = Array.isArray(data) ? data : data.trades || data.transactions || [];
-    } catch (err) {
-      console.warn(`   ⚠️  congress live source failed (${err.message}); using bundled sample.`);
+  // CONGRESS_TRADES_URL may be a single URL or a comma-separated list (e.g. an FMP
+  // Senate endpoint + a House endpoint) — each is fetched independently so one chamber
+  // failing doesn't lose the other.
+  const urls = (SMART_MONEY.CONGRESS_TRADES_URL || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+  if (urls.length) {
+    rows = [];
+    for (const url of urls) {
+      try {
+        const res = await fetchWithTimeout(
+          url,
+          { headers: { 'User-Agent': SMART_MONEY.SEC_USER_AGENT, Accept: 'application/json' } },
+          12000
+        );
+        if (!res.ok) throw new Error(`congress source ${res.status}`);
+        const data = await res.json();
+        const part = Array.isArray(data) ? data : data.trades || data.transactions || [];
+        // FMP rows carry no chamber field — stamp it from the endpoint URL so House and
+        // Senate rows are labelled correctly (skipped if the row already states a chamber).
+        const ch = /house/i.test(url) ? 'house' : /senate/i.test(url) ? 'senate' : null;
+        if (ch) for (const r of part) { if (r && r.chamber == null) r.chamber = ch; }
+        rows.push(...part);
+      } catch (err) {
+        console.warn(`   ⚠️  congress source failed (${err.message}); skipping that endpoint.`);
+      }
     }
+    if (rows.length === 0) rows = null; // all endpoints failed → fall back to sample below
   } else if (!warnedNoSource) {
     warnedNoSource = true;
     console.warn('   ⚠️  CONGRESS_TRADES_URL not set — using bundled sample congress data.');
