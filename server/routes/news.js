@@ -26,65 +26,57 @@ router.get('/feed', async (req, res) => {
     const holdings = await query('SELECT ticker FROM portfolio WHERE user_id = $1', [req.user.id]);
     const tickers = holdings.map(h => h.ticker);
 
-    // One representative article per cluster (latest in the cluster) + a source count.
-    const reps = await query(
-      `WITH relevant AS (
-         SELECT a.id, a.title, a.source, a.url, a.published_at, a.platform,
-                a.cluster_key, a.relevance_tier, a.importance,
-                count(*) OVER (PARTITION BY a.cluster_key) AS source_count
-           FROM articles a
-          WHERE a.is_relevant = true
-            AND a.relevance_tier <> 'none'
-            AND a.published_at > now() - ($1 || ' hours')::interval
-       )
-       SELECT DISTINCT ON (cluster_key) *
-         FROM relevant
-        ORDER BY cluster_key, published_at DESC`,
+    // One row per durable event (E1b), with its source count.
+    const evs = await query(
+      `SELECT id, title, source, url, last_seen AS published_at, relevance_tier, importance, source_count
+         FROM events
+        WHERE relevance_tier <> 'none'
+          AND last_seen > now() - ($1 || ' hours')::interval`,
       [String(FEED_WINDOW_HOURS)]
     );
-    if (reps.length === 0) {
+    if (evs.length === 0) {
       return res.json({ articles: [], buckets: { holdings: [], market: [], world: [] } });
     }
 
-    const ids = reps.map(r => r.id);
-    // Per-article ticker sentiments (for matched tickers + a representative score).
+    const ids = evs.map(e => e.id);
+    // Per-event matched tickers + a representative sentiment (via attached articles).
     const sents = await query(
-      `SELECT article_id, ticker, sentiment_label, sentiment_score
-         FROM article_sentiments WHERE article_id = ANY($1)`,
+      `SELECT a.event_id, s.ticker, s.sentiment_label, s.sentiment_score
+         FROM articles a JOIN article_sentiments s ON s.article_id = a.id
+        WHERE a.event_id = ANY($1)`,
       [ids]
     );
-    const sentByArticle = {};
-    for (const s of sents) (sentByArticle[s.article_id] ||= []).push(s);
+    const sentByEvent = {};
+    for (const s of sents) (sentByEvent[s.event_id] ||= []).push(s);
 
     // This user's exposure-weighted impact, to rank the holdings bucket.
     const impacts = await query(
-      `SELECT article_id, impact_score FROM event_portfolio_impact
-        WHERE user_id = $1 AND article_id = ANY($2)`,
+      `SELECT event_id, impact_score FROM event_portfolio_impact
+        WHERE user_id = $1 AND event_id = ANY($2)`,
       [req.user.id, ids]
     );
-    const impactByArticle = {};
-    for (const i of impacts) impactByArticle[i.article_id] = Number(i.impact_score);
+    const impactByEvent = {};
+    for (const i of impacts) impactByEvent[i.event_id] = Number(i.impact_score);
 
     const heldSet = new Set(tickers);
-    const shape = (r) => {
-      const rows = sentByArticle[r.id] || [];
-      const matched = rows.map(s => s.ticker).filter(t => t !== '__MARKET__');
+    const shape = (e) => {
+      const rows = sentByEvent[e.id] || [];
+      const matched = [...new Set(rows.map(s => s.ticker).filter(t => t !== '__MARKET__'))];
       const heldMatch = matched.filter(t => heldSet.has(t));
       // Representative sentiment: a held ticker's score if any, else the first row.
       const pick = rows.find(s => heldSet.has(s.ticker)) || rows[0];
       return {
-        id: r.id,
-        title: r.title,
-        source: r.source,
-        url: r.url,
-        published_at: r.published_at,
-        platform: r.platform,
-        tier: r.relevance_tier,
-        importance: Number(r.importance),
-        source_count: Number(r.source_count),
+        id: e.id,
+        title: e.title,
+        source: e.source,
+        url: e.url,
+        published_at: e.published_at,
+        tier: e.relevance_tier,
+        importance: Number(e.importance),
+        source_count: Number(e.source_count),
         matchedTickers: matched,
         heldTickers: heldMatch,
-        impact: impactByArticle[r.id] ?? null,
+        impact: impactByEvent[e.id] ?? null,
         sentiment: {
           label: pick ? pick.sentiment_label : 'neutral',
           score: pick ? Number(pick.sentiment_score) : 0.5,
@@ -92,7 +84,7 @@ router.get('/feed', async (req, res) => {
       };
     };
 
-    const shaped = reps.map(shape);
+    const shaped = evs.map(shape);
 
     const byImpactThenTime = (a, b) =>
       (b.impact ?? -1) - (a.impact ?? -1) || new Date(b.published_at) - new Date(a.published_at);
@@ -199,9 +191,9 @@ router.get('/impact', async (req, res) => {
 router.get('/alerts', async (req, res) => {
   try {
     const alerts = await query(
-      `SELECT al.*, ar.url AS article_url
+      `SELECT al.*, e.url AS article_url
          FROM alerts al
-         LEFT JOIN articles ar ON ar.id = al.article_id
+         LEFT JOIN events e ON e.id = al.event_id
         WHERE al.user_id = $1
         ORDER BY al.created_at DESC LIMIT 50`,
       [req.user.id]
@@ -232,6 +224,18 @@ router.put('/alerts/:id/read', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('Mark alert read error:', err);
+    res.status(500).json({ error: 'Failed to update alert' });
+  }
+});
+
+// ─── PUT /api/news/alerts/:id/dismiss ────────────────────────
+// Negative engagement signal (E3 outcome logging) — distinct from "read".
+router.put('/alerts/:id/dismiss', async (req, res) => {
+  try {
+    await execute('UPDATE alerts SET dismissed = true WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Dismiss alert error:', err);
     res.status(500).json({ error: 'Failed to update alert' });
   }
 });

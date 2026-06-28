@@ -4,11 +4,13 @@ const cors = require('cors');
 const path = require('path');
 
 const { runMigrations } = require('./db');
+const { seedUniverse } = require('./services/entityResolver');
 const { DISCLAIMER } = require('./config');
 const { router: authRouter } = require('./routes/auth');
 const portfolioRouter = require('./routes/portfolio');
 const newsRouter = require('./routes/news');
 const smartMoneyRouter = require('./routes/smartMoney');
+const reportsRouter = require('./routes/reports');
 const { startScheduler } = require('./scheduler');
 const { initSentry, sentryErrorHandler } = require('./observability');
 
@@ -58,6 +60,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/portfolio', portfolioRouter);
 app.use('/api/news', newsRouter);
 app.use('/api/smart-money', smartMoneyRouter);
+app.use('/api/reports', reportsRouter);
 
 // ─── Health Check ───────────────────────────────────────────
 app.get('/api/health', (req, res) => {
@@ -92,6 +95,7 @@ app.use((err, req, res, _next) => {
 // ─── Start Server ───────────────────────────────────────────
 async function start() {
   await runMigrations();
+  await seedUniverse();
   app.listen(PORT, () => {
     console.log(`
   ╔══════════════════════════════════════════════════╗

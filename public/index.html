@@ -510,6 +510,37 @@
 
       <!-- ═══ PAGE: AI Workspace ═══ -->
       <div id="page-ai" class="page hidden">
+        <!-- Daily Brief (E5 — the analyst voice) -->
+        <section class="brief-section animate-in" style="--delay: 1" id="brief-section">
+          <div class="section-header">
+            <h2>Your Daily Brief</h2>
+            <button class="btn btn-ghost btn-sm" id="brief-refresh" title="Regenerate today's brief">↻ Refresh</button>
+          </div>
+          <div class="daily-brief glass" id="daily-brief">
+            <div class="empty-state"><p>Your personalized brief appears here once your holdings have recent context.</p></div>
+          </div>
+        </section>
+
+        <!-- Ask it anything (E6) -->
+        <section class="ask-section animate-in" style="--delay: 2" id="ask-section">
+          <div class="section-header">
+            <h2>Ask About Your Portfolio</h2>
+            <span class="ask-quota" id="ask-quota"></span>
+          </div>
+          <div class="ask-box glass">
+            <div class="ask-input-row">
+              <input type="text" id="ask-input" placeholder="e.g. What's my biggest risk right now?" autocomplete="off" maxlength="500">
+              <button class="btn btn-primary" id="ask-btn">Ask</button>
+            </div>
+            <div class="ask-examples">
+              <button class="ask-chip" data-q="Why is my portfolio down?">Why is my portfolio down?</button>
+              <button class="ask-chip" data-q="What's my biggest risk right now?">What's my biggest risk?</button>
+              <button class="ask-chip" data-q="Which of my holdings are improving?">Which holdings are improving?</button>
+            </div>
+            <div class="ask-answer hidden" id="ask-answer"></div>
+          </div>
+        </section>
+
         <section class="analyzer-section glass">
           <div class="section-header">
             <h2>Sentiment Analyzer</h2>
@@ -673,6 +704,22 @@
         <div class="modal-footer">
           <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
           <button class="btn btn-primary" id="modal-add">Add to Portfolio</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Company Brief (E4 onboarding) -->
+    <div class="modal-overlay hidden" id="brief-modal">
+      <div class="modal glass brief-modal">
+        <div class="modal-header">
+          <h3 id="brief-title">Company Brief</h3>
+          <button class="btn btn-ghost modal-close" id="brief-close">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body" id="brief-body"></div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" id="brief-done">Got it</button>
         </div>
       </div>
     </div>

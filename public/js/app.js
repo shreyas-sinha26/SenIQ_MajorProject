@@ -212,7 +212,7 @@ async function showDashboard() {
   }
 
   // Load all data
-  await Promise.all([loadPortfolio(), loadNewsFeed(), loadAlerts(), loadPortfolioSentiment(), loadImpactFeed(), loadSmartMoney()]);
+  await Promise.all([loadPortfolio(), loadNewsFeed(), loadAlerts(), loadPortfolioSentiment(), loadImpactFeed(), loadDailyBrief(), loadSmartMoney()]);
 
   // Auto-refresh every 60s
   if (refreshInterval) clearInterval(refreshInterval);
@@ -269,7 +269,10 @@ function renderHoldings() {
       <td><span class="ht-senti-label neutral" id="senti-label-${h.ticker}">—</span></td>
       <td><span class="ht-score neutral" id="score-${h.ticker}">—</span></td>
       <td><span class="ht-headline" id="headline-${h.ticker}">—</span></td>
-      <td><button class="ht-remove" onclick="event.stopPropagation(); removeStock('${h.ticker}')" title="Remove">×</button></td>
+      <td class="ht-actions">
+        <button class="ht-info" onclick="event.stopPropagation(); openBriefFor('${h.ticker}')" title="Company brief">ℹ</button>
+        <button class="ht-remove" onclick="event.stopPropagation(); removeStock('${h.ticker}')" title="Remove">×</button>
+      </td>
     </tr>
   `}).join('');
 }
@@ -442,6 +445,8 @@ async function addStock(ticker, opts = {}) {
     const h = holdings.find(h => h.ticker === ticker);
     if (h && res.holding) { h.company_name = res.holding.company_name; h.asset_class = res.holding.asset_class; }
     renderHoldings();
+    // E4 onboarding: pop the company brief returned on add (best-effort).
+    if (res.brief) showBrief(res.brief);
     // Refresh sentiment & news in parallel (non-blocking)
     loadPortfolioSentiment();
     loadNewsFeed();
@@ -1340,6 +1345,7 @@ function switchToPage(page) {
   document.querySelectorAll('.main-tab').forEach(t => t.classList.toggle('active', t.dataset.page === page));
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('hidden', p.id !== `page-${page}`));
   if (page === 'analytics') updateSentimentChart(activeFilter && cachedSentiments[activeFilter] ? { [activeFilter]: cachedSentiments[activeFilter] } : cachedSentiments);
+  if (page === 'ai') loadDailyBrief();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1421,6 +1427,191 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// ─── Company Brief (E4 onboarding) ───────────────────────────
+const BRIEF_TYPE_LABEL = {
+  ma: 'M&A', legal: 'Legal', disruption: 'Disruption', executive: 'Exec change',
+  earnings: 'Earnings', guidance: 'Guidance', rating: 'Analyst', insider: 'Insider',
+  product: 'Product', macro: 'Macro', other: 'News', unknown: 'News',
+};
+
+function briefScoreClass(score) {
+  if (score == null) return 'neutral';
+  return score > 0.55 ? 'positive' : score < 0.45 ? 'negative' : 'neutral';
+}
+
+function renderBrief(b) {
+  const c = b.company || {};
+  const meta = [c.sector, c.exchange, c.country].filter(Boolean).join(' · ');
+  const execs = (c.executives || []).map(e => `${escapeHtml(e.name)}${e.role ? ` (${escapeHtml(e.role)})` : ''}`).join(', ');
+
+  const s = b.sentiment;
+  const TT = {
+    sentiment: 'Overall current mood from recent news — positive, neutral, or negative.',
+    acute: 'Headline sentiment right now (0–1), from the last 24–72h and weighted toward fresher, more credible sources. Above 0.5 leans positive, below 0.5 negative.',
+    momentum: 'Which way sentiment is trending — recent 7 days vs the prior week. Improving, declining, or flat.',
+    z: "How unusual today's sentiment is versus this asset's own 90-day normal. Around ±2 is a real surprise; near 0 is business-as-usual. Shows n/a until ~5 data points build up.",
+  };
+  const sentimentBlock = s ? `
+    <div class="brief-stats">
+      <div class="brief-stat" data-tip="${escapeHtml(TT.sentiment)}" aria-label="${escapeHtml(TT.sentiment)}"><span class="brief-stat-label">Sentiment</span><span class="brief-stat-val ${briefScoreClass(s.acute)}">${escapeHtml(s.label)}</span></div>
+      <div class="brief-stat" data-tip="${escapeHtml(TT.acute)}" aria-label="${escapeHtml(TT.acute)}"><span class="brief-stat-label">Acute</span><span class="brief-stat-val">${s.acute ?? '—'}</span></div>
+      <div class="brief-stat" data-tip="${escapeHtml(TT.momentum)}" aria-label="${escapeHtml(TT.momentum)}"><span class="brief-stat-label">Momentum</span><span class="brief-stat-val">${escapeHtml(s.momentum || 'flat')}</span></div>
+      <div class="brief-stat" data-tip="${escapeHtml(TT.z)}" aria-label="${escapeHtml(TT.z)}"><span class="brief-stat-label">90d z-score</span><span class="brief-stat-val">${s.baseline_z != null ? s.baseline_z : 'n/a'}</span></div>
+    </div>` : `<p class="brief-empty">No sentiment history yet — it fills in as news accumulates.</p>`;
+
+  const impactBlock = b.impact ? `
+    <div class="brief-impact">
+      <span class="impact-dir ${b.impact.direction}">${DIR_ICON[b.impact.direction] || ''}</span>
+      <span class="brief-impact-text">Top impact: <strong>${escapeHtml(b.impact.top_event)}</strong></span>
+      <span class="brief-impact-exp">${b.impact.exposure_pct}% exposure</span>
+    </div>` : '';
+
+  const events = (b.recent_events || []);
+  const eventsBlock = events.length ? `
+    <ul class="brief-events">
+      ${events.map(e => `
+        <li class="brief-event">
+          <span class="brief-event-type">${escapeHtml(BRIEF_TYPE_LABEL[e.type] || 'News')}</span>
+          <span class="brief-event-title">${escapeHtml(e.title)}</span>
+          <span class="brief-event-meta">${e.source_count > 1 ? `${e.source_count} sources · ` : ''}${e.last_seen ? timeAgo(new Date(e.last_seen)) : ''}</span>
+        </li>`).join('')}
+    </ul>` : `<p class="brief-empty">No recent events for this holding yet.</p>`;
+
+  const sm = b.smart_money || { institutions: [], congress: [] };
+  const smBits = [];
+  if (sm.institutions && sm.institutions.length) smBits.push(`${sm.institutions.length} fund${sm.institutions.length > 1 ? 's' : ''} hold it (${escapeHtml(sm.institutions[0].name)}…)`);
+  if (sm.congress && sm.congress.length) smBits.push(`${sm.congress.length} recent congress trade${sm.congress.length > 1 ? 's' : ''}`);
+  const smBlock = smBits.length ? `<p class="brief-smartmoney">🏛️ ${smBits.join(' · ')}</p>` : '';
+
+  return `
+    <div class="brief-head">
+      <div class="brief-name">${escapeHtml(c.name || b.ticker)} <span class="brief-ticker">${escapeHtml(b.ticker)}</span></div>
+      ${meta ? `<div class="brief-meta">${escapeHtml(meta)}</div>` : ''}
+      ${!b.in_universe ? `<div class="brief-meta brief-muted">Outside the curated universe — basic coverage only.</div>` : ''}
+      ${execs ? `<div class="brief-execs">Key people: ${execs}</div>` : ''}
+    </div>
+    ${sentimentBlock}
+    ${impactBlock}
+    <h4 class="brief-section-title">Recent context</h4>
+    ${eventsBlock}
+    ${smBlock}
+    <p class="brief-note">${escapeHtml(b.note || '')}</p>`;
+}
+
+function showBrief(brief) {
+  document.getElementById('brief-title').textContent = `${brief.ticker} — Company Brief`;
+  document.getElementById('brief-body').innerHTML = renderBrief(brief);
+  document.getElementById('brief-modal').classList.remove('hidden');
+}
+
+async function openBriefFor(ticker) {
+  try {
+    const { brief } = await api(`/api/portfolio/${ticker}/brief`);
+    showBrief(brief);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function initBriefModal() {
+  const modal = document.getElementById('brief-modal');
+  if (!modal) return;
+  const close = () => modal.classList.add('hidden');
+  document.getElementById('brief-close')?.addEventListener('click', close);
+  document.getElementById('brief-done')?.addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+}
+
+// ─── Daily Brief (E5 — the analyst voice) ────────────────────
+async function loadDailyBrief() {
+  try {
+    const data = await api('/api/reports/daily');
+    renderDailyBrief(data.brief);
+  } catch (err) {
+    console.error('Daily brief error:', err);
+  }
+}
+
+const WRITER_LABEL = { claude: 'Written by Claude', ollama: 'Local model', deterministic: 'Auto-generated' };
+
+function renderDailyBrief(brief) {
+  const el = document.getElementById('daily-brief');
+  if (!el) return;
+  if (!brief || !brief.narrative) {
+    el.innerHTML = '<div class="empty-state"><p>Your personalized brief appears here once your holdings have recent context.</p></div>';
+    return;
+  }
+  const ch = (brief.packet && brief.packet.changed) || {};
+  const chips = [];
+  if (ch.has_prior) {
+    if (ch.new_events && ch.new_events.length) chips.push(`<span class="brief-chip new">${ch.new_events.length} new since yesterday</span>`);
+    if (ch.sentiment_swings && ch.sentiment_swings.length) chips.push(`<span class="brief-chip swing">${ch.sentiment_swings.length} sentiment shift${ch.sentiment_swings.length > 1 ? 's' : ''}</span>`);
+    if (ch.rank_changes && ch.rank_changes.length) chips.push(`<span class="brief-chip rank">${ch.rank_changes.length} rank change${ch.rank_changes.length > 1 ? 's' : ''}</span>`);
+    if (!chips.length) chips.push('<span class="brief-chip quiet">Little changed since yesterday</span>');
+  } else {
+    chips.push('<span class="brief-chip quiet">First brief</span>');
+  }
+  const dateStr = brief.brief_date ? new Date(brief.brief_date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+  el.innerHTML = `
+    <div class="brief-top">
+      <span class="brief-date">${escapeHtml(dateStr)}</span>
+      <span class="brief-writer" title="${escapeHtml(brief.model || '')}">${WRITER_LABEL[brief.writer] || 'Brief'}</span>
+    </div>
+    <div class="brief-headline">${escapeHtml(brief.headline || '')}</div>
+    <div class="brief-changes">${chips.join('')}</div>
+    <p class="brief-narrative">${escapeHtml(brief.narrative)}</p>`;
+}
+
+async function refreshDailyBrief() {
+  const btn = document.getElementById('brief-refresh');
+  if (btn) { btn.disabled = true; btn.textContent = '↻ …'; }
+  try {
+    const data = await api('/api/reports/daily/generate', { method: 'POST' });
+    renderDailyBrief(data.brief);
+    showToast('Brief refreshed', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+  }
+}
+
+// ─── Ask it anything (E6) ────────────────────────────────────
+async function askPortfolio(question) {
+  const input = document.getElementById('ask-input');
+  const answerEl = document.getElementById('ask-answer');
+  const btn = document.getElementById('ask-btn');
+  const q = (question || input.value || '').trim();
+  if (!q) return showToast('Type a question first', 'error');
+  input.value = q;
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  answerEl.classList.remove('hidden');
+  answerEl.innerHTML = '<div class="ask-thinking">Thinking…</div>';
+  try {
+    const data = await api('/api/reports/ask', { method: 'POST', body: JSON.stringify({ question: q }) });
+    const writerTag = data.writer === 'claude' ? 'AI answer' : 'Auto-generated from your data';
+    answerEl.innerHTML = `
+      <div class="ask-answer-text">${escapeHtml(data.answer)}</div>
+      <div class="ask-answer-meta"><span class="ask-writer">${writerTag}</span><span class="ask-disclaimer">Informational only — not advice.</span></div>`;
+    renderAskQuota(data.quota);
+  } catch (err) {
+    answerEl.innerHTML = `<div class="ask-answer-text">${escapeHtml(err.message)}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Ask'; }
+  }
+}
+
+function renderAskQuota(quota) {
+  const el = document.getElementById('ask-quota');
+  if (el && quota) el.textContent = `${quota.remaining}/${quota.limit} questions left today`;
+}
+
+function initAsk() {
+  document.getElementById('ask-btn')?.addEventListener('click', () => askPortfolio());
+  document.getElementById('ask-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') askPortfolio(); });
+  document.querySelectorAll('.ask-chip').forEach((c) => c.addEventListener('click', () => askPortfolio(c.dataset.q)));
+}
+
 // ─── Init ────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   initAuth();
@@ -1430,6 +1621,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   initMainTabs();
   initIntelTabs();
   initSmartMoney();
+  initAsk();
+  initBriefModal();
+  document.getElementById('brief-refresh')?.addEventListener('click', refreshDailyBrief);
 
   // Filter clear button
   document.getElementById('clear-filter-btn').addEventListener('click', clearFilter);

@@ -1,4 +1,4 @@
-# Handoff — SenIQ (Phase 3 + 3.5 complete)
+# Handoff — SenIQ (Phases 0–3.5 + Engine E1–E3 complete)
 
 ## Goal
 Turn the existing `ai-portfolio-copilot` app into **SenIQ**, a sentiment-driven market
@@ -292,7 +292,7 @@ holder), no console errors.
 
 ## Roadmap (2026-06-20) — re-sequenced, see SenIQ_Roadmap.pdf
 A full roadmap PDF now lives at `SenIQ_Roadmap.pdf` (regenerate with
-`python scripts/build_roadmap_pdf.py` on Windows; `python3 …` on macOS/Linux). It **supersedes the phase ordering in PLAN.md** because two
+`python3 scripts/build_roadmap_pdf.py`). It **supersedes the phase ordering in PLAN.md** because two
 launch blockers — **OAuth** and **Stripe/Razorpay billing** — both need a public domain over HTTPS
 (OAuth callbacks + payment webhooks). So cloud deployment is pulled to the front:
 
@@ -313,7 +313,261 @@ launch blockers — **OAuth** and **Stripe/Razorpay billing** — both need a pu
 Sequencing: **4 → (5, 6 in parallel) → 7 → 8 → 9.** Cross-cutting: email provider (Resend/SES),
 monitoring/backups, Terms+Privacy before billing, live-congress data source still open.
 
-## Next step
+## Engine track (owned solo) — see ENGINE_PLAN.md
+The user owns the **intelligence engine + alerts + reporting** and wants it perfect. Locked plan in
+`ENGINE_PLAN.md` (6 phases E1–E6 + a live-refinement testing approach + v2 scope). Key decisions made
+in discussion: **Events become first-class** (the keystone); knowledge "graph" right-sized to a
+**curated company reference table** (name/aliases/ticker/**sector**/key execs), capped to ~US 100 /
+India 50 / crypto 25, graceful fallback for holdings outside it; **outcome logging from day one →
+supervised tuning later, NO reinforcement learning**; testing = offline logic fixtures + live canary
+portfolios (labels arrive on their own from price-moves + open/dismiss), tune via config, replay over
+stored data. v2 = learned relevance model, opportunity radar, deeper graph (suppliers/competitors),
+universe expansion, X/transcripts.
+
+**E1a — Company reference + entity resolution — DONE (2026-06-23), verified.**
+- Migration `0006_company_reference.sql` (NEW): `companies` (ticker, name, aliases[], sector,
+  asset_class, exchange, country) + `executives` (full_name, ticker, role).
+- `server/data/universe.js` (NEW): curated seed — **129 entities** (54 US large-caps, 50 Nifty, 25
+  crypto) with sectors + 17 key executives. Expandable toward the caps.
+- `server/services/entityResolver.js` (NEW): pure `buildResolver(companies, executives)` +
+  DB-backed cached `resolve()` + idempotent `seedUniverse()` (runs on boot in `index.js` after
+  migrations). Resolves company names/aliases/UPPERCASE-symbols + **executive→ticker** (key-person w/o
+  ticker) + **sector themes** ("IT sector"→Information Technology). Matching rules chosen to kill false
+  positives: single-token names match **whole-word** (so "TRON" ≠ "sTRONg"/"elecTRONics"); symbols match
+  **uppercase whole-word only** (so "SOL" surges matches, "sole" doesn't); ambiguous common-word names
+  (e.g. "visa") only when **Capitalized** (so "US visa limits" ≠ Visa Inc).
+- `scheduler.js`: replaced `matchTickers` with the resolver (passes held holdings as fallback for
+  non-universe tickers); `__MARKET__` now derived from the relevance tier (market/world/macro) instead
+  of keyword matching. `tickerMatcher.js` still used only by `routes/news.js /analyze` (switch later).
+- **Tests:** `test/entityResolver.test.js` + `npm test` — **16 checks pass** (incl. the TRON & visa
+  regressions). **Bugs found+fixed during build:** (1) "Bitcoin"→COIN (old matcher) — fixed; (2)
+  "TRON" substring-matching inside "strong"/"electronics" — fixed via whole-word single tokens; (3)
+  travel "visa"→Visa Inc — fixed via capitalized-only ambiguous match.
+- **Verified on Postgres:** boot seeds 129 companies/17 execs; pipeline resolves cleanly
+  ("Nifty IT slips: TCS, Infosys, Wipro" → all three; HDFC Life → HDFCLIFE+HDFCBANK; Jio → RELIANCE;
+  non-universe gold holding → XAU via fallback); dedup holds (2nd run = 0 new, 0 alerts).
+
+**E1b — Persistent events — DONE (2026-06-23), verified.** The keystone: a story is now a durable
+remembered thing, not a per-batch cluster.
+- Migration `0007_events.sql` (NEW): `events` table (id, cluster_key UNIQUE, title/url/source,
+  relevance_tier, **event_type** default 'unknown' (E2 fills), importance, primary_ticker, source_count,
+  first_seen/last_seen). `articles.event_id` FK. **Re-keyed `event_portfolio_impact` from article_id →
+  event_id** (dropped old col/constraint, added UNIQUE(user_id,event_id); old rows cleared — recompute
+  repopulates). Added `alerts.event_id`.
+- `server/services/events.js` (NEW): `upsertEvents()` — set-based, runs every pipeline pass after
+  article persist. (1) upserts one event per cluster_key from recent relevant articles (representative
+  = highest-importance/newest; source_count/first/last_seen aggregated; first_seen kept as earliest,
+  last_seen as latest), (2) sets primary_ticker = most-mentioned non-macro ticker, (3) attaches
+  articles via event_id, (4) prunes events older than `EVENTS.WINDOW_DAYS` (7) — cascades impacts.
+- `config.js`: new `EVENTS.WINDOW_DAYS = 7`.
+- `scheduler.js`: calls `upsertEvents()` between article-persist and alerts/impact.
+- `impactScoring.js`: `loadRecentEvents()` now groups **durable events** (join events→articles→
+  article_sentiments, avg score per ticker, isMacro from tier/platform); upserts on event_id; pruning
+  is automatic via FK cascade. `getImpactFeed` joins `events`.
+- `materiality.js`: `loadRecentClusters()` loads events; alerts dedupe by **(user_id, event_id)**;
+  insert writes event_id (no more cluster_key/article_id on the alert).
+- `routes/news.js` `/feed`: reads one row per **event**, attaches tickers/sentiment via `event_id`,
+  impact via event_id → same 3 buckets.
+- **Verified on Postgres:** 0007 applied; pipeline built **103 durable events** (71 holding/30 market/
+  2 world), 103 articles attached; impact = 153 rows across 27 events/7 users keyed on event_id;
+  run-2 dedup = 0 new/0 alerts; HTTP `/api/news/feed` for a fresh RELIANCE/TCS/BTC user returned the 3
+  buckets with stable event ids (holdings: TCS/Jio events). `npm test` still 16/16.
+- **Note (for E3):** run-1 fired ~77 alerts (~11 events × 7 users) — too many *per user*; that's the
+  per-user volume **E3 alert budgets** will cap (thresholds in `config.MATERIALITY` are also tunable).
+  Today's RSS had no duplicate headlines so every event is source_count=1 (clustering proven earlier).
+
+**E2 — Event typing + 6-factor impact — DONE (2026-06-24), verified.**
+- Migration `0008_event_typing.sql` (NEW): `articles.sectors TEXT[]` + `events.sectors TEXT[]` (event_type
+  already on events from 0007); index on event_type.
+- `server/services/eventTyping.js` (NEW): pure `classifyEventType(title, summary, tier)` → one of
+  ma/legal/disruption/executive/earnings/guidance/rating/insider/product/macro/other (ordered rules,
+  highest-severity first). `severityFor(type)` reads `config.EVENT_TYPES.SEVERITY`.
+- `config.js`: `EVENT_TYPES.SEVERITY` (ma 1.0 … rating 0.4 … other 0.3) + `IMPACT` factor knobs
+  (SECTOR_RELEVANCE 0.4, NOVELTY_BASE/GAIN, CONFIDENCE_FLOOR, RECENCY_FLOOR; MACRO_BROAD_FACTOR reused
+  as macro relevance).
+- `events.js upsertEvents()`: added step 4 (aggregate article sectors → `events.sectors`) + step 5
+  (type each recent event from its representative title).
+- `impactScoring.js`: **rewrote impact to the 6-factor model** —
+  `impact(holding) = exposure × relevance × severity × novelty × confidence × recency`, where
+  relevance = 1.0 direct / SECTOR_RELEVANCE sector-match / MACRO_BROAD_FACTOR macro; severity =
+  type-weight × |score-0.5|×2; novelty from z-surprise; recency = decay on last_seen. Each holding
+  scored by its strongest link (direct > sector > macro), no double-count. `recomputeImpacts` now passes
+  holdings enriched with **sector** (ticker→sector from companies) so sector-wide events touch sector
+  holdings. **db/portfolioService lazy-required** so the pure `impactForEvent` is testable without a DB.
+- **Tests:** `test/engine.test.js` (NEW) — 10 typing + 6 impact checks; `npm test` now runs both suites
+  = **32 checks pass**. Bug fixed during build: "cuts target price" (analyst) was typing as guidance →
+  moved analyst-target keywords to `rating`.
+- **Verified on Postgres:** pipeline typed events (macro 33 / legal 4 / ma 4 / earnings/guidance/
+  product/disruption / other 45), 19 events carry sector themes, impact now **75 distinct scores
+  spanning 0.001–0.523** (was ~flat 0.5) — the 6-factor model differentiates. On a market-selloff day
+  macro events legitimately top the feed.
+- **Tuning notes (live loop, not bugs):** the lexicon over-scores bland macro headlines ("Rupee 1 paise
+  lower") — FinBERT or a lower macro severity fixes it; relevance-tier still has occasional
+  summary-driven edge artifacts (e.g. a micro-cap mis-tagged world). Both are config/live-refinement.
+
+**E3 — Alert budgets + outcome logging — DONE (2026-06-24), verified.**
+- Migration `0009_alert_budgets_outcomes.sql` (NEW): `alerts.delivery` ('realtime'|'digest' CHECK) +
+  `alerts.dismissed`; `event_outcomes` table (per-event feature snapshot + 1d/3d price move + label).
+- `config.js`: `ALERT_BUDGET` (MAX_REALTIME_PER_DAY 5, PER_TICKER_COOLDOWN_HOURS 12, quiet-hours block
+  gated off until per-user TZ) + `OUTCOMES.MATERIAL_MOVE_PCT 0.03`.
+- `materiality.js`: pure **`planDeliveries(candidates, state)`** — sorts a user's candidates by priority,
+  gives the top MAX_REALTIME_PER_DAY 'realtime', rest 'digest'; per-ticker cooldown + quiet-hours →
+  digest; MARKET skips cooldown but counts to budget. `generateAlerts` gathers today's realtime count +
+  cooldown tickers from DB, calls planDeliveries, inserts with `delivery`, returns `{total, realtime}`.
+  Nothing is dropped — over-budget items are still recorded as digest. **db/portfolioService now
+  lazy-required** so planDeliveries is unit-testable.
+- `server/services/outcomes.js` (NEW): `logEventFeatures()` snapshots per-event features
+  (type/severity/source_count/sentiment/z/max_impact + price_at_event) into `event_outcomes`;
+  `resolveOutcomes()` fills 1d/3d price + move + `materially_moved` once events reach that age. Price
+  resolves only where a feed exists (crypto via CoinGecko; US equities need a Finnhub key; India null) —
+  degrades gracefully. Engagement labels = `alerts.read`/`dismissed`.
+- `scheduler.js`: step 7 calls logEventFeatures + resolveOutcomes. `routes/news.js`: new
+  `PUT /alerts/:id/dismiss`.
+- **Tests:** `test/engine.test.js` +6 budget checks (priority cap, cooldown, daily cap, MARKET, quiet
+  hours, overnight wrap) → `npm test` = **38 checks** (16 resolver + 22 engine).
+- **Verified on Postgres:** delivery split works (low-volume run = all under cap; planDeliveries unit-
+  tested for the cap path); 55 outcomes logged (39 with z, price where feeds exist), 5 price-resolved.
+- **Bug found+fixed during verification:** **stale impact rows** — events live 7 days (clustering) but
+  the impact feed window is 72h; aged events kept stale impact scores (saw a 0.523 on a low-severity
+  'other' event = above its ceiling, 153 stale rows). Restored an explicit prune in `recomputeImpacts`
+  (delete impacts for events with last_seen older than EVENT_WINDOW_HOURS). After fix: 0 stale rows, 0
+  impossible impacts, max impact a sane 0.212. (This had been silently inflating "today's most important
+  event.")
+
+**E4 — New-holding onboarding — DONE (2026-06-28), verified.** Adding a holding now feels smart:
+silent backfill (no alert blast for history), an instant company brief, and a per-holding watermark so
+only post-add events can alert.
+- **Decisions (user delegated all three):** brief = **deterministic/hybrid** (assembled from engine
+  data, shaped for E5 to feed Claude later — **no Claude call in E4**); backfill = **reuse stored
+  events** (no fresh per-ticker fetch); watermark = **new `portfolio.monitoring_since` column** (not
+  overloading `added_at`).
+- Migration `0010_onboarding.sql` (NEW): `portfolio.monitoring_since TIMESTAMPTZ NOT NULL DEFAULT now()`
+  + index; existing rows aligned to `added_at` so the migration doesn't silence legit post-add events.
+- `server/services/onboarding.js` (NEW): `onboardHolding(userId, ticker, holding)` = silent backfill +
+  brief; `buildCompanyBrief()` (read-only, reused by the GET endpoint) assembles a structured packet —
+  company reference (sector/exchange/country/aliases/execs), current sentiment (acute/momentum/z), the
+  holding's recent typed events (last 7d), this user's impact row, light smart-money (funds holding it +
+  congress trades), `in_universe` flag + a "monitoring from here on" note. Degrades gracefully for
+  non-universe holdings and missing sources.
+- `impactScoring.js`: added **`recomputeImpactsForUser(userId)`** — scoped silent backfill (impact only,
+  no alerts, no other users) over the 72h event window.
+- `materiality.js`: pure **`isPostWatermark(eventFirstSeen, watermark)`** gate; `loadRecentClusters` now
+  selects `e.first_seen`; `generateAlerts` loads per-(user,ticker) watermarks (+ per-user earliest) and
+  **skips holding alerts whose event predates the holding's `monitoring_since`** and **market/world
+  alerts that predate the user's earliest watermark** (so a brand-new user isn't blasted with pre-join
+  events). Nothing is hidden from the feed — only alerts are gated.
+- `config.js`: `ONBOARDING` block (BRIEF_EVENTS 5 / BRIEF_EVENT_DAYS 7 / BRIEF_SMART_MONEY 3).
+- `routes/portfolio.js`: `POST /` returns `{holding, brief}` (onboarding best-effort, never blocks the
+  add); new **`GET /api/portfolio/:ticker/brief`** to re-fetch.
+- **Tests:** `test/engine.test.js` +5 `isPostWatermark` checks → `npm test` = **43 checks** (16 resolver
+  + 27 engine).
+- **Verified on Postgres `seniq` (live API + DB):** boot applied `0010`; added RELIANCE for a fresh user
+  → brief came back fully populated (Energy/NSE/IN, alias "jio", exec Mukesh Ambani, sentiment
+  acute 0.67 / z −0.48 / 34 pts, 5 typed events, **backfilled impact 0.424**, honest smart-money gap);
+  **17 impact rows** written silently, **0 alerts**. Watermark gate proven both directions: **holding**
+  (SBIN event, watermark after event → 0 alerts, rewound before → 1 fires) and **market/world**
+  (watermark=now suppressed 2 broad events; rewound → both fired). `GET /:ticker/brief` returns the same
+  packet. Test users cleaned up afterward.
+- **Note:** RELIANCE's holding *materiality* scored 0 (below the 0.35 alert threshold) on this data, so
+  its alert wouldn't fire regardless of the watermark — orthogonal to E4; the gate was proven on SBIN,
+  which clears the threshold.
+- **UI wired (2026-06-28):** the brief now surfaces in the product. `public/index.html` got a
+  `#brief-modal`; `public/js/app.js` `renderBrief()/showBrief()/openBriefFor()` + `initBriefModal()` —
+  the brief pops automatically after a successful add (`addStock` shows `res.brief`), and each holding
+  card gained an "ℹ" button that re-fetches via `GET /:ticker/brief`. `public/css/style.css` has the
+  `.brief-*` styles. **Verified in-browser** (port 3000, 1280×860): adding RELIANCE auto-opened the
+  brief (Energy·NSE·IN, Mukesh Ambani, sentiment grid positive/0.67/flat/−0.48, impact hero "100%
+  exposure", 5 typed events NEWS/LEGAL with time-ago, monitoring note); the card "ℹ" re-opens it via the
+  GET path; no console errors. Test user cleaned up, preview stopped.
+
+**E5 — The analyst voice (daily brief) — DONE (2026-06-28), verified.** Claude (Haiku) writes a daily
+brief grounded entirely in the user's holdings, led by "what changed since yesterday" + the single most
+important event. In-app delivery only (email is Phase 9).
+- **Decisions (kickoff):** model = **Haiku 4.5** (`claude-haiku-4-5`); wiring = **build behind flag +
+  fallback** (user adds the key after); scope = **daily brief first** (alert narratives later);
+  delivery = **in-app only**.
+- **SDK:** added `@anthropic-ai/sdk` (0.106.0). Consulted the `claude-api` skill — Haiku has no `effort`
+  param and a routine brief needs no extended thinking, so `thinking` is omitted; the **static system
+  prompt is prompt-cached** (`cache_control: ephemeral`); `max_tokens` capped at 1800.
+- Migration `0011_daily_briefs.sql` (NEW): `daily_briefs` (user_id, brief_date, packet JSONB, narrative,
+  headline, writer, model; UNIQUE(user_id,brief_date) — cache + diff baseline) + `claude_calls`
+  (per-call token/cost log driving the per-user quota + global kill-switch, no separate counter table).
+- `server/services/grounding.js` (NEW): `buildGroundingPacket(userId, prevPacket)` assembles top
+  holdings (by exposure, with sentiment/z), top impact events, most_important, light smart-money, and a
+  pure **`buildDiff(today, prev)`** (new/dropped events, impact-rank moves, sentiment swings — the diff
+  is the engine's job).
+- `server/services/briefWriter.js` (NEW): `writeBrief(packet, {allowClaude})` — Claude writer (cached
+  system prompt, grounded JSON packet, `parseClaudeOutput` splits HEADLINE) with a pure deterministic
+  template fallback. Falls back on ANY Claude error so a brief always ships.
+- `server/services/reports.js` (NEW): orchestration + pure **`guardCheck(state)`** (flag → key → global
+  kill-switch → per-user quota). `generateBriefForUser` (cache-or-generate, logs cost only on a real
+  Claude call), `generateDailyBriefs` (cron entry over all users), `getLatestBrief`.
+- `config.REPORTS` (MODEL, CRON `30 5 * * *`, MAX_OUTPUT_TOKENS 1800, TOP_HOLDINGS/EVENTS, PER_USER_DAILY_QUOTA 1,
+  GLOBAL_DAILY_USD_CEILING 5, Haiku PRICE_PER_MTOK). `FEATURES.CLAUDE_REPORTS` stays **false** until the
+  key is added. `.env.example` documents `ANTHROPIC_API_KEY`.
+- `routes/reports.js` (NEW, mounted `/api/reports`): `GET /daily` (latest, generates if missing —
+  idempotent per day, not a loopable Claude trigger), `POST /daily/generate` (force; quota still applies
+  so repeats fall back to the free writer — never runaway). `scheduler.js`: daily `runDailyBriefs` cron.
+- **Frontend:** `public/index.html` "Your Daily Brief" panel atop the dashboard; `public/js/app.js`
+  `loadDailyBrief()/renderDailyBrief()/refreshDailyBrief()` (date, writer badge, change chips, headline,
+  narrative; wired into dashboard load + a ↻ Refresh button); `public/css/style.css` `.brief-section`/
+  `.daily-brief`/`.brief-chip` styles.
+- **Tests:** `test/reports.test.js` (NEW, +16: guardCheck, buildDiff, deterministic writer,
+  parseClaudeOutput) → `npm test` = **59 checks** (16 resolver + 27 engine + 16 reports).
+- **Verified on Postgres `seniq`:** boot applied `0011` + registered the brief cron. No key →
+  `GET /api/reports/daily` returned a deterministic brief grounded in real holdings (49.9% exposure,
+  impact 0.207, "first brief"), guard reason `claude_reports_disabled`. Seeded a fake yesterday packet
+  → diff correctly flagged 6 new events + dropped the stale one, narrative led with the change. **Claude
+  path proven:** flag on + (bad) key → guard allowed, the real SDK call fired (401 with a genuine
+  `request_id`), then fell back to deterministic with **no** `claude_calls` row logged (errored call not
+  billed). UI verified in-browser (panel renders headline/chips/narrative atop the dashboard; ↻ Refresh
+  works; no console errors). Test users cleaned up, preview stopped.
+- **To activate Claude:** put `ANTHROPIC_API_KEY` in `.env` and set `FEATURES.CLAUDE_REPORTS = true`.
+
+**E6 — Ask it anything — DONE (2026-06-28), verified.** Natural-language portfolio Q&A answered by
+Claude (Haiku), grounded STRICTLY on the user's engine data, citing the numbers. In-app only.
+- **Decisions (kickoff, all recommended):** **single-shot** (stateless, grounded per question);
+  **10 questions/user/day** hard cap; **deterministic data-answer fallback** when Claude is
+  unavailable; **extended grounding** (all holdings + fuller impact feed + sentiment + smart-money).
+- `config.QA` (MODEL haiku, MAX_OUTPUT_TOKENS 1000, PER_USER_DAILY_QUESTIONS 10, MAX_QUESTION_CHARS 500,
+  TOP_EVENTS 10, MAX_HOLDINGS 30). Same `FEATURES.CLAUDE_REPORTS` flag + REPORTS global $/day
+  kill-switch + `claude_calls` cost log (kind='qa') as E5 — no new table.
+- `grounding.js`: `topHoldings(userId, limit)` parameterized + new **`buildQAContext(userId)`** (all
+  holdings up to cap, fuller feed, smart-money — so "biggest risk?" sees the whole book).
+- `server/services/qa.js` (NEW): pure `sanitizeQuestion` (clamp/collapse) + `deterministicAnswer`
+  (intent-aware grounded digest: risk / down / improving / general, cites exposure + sentiment).
+  `answerQuestion(userId, q)` — clamps → builds context → **guardCheck** (reused from reports;
+  counts today's kind='qa' calls vs the 10/day cap, global kill-switch) → Claude (cached system prompt,
+  strict-grounding, no-advice) and logs cost, else deterministic. Returns `{answer, writer, quota}`.
+- `routes/reports.js`: `POST /api/reports/ask` (empty question → 400). Frontend: "Ask About Your
+  Portfolio" panel under the daily brief — input + example chips + answer area + "N/10 left today"
+  counter (`public/index.html`, `app.js` `askPortfolio()/initAsk()`, `style.css` `.ask-*`).
+- **Tests:** `test/reports.test.js` +7 (sanitize, deterministicAnswer intents) → `npm test` = **66
+  checks** (16 resolver + 27 engine + 23 reports).
+- **Verified on Postgres `seniq`:** no key → 3 questions returned intent-correct grounded answers
+  (risk→AAPL/BTC negative; improving→RELIANCE; down→negative concentration), each leading with the
+  most-important event + citing exposure/impact; empty question → 400. Guardrails proven: flag+bad key →
+  guard allowed, real Claude 401 (`request_id`), graceful fallback, no qa row logged; **10 qa calls →
+  guard `user_quota_exceeded`, 0 remaining** (anti-runaway cap holds). UI verified in-browser (chip →
+  grounded answer, writer badge, quota counter; no console errors). Test user cleaned up, preview stopped.
+- **To activate Claude (E5 + E6):** set `ANTHROPIC_API_KEY` in `.env` + `FEATURES.CLAUDE_REPORTS = true`.
+
+## Engine track COMPLETE — E1–E6 all shipped + verified
+The locked `ENGINE_PLAN.md` v1 is done end-to-end: durable events + entity resolution (E1), event
+typing + 6-factor impact (E2), alert budgets + outcome logging (E3), smart new-holding onboarding (E4),
+the Claude analyst voice / daily brief (E5), and grounded NL Q&A (E6). Remaining engine work is the
+**v2 scope** in ENGINE_PLAN.md (learned relevance model on the logged outcomes, opportunity radar,
+deeper supplier/competitor graph, universe expansion, X/transcripts) — none started. The live-refinement
+testing loop (canary portfolios, config-tuned thresholds, replay over stored data) runs continuously.
+
+## Next (product track, separate from the engine)
+Per the re-sequenced roadmap, the product track resumes at **Phase 4 — Cloud Deployment, Domain &
+HTTPS** (NOT yet started; kickoff Qs unasked — Render vs Fly vs VPS, domain/registrar, managed Postgres
+provider, cron in-process vs worker). Phases 5 (OAuth), 6 (tiers/billing — finally enforces the
+smart-money + report/QA tier split and the per-tier quotas E5/E6 stubbed), 7 (strategies), 8 (API/MCP),
+9 (agent email delivery) follow. The engine work above feeds Phase 9's report/alert delivery.
+
+## Next step (product track, separate)
 Start **Phase 4 — Cloud Deployment, Domain & HTTPS** (see `SenIQ_Roadmap.pdf`). Per the working
 agreement, ask the Phase 4 kickoff questions first: Render vs Fly vs VPS; which domain + registrar;
 managed Postgres provider; keep node-cron in-process or split a worker. (The old "Phase 4 = billing"
