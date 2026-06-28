@@ -3,6 +3,7 @@ const { queryOne, execute } = require('../db');
 const { getCompanyName } = require('../services/tickerMatcher');
 const { resolveAsset, isLaunchAssetClass } = require('../services/assetRegistry');
 const { getWeightedHoldings } = require('../services/portfolioService');
+const { onboardHolding, buildCompanyBrief } = require('../services/onboarding');
 const { authMiddleware } = require('./auth');
 
 const router = express.Router();
@@ -63,24 +64,54 @@ router.post('/', async (req, res) => {
 
     const created = await queryOne(
       `INSERT INTO portfolio (user_id, ticker, company_name, asset_class, exchange, quantity, cost_basis)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, monitoring_since`,
       [req.user.id, ticker, companyName, assetClass, exchange || null, quantity, costBasis]
     );
 
-    res.status(201).json({
-      holding: {
-        id: created.id,
-        ticker,
-        company_name: companyName,
-        asset_class: assetClass,
-        exchange: exchange || null,
-        quantity,
-        cost_basis: costBasis,
-      },
-    });
+    const holding = {
+      id: created.id,
+      ticker,
+      company_name: companyName,
+      asset_class: assetClass,
+      exchange: exchange || null,
+      quantity,
+      cost_basis: costBasis,
+      monitoring_since: created.monitoring_since,
+    };
+
+    // E4 onboarding: silent historical backfill (no alerts) + a deterministic company
+    // brief. Best-effort — a failure here must never block the add itself.
+    let brief = null;
+    try {
+      ({ brief } = await onboardHolding(req.user.id, ticker, holding));
+    } catch (err) {
+      console.error('Onboarding error:', err.message);
+    }
+
+    res.status(201).json({ holding, brief });
   } catch (err) {
     console.error('Add asset error:', err);
     res.status(500).json({ error: 'Failed to add asset' });
+  }
+});
+
+// ─── GET /api/portfolio/:ticker/brief ────────────────────────
+// Re-fetch the E4 company brief for a held ticker (same packet returned on add).
+router.get('/:ticker/brief', async (req, res) => {
+  try {
+    const ticker = req.params.ticker.toUpperCase();
+    const holding = await queryOne(
+      `SELECT company_name, asset_class, exchange, monitoring_since
+         FROM portfolio WHERE user_id = $1 AND ticker = $2`,
+      [req.user.id, ticker]
+    );
+    if (!holding) return res.status(404).json({ error: 'Asset not in portfolio' });
+    const brief = await buildCompanyBrief(req.user.id, ticker, holding);
+    res.json({ brief });
+  } catch (err) {
+    console.error('Brief error:', err);
+    res.status(500).json({ error: 'Failed to build brief' });
   }
 });
 

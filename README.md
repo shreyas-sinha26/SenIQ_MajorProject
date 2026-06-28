@@ -12,20 +12,35 @@ politicians) is moving, and surfaces **what actually matters to _your_ holdings*
 
 ---
 
-## Features (Phases 0–3.5, shipped)
+## Features (Phases 0–3.5 + Engine E1–E6, shipped)
 
 - **Multi-asset portfolio** — equities / crypto / commodities with quantity + cost basis →
   exposure weights. Live prices via Finnhub (US equities) and CoinGecko (crypto, no key).
 - **Sentiment engine v2** — decay-weighted acute score + momentum + 90-day z-score baseline,
-  computed on read. Multi-source ingest (GDELT + Indian RSS + Reddit). Optional local
-  **FinBERT** classifier; keyword lexicon by default.
+  computed on read. Multi-source ingest (GDELT + Indian RSS + Reddit). Optional **FinBERT**
+  classifier via the Hugging Face Inference API; keyword lexicon by default.
 - **Portfolio Impact Scoring** — per-event, exposure-weighted impact ranking + a per-user feed.
 - **Smart money** — 13F filings via free **SEC EDGAR** (10 seeded funds) + Congress trades,
   follows, and signed outbound webhooks.
 - **News relevance & de-spam** — a 3-bucket feed (Holdings / Markets / World), event
   clustering (one card per story), and materiality-gated alerts.
 
-See [`PLAN.md`](PLAN.md) for the full phased roadmap and [`handoff.md`](handoff.md) for build notes.
+**Intelligence engine (E1–E6):**
+- **E1 — entity resolution + durable events** — a curated company universe (~US 100 / Nifty 50 /
+  top crypto) resolves names, executives, and sector themes; stories become *remembered* events
+  that articles attach to across runs.
+- **E2 — event typing + 6-factor impact** — `exposure × relevance × severity × novelty ×
+  confidence × recency`.
+- **E3 — alert budgets + outcome logging** — top few realtime/day, rest digest; per-ticker
+  cooldown; auto-logged 1–3 day price outcomes for future supervised tuning.
+- **E4 — smart onboarding** — adding a holding gives an instant company brief + silent backfill
+  + a "monitoring since" watermark (no alert blast for old news).
+- **E5 — daily brief** — Claude (Haiku) writes a brief grounded entirely in your holdings, led by
+  what changed since yesterday. Server-scheduled, behind a flag, with hard cost guardrails.
+- **E6 — Ask anything** — natural-language portfolio Q&A grounded strictly on engine data.
+
+See [`PLAN.md`](PLAN.md) (product roadmap), [`ENGINE_PLAN.md`](ENGINE_PLAN.md) (engine track), and
+[`handoff.md`](handoff.md) for build notes.
 
 ---
 
@@ -34,7 +49,8 @@ See [`PLAN.md`](PLAN.md) for the full phased roadmap and [`handoff.md`](handoff.
 - **Backend:** Node.js (≥18) + Express, `node-cron` pipeline
 - **Database:** PostgreSQL (migrations run automatically on boot)
 - **Frontend:** vanilla HTML / CSS / JS SPA (served from `public/`)
-- **ML:** FinBERT via `@huggingface/transformers` (local, CPU, optional)
+- **ML:** FinBERT via the Hugging Face Inference API (`@huggingface/inference`, optional)
+- **LLM:** Claude (Anthropic) for the daily brief + portfolio Q&A (optional, flag-gated)
 
 ---
 
@@ -68,9 +84,11 @@ Optional API keys (all degrade gracefully — see inline comments in `.env.examp
 |---|---|---|
 | `FINNHUB_API_KEY` | Live US equity prices ([free](https://finnhub.io)) | Equities show N/A; crypto still prices free |
 | `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | Reddit social ingest | Skipped; GDELT + RSS still feed news |
-| `FINBERT_CLASSIFY=1` | Use the FinBERT ML classifier | Keyword lexicon (default) |
+| `FINBERT_CLASSIFY=1` | Use the FinBERT classifier (HF Inference API) | Keyword lexicon (default) |
+| `HF_API_TOKEN` | Hugging Face token for FinBERT | FinBERT disabled; lexicon used |
 | `SEC_USER_AGENT` | SEC EDGAR contact (real email) | Default UA used |
 | `CONGRESS_TRADES_URL` | Live congress-trade data | Bundled sample (`data/congress_sample.json`) |
+| `ANTHROPIC_API_KEY` | Claude — daily brief (E5) + Q&A (E6) | Free deterministic writer |
 
 ### 4. Run
 ```powershell

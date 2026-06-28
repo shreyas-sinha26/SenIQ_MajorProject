@@ -20,11 +20,10 @@
  * event never alerts twice.
  */
 
-const { query, execute } = require('../db');
-const { MATERIALITY } = require('../config');
-const { getWeightedHoldings } = require('./portfolioService');
+// db + portfolioService lazy-required inside the async functions so the pure
+// planDeliveries / scoring helpers are importable/testable without a database.
+const { MATERIALITY, ALERT_BUDGET } = require('../config');
 const { scoreTicker } = require('./sentimentScoring');
-const { sourceWeight } = require('./sentimentScoring');
 
 const round = (n, d = 3) => Math.round(n * 10 ** d) / 10 ** d;
 
@@ -43,60 +42,43 @@ function dirLabel(signed) {
   return 'neutral';
 }
 
-// Group recent relevant articles into events keyed by cluster_key.
+// Load recent durable events with their per-ticker sentiment (averaged over the
+// event's articles). Returns event objects the alert logic scores.
 async function loadRecentClusters() {
+  const { query } = require('../db');
   const rows = await query(
-    `SELECT a.id AS article_id, a.title, a.url, a.source, a.platform, a.published_at,
-            a.cluster_key, a.relevance_tier, a.importance,
-            s.ticker, s.sentiment_score AS score, s.confidence
-       FROM articles a
+    `SELECT e.id AS event_id, e.title, e.relevance_tier AS tier, e.importance, e.source_count,
+            e.first_seen,
+            s.ticker, avg(s.sentiment_score) AS score, max(s.confidence) AS confidence
+       FROM events e
+       JOIN articles a ON a.event_id = e.id
        JOIN article_sentiments s ON s.article_id = a.id
-      WHERE a.is_relevant = true
-        AND a.cluster_key IS NOT NULL
-        AND a.published_at > now() - ($1 || ' hours')::interval`,
+      WHERE e.relevance_tier <> 'none'
+        AND e.last_seen > now() - ($1 || ' hours')::interval
+      GROUP BY e.id, e.title, e.relevance_tier, e.importance, e.source_count, e.first_seen, s.ticker`,
     [String(MATERIALITY.LOOKBACK_HOURS)]
   );
 
-  const clusters = new Map();
+  const events = new Map();
   for (const r of rows) {
-    let c = clusters.get(r.cluster_key);
+    let c = events.get(r.event_id);
     if (!c) {
       c = {
-        cluster_key: r.cluster_key,
-        tier: r.relevance_tier,
+        event_id: r.event_id,
+        title: r.title,
+        tier: r.tier,
         importance: Number(r.importance) || 0,
-        articleIds: new Set(),
-        rep: r,           // representative article (best source / latest)
-        repWeight: sourceWeight(r.source, r.platform),
-        tickers: {},      // ticker -> { sumScore, sumConf, n }
+        sourceCount: Number(r.source_count) || 1,
+        firstSeen: r.first_seen,
+        tickers: {},
       };
-      clusters.set(r.cluster_key, c);
+      events.set(r.event_id, c);
     }
-    c.articleIds.add(r.article_id);
-    c.importance = Math.max(c.importance, Number(r.importance) || 0);
-
-    // Best representative = highest source credibility, tie-break on recency.
-    const w = sourceWeight(r.source, r.platform);
-    if (w > c.repWeight || (w === c.repWeight && new Date(r.published_at) > new Date(c.rep.published_at))) {
-      c.rep = r;
-      c.repWeight = w;
-    }
-
     if (r.ticker && r.ticker !== '__MARKET__') {
-      const t = (c.tickers[r.ticker] ||= { sumScore: 0, sumConf: 0, n: 0 });
-      t.sumScore += Number(r.score);
-      t.sumConf += Number(r.confidence) || 0;
-      t.n += 1;
+      c.tickers[r.ticker] = { score: Number(r.score), confidence: Number(r.confidence) || 0 };
     }
   }
-
-  return [...clusters.values()].map((c) => ({
-    ...c,
-    sourceCount: c.articleIds.size,
-    tickers: Object.fromEntries(
-      Object.entries(c.tickers).map(([k, v]) => [k, { score: v.sumScore / v.n, confidence: v.sumConf / v.n }])
-    ),
-  }));
+  return [...events.values()];
 }
 
 // Per-user materiality for a holding event.
@@ -123,15 +105,70 @@ function holdingMateriality(cluster, exposureByTicker, zByTicker) {
 }
 
 /**
+ * Monitoring-since watermark gate (Engine Phase E4). An event may alert a holding only
+ * if it was first seen at/after the user started monitoring it — so a freshly-added
+ * holding never pings about old news (the news still shows in the feed + brief). A null
+ * watermark (no record) means "no gate" → allow. Pure + unit-tested.
+ */
+function isPostWatermark(eventFirstSeen, watermark) {
+  if (!watermark) return true;
+  if (!eventFirstSeen) return true; // unknown event age → don't suppress
+  return new Date(eventFirstSeen).getTime() >= new Date(watermark).getTime();
+}
+
+function inQuietWindow(hour, b) {
+  if (!b.QUIET_HOURS_ENABLED) return false;
+  const { QUIET_START: s, QUIET_END: e } = b;
+  return s <= e ? hour >= s && hour < e : hour >= s || hour < e; // handles overnight wrap
+}
+
+/**
+ * Decide realtime vs digest for each candidate alert, per user, under the budget.
+ * Pure (state passed in) so it's unit-testable. Mutates+returns candidates with
+ * `.delivery` set. Highest-priority candidates claim the scarce realtime slots first;
+ * everything else is recorded as 'digest' (nothing is dropped).
+ *
+ * state = { sentTodayByUser:{uid:n}, cooldownByUser:{uid:Set<ticker>}, nowHour, budget }
+ */
+function planDeliveries(candidates, state) {
+  const { sentTodayByUser = {}, cooldownByUser = {}, nowHour = 0, budget } = state;
+  const quiet = inQuietWindow(nowHour, budget);
+  const byUser = new Map();
+  for (const c of candidates) {
+    if (!byUser.has(c.user_id)) byUser.set(c.user_id, []);
+    byUser.get(c.user_id).push(c);
+  }
+  for (const [uid, list] of byUser) {
+    list.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+    let realtimeCount = sentTodayByUser[uid] || 0;
+    const cooldown = new Set(cooldownByUser[uid] || []);
+    for (const c of list) {
+      const isTicker = c.ticker && c.ticker !== 'MARKET';
+      if (quiet) c.delivery = 'digest';
+      else if (isTicker && cooldown.has(c.ticker)) c.delivery = 'digest';
+      else if (realtimeCount >= budget.MAX_REALTIME_PER_DAY) c.delivery = 'digest';
+      else {
+        c.delivery = 'realtime';
+        realtimeCount++;
+        if (isTicker) cooldown.add(c.ticker);
+      }
+    }
+  }
+  return candidates;
+}
+
+/**
  * Generate event-level alerts for the current ingest pass.
  * Returns the number of alert rows written.
  */
 async function generateAlerts() {
+  const { query, execute } = require('../db');
+  const { getWeightedHoldings } = require('./portfolioService');
   const clusters = await loadRecentClusters();
-  if (clusters.length === 0) return 0;
+  if (clusters.length === 0) return { total: 0, realtime: 0 };
 
   const userRows = await query('SELECT DISTINCT user_id FROM portfolio');
-  if (userRows.length === 0) return 0;
+  if (userRows.length === 0) return { total: 0, realtime: 0 };
   const userIds = userRows.map((u) => u.user_id);
 
   // z-surprise per held ticker (computed once for the run).
@@ -154,71 +191,110 @@ async function generateAlerts() {
     exposureByUser[uid] = map;
   }
 
-  // Pre-load existing (user, cluster) alerts so we never double-fire an event.
-  const clusterKeys = clusters.map((c) => c.cluster_key);
+  // Monitoring-since watermarks (E4): an event alerts a holding only if it post-dates
+  // when the user started monitoring it; broad alerts gate on the user's EARLIEST
+  // watermark (don't blast a brand-new user with events that predate their account).
+  const watermarkByUserTicker = {};
+  const minWatermarkByUser = {};
+  for (const r of await query('SELECT user_id, ticker, monitoring_since FROM portfolio')) {
+    (watermarkByUserTicker[r.user_id] ||= {})[r.ticker] = r.monitoring_since;
+    const t = new Date(r.monitoring_since).getTime();
+    if (minWatermarkByUser[r.user_id] == null || t < minWatermarkByUser[r.user_id]) {
+      minWatermarkByUser[r.user_id] = t;
+    }
+  }
+
+  // Pre-load existing (user, event) alerts so we never double-fire an event.
+  const eventIds = clusters.map((c) => c.event_id);
   const existing = await query(
-    'SELECT user_id, cluster_key FROM alerts WHERE cluster_key = ANY($1)',
-    [clusterKeys]
+    'SELECT user_id, event_id FROM alerts WHERE event_id = ANY($1)',
+    [eventIds]
   );
-  const alreadyAlerted = new Set(existing.map((e) => `${e.user_id}|${e.cluster_key}`));
+  const alreadyAlerted = new Set(existing.map((e) => `${e.user_id}|${e.event_id}`));
 
   const toInsert = [];
-  for (const cluster of clusters) {
-    const title = cluster.rep.title;
-    const srcNote = cluster.sourceCount > 1 ? ` (${cluster.sourceCount} sources)` : '';
+  for (const ev of clusters) {
+    const srcNote = ev.sourceCount > 1 ? ` (${ev.sourceCount} sources)` : '';
 
-    if (cluster.tier === 'holding') {
+    if (ev.tier === 'holding') {
       // Fire per user, scaled by THEIR exposure + the surprise vs baseline.
       for (const uid of userIds) {
-        const key = `${uid}|${cluster.cluster_key}`;
+        const key = `${uid}|${ev.event_id}`;
         if (alreadyAlerted.has(key)) continue;
-        const { score, direction, topTicker } = holdingMateriality(cluster, exposureByUser[uid], zByTicker);
+        const { score, direction, topTicker } = holdingMateriality(ev, exposureByUser[uid], zByTicker);
         if (score < MATERIALITY.HOLDING_THRESHOLD || !topTicker) continue;
+        // E4: skip old news for a freshly-added holding (still visible in the feed).
+        if (!isPostWatermark(ev.firstSeen, watermarkByUserTicker[uid]?.[topTicker])) continue;
         const icon = direction === 'negative' ? '⚠️' : direction === 'positive' ? '🚀' : '📰';
         toInsert.push({
           user_id: uid,
           ticker: topTicker,
-          cluster_key: cluster.cluster_key,
+          event_id: ev.event_id,
           alert_type: `holding_${direction}`,
           label: direction,
-          score: cluster.tickers[topTicker]?.score ?? 0.5,
-          message: `${icon} ${topTicker} — ${title}${srcNote}`,
-          article_id: cluster.rep.article_id,
+          score: ev.tickers[topTicker]?.score ?? 0.5,
+          message: `${icon} ${topTicker} — ${ev.title}${srcNote}`,
+          priority: score,
         });
         alreadyAlerted.add(key);
       }
     } else {
       // market / world: importance × volume, fired to everyone but gated harder.
-      const broad = cluster.importance * volumeBoost(cluster.sourceCount);
+      const broad = ev.importance * volumeBoost(ev.sourceCount);
       if (broad < MATERIALITY.BROAD_THRESHOLD) continue;
-      const icon = cluster.tier === 'world' ? '🌍' : '📊';
-      const label = cluster.tier === 'world' ? 'World' : 'Markets';
+      const icon = ev.tier === 'world' ? '🌍' : '📊';
+      const label = ev.tier === 'world' ? 'World' : 'Markets';
       for (const uid of userIds) {
-        const key = `${uid}|${cluster.cluster_key}`;
+        const key = `${uid}|${ev.event_id}`;
         if (alreadyAlerted.has(key)) continue;
+        // E4: don't blast a brand-new user with market/world events that predate them.
+        if (!isPostWatermark(ev.firstSeen, minWatermarkByUser[uid] != null ? new Date(minWatermarkByUser[uid]) : null)) continue;
         toInsert.push({
           user_id: uid,
           ticker: 'MARKET',
-          cluster_key: cluster.cluster_key,
-          alert_type: cluster.tier === 'world' ? 'world_event' : 'market_event',
+          event_id: ev.event_id,
+          alert_type: ev.tier === 'world' ? 'world_event' : 'market_event',
           label: 'neutral',
           score: 0.5,
-          message: `${icon} ${label}: ${title}${srcNote}`,
-          article_id: cluster.rep.article_id,
+          message: `${icon} ${label}: ${ev.title}${srcNote}`,
+          priority: broad,
         });
         alreadyAlerted.add(key);
       }
     }
   }
 
+  if (toInsert.length === 0) return { total: 0, realtime: 0 };
+
+  // Apply per-user budgets: only the top few push in realtime, rest are digest.
+  const cd = String(ALERT_BUDGET.PER_TICKER_COOLDOWN_HOURS);
+  const sentRows = await query(
+    `SELECT user_id, count(*) c FROM alerts
+      WHERE delivery = 'realtime' AND created_at >= date_trunc('day', now()) GROUP BY user_id`
+  );
+  const sentTodayByUser = Object.fromEntries(sentRows.map((r) => [r.user_id, Number(r.c)]));
+  const cdRows = await query(
+    `SELECT DISTINCT user_id, ticker FROM alerts
+      WHERE delivery = 'realtime' AND ticker <> 'MARKET'
+        AND created_at > now() - ($1 || ' hours')::interval`,
+    [cd]
+  );
+  const cooldownByUser = {};
+  for (const r of cdRows) (cooldownByUser[r.user_id] ||= new Set()).add(r.ticker);
+
+  const nowHour = (new Date().getUTCHours() + ALERT_BUDGET.QUIET_TZ_OFFSET + 24) % 24;
+  planDeliveries(toInsert, { sentTodayByUser, cooldownByUser, nowHour, budget: ALERT_BUDGET });
+
+  let realtime = 0;
   for (const a of toInsert) {
+    if (a.delivery === 'realtime') realtime++;
     await execute(
-      `INSERT INTO alerts (user_id, ticker, article_id, alert_type, sentiment_label, sentiment_score, message, cluster_key)
+      `INSERT INTO alerts (user_id, ticker, event_id, alert_type, sentiment_label, sentiment_score, message, delivery)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [a.user_id, a.ticker, a.article_id, a.alert_type, a.label, a.score, a.message, a.cluster_key]
+      [a.user_id, a.ticker, a.event_id, a.alert_type, a.label, a.score, a.message, a.delivery]
     );
   }
-  return toInsert.length;
+  return { total: toInsert.length, realtime };
 }
 
-module.exports = { generateAlerts, loadRecentClusters, holdingMateriality, volumeBoost };
+module.exports = { generateAlerts, loadRecentClusters, holdingMateriality, volumeBoost, planDeliveries, inQuietWindow, isPostWatermark };
