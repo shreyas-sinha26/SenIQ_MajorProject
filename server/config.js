@@ -12,40 +12,67 @@ const DISCLAIMER =
 
 // Tier matrix scaffold (Phase 4 fills in billing). Limits are read by gating
 // middleware; numbers reflect the decided Free/Plus/Pro split.
+// Tier order (lowest → highest) — used by requireTier() comparisons.
+const TIER_ORDER = ['free', 'plus', 'pro'];
+
 const TIERS = {
   free: {
     label: 'Free',
+    rank: 0,
     maxHoldings: 7,
     sources: ['news', 'macro'],
+    sentimentDepth: 'basic',       // acute + 7-day history; no 90-day z-score
+    impactFeed: 'top',             // today's single most important event only
     claudeReportsPerDay: 0,
+    qaPerDay: 0,                    // Ask-anything (E6) gated off
     realtimeAlerts: false,
     apiAccess: false,
+    strategies: 'list',            // names + descriptions only (Phase 7)
     smartMoney: 'teaser',          // top 1-2, delayed, in the digest only
     smartMoneyRealtime: false,     // no instant smart-money alerts
     webhooks: false,
+    price: { usd: 0, inr: 0 },
   },
   plus: {
     label: 'Plus',
+    rank: 1,
     maxHoldings: Infinity,
     sources: ['news', 'reddit', 'macro'],
+    sentimentDepth: 'full',        // + 90-day z-score baseline
+    impactFeed: 'full',            // full ranked impact feed + exposure %
     claudeReportsPerDay: 1,
+    qaPerDay: 10,
     realtimeAlerts: true,
     apiAccess: false,
+    strategies: 'applicability',   // + live "what it flags in your portfolio"
     smartMoney: 'full',            // full Institutions + Politicians tabs
     smartMoneyRealtime: true,      // instant alerts on followed + holdings
     webhooks: false,
+    price: { usd: 9, inr: 399 },
   },
   pro: {
     label: 'Pro',
+    rank: 2,
     maxHoldings: Infinity,
     sources: ['news', 'reddit', 'macro'],
+    sentimentDepth: 'full',
+    impactFeed: 'full',
     claudeReportsPerDay: 2,
+    qaPerDay: 30,
     realtimeAlerts: true,
     apiAccess: true,
+    strategies: 'personalized',    // personalized to portfolio (Phase 7)
     smartMoney: 'full',            // full + filtered to holdings
     smartMoneyRealtime: true,
     webhooks: true,                // register outbound webhooks for events
+    price: { usd: 24, inr: 999 },
   },
+};
+
+// Pricing for the upgrade UI. Annual ≈ 2 months free (10× monthly).
+const PRICING = {
+  currencies: { usd: { symbol: '$', code: 'USD' }, inr: { symbol: '₹', code: 'INR' } },
+  annualMonthsFree: 2,
 };
 
 // Rollout flags — flip on as each phase lands. X stays deferred indefinitely;
@@ -300,4 +327,4 @@ const SMART_MONEY = {
   WEBHOOK_MAX_FAILURES: 10,      // auto-disable a webhook after this many consecutive fails
 };
 
-module.exports = { DISCLAIMER, TIERS, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, INGEST, SMART_MONEY };
+module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, INGEST, SMART_MONEY };
