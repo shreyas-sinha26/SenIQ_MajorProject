@@ -115,7 +115,16 @@ can reset their password.
 
 ---
 
-## Phase 6 — Tiers & billing (Free / Plus / Pro)  *(was Phase 4)*
+## Phase 6 — Tiers & billing (Free / Plus / Pro)  *(was Phase 4)* — ✅ DONE (2026-06-30)
+**Built:** `subscription_tier` + `is_admin` (migration 0012, tier read per-request not from the JWT);
+tier matrix + pricing in `config.TIERS`; `middleware/tier.js` (attachTier/requireTier/requireAdmin).
+**Gating live:** holdings cap (Free 7), smart-money teaser (Free), impact-feed depth (Free = top event),
+AI Workspace (brief + Q&A) Plus+. **Admin:** `/api/admin` (list users, set any tier) + a nav tier
+switcher to preview Free/Plus/Pro; `admin@seniq.local` seeded from `ADMIN_PASSWORD`. **Billing:**
+`/api/billing/plans` + `/checkout` is a **dev stub** (flips tier directly) — real Stripe (US) /
+Razorpay (IN) Checkout + webhooks still wire in at deploy (need the public HTTPS domain). Plans/upgrade
+UI on the profile page. *Below = original spec, kept for the deploy-time billing work.*
+
 **Goal:** monetize via feature gating + Stripe/Razorpay, with hard cost guardrails on the Claude-backed
 reports. Needs the public HTTPS domain (Phase 4) for payment webhooks.
 **Kickoff Qs:** confirm final price points + annual discount. Stripe (US) + Razorpay (India) accounts
@@ -169,11 +178,23 @@ webhook; no code path lets a user invoke Claude beyond their quota; the global k
 
 ---
 
-## Phase 7 — Strategies tab  *(was Phase 5)*
+## Phase 7 — Strategies (builder + backtest + paper trade)  *(was Phase 5)*  — **SCOPE CHANGED 2026-06-30**
+> **Decision reversed:** the original "education only, **NO backtesting**, lives in the separate zeuniq
+> project" is superseded. SenIQ now **brings backtesting + paper trading in-house** by reusing the zeuniq
+> Python engine as a **separate strategy service** (US stocks + crypto + India). Live execution stays in
+> zeuniq. Full design + locked decisions in **`STRATEGY_PLAN.md`**. Sidebar already has the scaffold:
+> Strategy Builder / Your Strategies / Backtest / Paper Trade.
+
+**New goal:** a **visual strategy builder** (pick EMA/RSI/MACD…), **backtesting**, and **paper trading**,
+where rules can mix **technical factors** with **SenIQ signal factors** (sentiment, z-score, smart-money,
+impact). Data: Finnhub (US live) + yfinance (India + commodities + backtest) + CoinGecko/Binance (crypto)
++ Dhan (India, from zeuniq). Tier-gated: builder/backtest = Plus+, paper = Pro.
+
+*Original education-only spec retained below for the preset-strategy content.*
+
 **Goal:** 3–5 preset sentiment strategies as **education** (not signals), with live applicability to the
-user's holdings. **No backtesting** — that lives in the user's separate backtesting project.
+user's holdings.
 **Kickoff Qs:** which strategies make the cut? How to present live applicability? Disclaimer wording?
-Where to link out to the backtesting project?
 
 - Present well-known approaches + logic: sentiment-momentum, sentiment-reversal (fade extremes),
   news-volume spike, smart-money follow, macro-risk-off overlay.
@@ -187,7 +208,10 @@ today" view — no backtest charts.
 
 ## Phase 8 — API / MCP server  *(was Phase 6)*
 **Goal:** expose the platform as a clean REST API and an MCP server the agent consumes; UI and agent
-share one tool layer.
+share one tool layer. **Now also the signal-delivery bridge for Phase 7's strategy engine** — exposes
+SenIQ signal factors (`get_signal`, `get_signal_history`, `get_portfolio_sentiment`, `get_smart_money`)
++ strategy tools (`create_strategy`, `backtest`, `run_strategy`) so the visual builder, the engine, and
+external agents all speak one strategy schema. Pro-gated, per-user API key. See `STRATEGY_PLAN.md`.
 **Kickoff Qs:** REST + MCP both at launch or MCP later? Auth scheme (API keys per user)? Which tools
 first? Rate-limit tiers per plan?
 
