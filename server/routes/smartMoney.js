@@ -15,11 +15,16 @@ const express = require('express');
 const crypto = require('crypto');
 const { query, queryOne, execute } = require('../db');
 const { authMiddleware } = require('./auth');
+const { attachTier } = require('../middleware/tier');
 const { SMART_MONEY, DISCLAIMER } = require('../config');
 const { pollSmartMoney, polKey } = require('../services/smartMoney');
 
 const router = express.Router();
-router.use(authMiddleware);
+router.use(authMiddleware, attachTier);
+
+// Phase 6 — Free tier gets a teaser (top 2 only) of smart money; Plus/Pro get the full set.
+const TEASER_LIMIT = 2;
+const isTeaser = (req) => req.tierCfg?.smartMoney === 'teaser';
 
 const FRESHNESS_NOTE =
   'Smart-money data is disclosed with a legal lag — 13F filings ~45 days after quarter ' +
@@ -64,6 +69,10 @@ router.get('/institutions', async (req, res) => {
         ORDER BY f.total_value DESC NULLS LAST, i.name`,
       [req.user.id]
     );
+    if (isTeaser(req)) {
+      return res.json({ institutions: rows.slice(0, TEASER_LIMIT), freshnessNote: FRESHNESS_NOTE,
+        teaser: true, total: rows.length, upgrade: { requiredTier: 'plus', requiredLabel: 'Plus' } });
+    }
     res.json({ institutions: rows, freshnessNote: FRESHNESS_NOTE });
   } catch (err) {
     console.error('Institutions list error:', err);
@@ -141,6 +150,10 @@ router.get('/congress', async (req, res) => {
       trades = recent.filter((t) => (t.ticker && heldSet.has(t.ticker)) || followedSet.has(polKey(t.politician)));
     }
 
+    if (isTeaser(req)) {
+      return res.json({ trades: trades.slice(0, TEASER_LIMIT), scope, freshnessNote: FRESHNESS_NOTE,
+        teaser: true, total: trades.length, upgrade: { requiredTier: 'plus', requiredLabel: 'Plus' } });
+    }
     res.json({ trades: trades.slice(0, limit), scope, freshnessNote: FRESHNESS_NOTE });
   } catch (err) {
     console.error('Congress list error:', err);

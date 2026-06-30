@@ -1256,3 +1256,25 @@ tr:hover .ht-info { opacity: 1; }
 
 /* Smart-money search bars (Institutions / Congress) */
 .sm-search { margin: 0 0 14px; max-width: 440px; }
+
+/* ═══ Phase 6 — tiers & billing ═══ */
+.tier-control { display: flex; align-items: center; gap: 8px; }
+.tier-badge { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); background: rgba(255,255,255,.05); }
+.tier-badge.plus { color: #0ea5e9; border-color: rgba(14,165,233,.4); background: rgba(14,165,233,.1); }
+.tier-badge.pro { color: #fff; border-color: transparent; background: linear-gradient(135deg,#a855f7,#ec4899); }
+.admin-tier { display: flex; align-items: center; gap: 6px; }
+.admin-tier-label { font-size: .64rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.admin-tier select { background: rgba(255,255,255,.06); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: .78rem; padding: 4px 8px; cursor: pointer; }
+.upgrade-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 11px 14px; border: 1px dashed var(--border-hover); border-radius: var(--radius-sm); background: rgba(14,165,233,.06); font-size: .84rem; color: var(--text-secondary); }
+.plans-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 14px; }
+.plan-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 18px; background: rgba(255,255,255,.03); display: flex; flex-direction: column; gap: 10px; }
+.plan-card.current { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.plan-card.pro { background: linear-gradient(160deg, rgba(168,85,247,.08), rgba(236,72,153,.05)); }
+.plan-name { font-size: 1rem; font-weight: 700; color: var(--text-primary); }
+.plan-price { font-size: 1.6rem; font-weight: 800; color: var(--text-primary); }
+.plan-per { font-size: .8rem; font-weight: 500; color: var(--text-muted); }
+.plan-feats { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: .82rem; color: var(--text-secondary); }
+.plan-feats li::before { content: "✓ "; color: var(--positive); font-weight: 700; }
+.plan-current-badge { font-size: .72rem; font-weight: 700; text-transform: uppercase; color: var(--accent-light); text-align: center; padding: 8px; }
+.plan-badge.plus { color: #0ea5e9; }
+.plan-badge.pro { color: #a855f7; }

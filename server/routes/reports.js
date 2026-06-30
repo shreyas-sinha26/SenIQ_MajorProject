@@ -10,12 +10,16 @@
 
 const express = require('express');
 const { authMiddleware } = require('./auth');
+const { attachTier, requireTier } = require('../middleware/tier');
 const { generateBriefForUser, getLatestBrief } = require('../services/reports');
 const { answerQuestion } = require('../services/qa');
 const { DISCLAIMER } = require('../config');
 
 const router = express.Router();
-router.use(authMiddleware);
+router.use(authMiddleware, attachTier);
+
+// Phase 6 — the AI Workspace (daily brief + Q&A) is a Plus/Pro feature.
+router.use(requireTier('plus'));
 
 router.get('/daily', async (req, res) => {
   try {

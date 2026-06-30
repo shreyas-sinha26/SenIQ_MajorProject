@@ -75,8 +75,13 @@ async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${API}${path}`, { ...opts, headers });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || 'Request failed');
+    err.status = res.status;
+    err.data = data; // carries { upgrade: { requiredTier, requiredLabel } } on 402
+    throw err;
+  }
   return data;
 }
 
@@ -210,6 +215,7 @@ async function showDashboard() {
     document.getElementById('user-name').textContent = currentUser.name;
     document.getElementById('user-avatar').textContent = currentUser.name.charAt(0).toUpperCase();
   }
+  renderTierControl();
 
   // Load all data
   await Promise.all([loadPortfolio(), loadNewsFeed(), loadAlerts(), loadPortfolioSentiment(), loadImpactFeed(), loadDailyBrief(), loadSmartMoney()]);
@@ -702,6 +708,10 @@ async function loadImpactFeed() {
   try {
     const data = await api('/api/news/impact');
     renderImpactFeed(data.topEvent, data.feed || []);
+    // Append (or refresh) the gating note on the impact section.
+    const sect = document.getElementById('impact-section');
+    sect?.querySelector('.upgrade-note')?.remove();
+    if (data.gated && sect) sect.insertAdjacentHTML('beforeend', upgradeNote('Free shows today’s top event only — see the full ranked feed on Plus.'));
   } catch (err) {
     console.error('Impact feed error:', err);
   }
@@ -1160,8 +1170,9 @@ async function loadSmartMoneyMeta() {
 
 async function loadInstitutions() {
   try {
-    const { institutions } = await api('/api/smart-money/institutions');
-    cachedInstitutions = institutions || [];
+    const data = await api('/api/smart-money/institutions');
+    cachedInstitutions = data.institutions || [];
+    instTeaser = data.teaser ? { total: data.total } : null;
     renderInstitutions();
   } catch (err) { console.error('Institutions load error:', err); }
 }
@@ -1205,6 +1216,9 @@ function renderInstitutions() {
         </div>
       </div>`;
   }).join('');
+  if (instTeaser && !instSearchQuery) {
+    grid.insertAdjacentHTML('beforeend', upgradeNote(`Showing ${cachedInstitutions.length} of ${instTeaser.total} funds — unlock all on Plus.`));
+  }
 }
 
 async function openInstitution(slug) {
@@ -1254,8 +1268,9 @@ function renderInstitutionDetail(data) {
 
 async function loadCongress() {
   try {
-    const { trades } = await api(`/api/smart-money/congress?scope=${congressScope}&limit=60`);
-    cachedCongress = trades || [];
+    const data = await api(`/api/smart-money/congress?scope=${congressScope}&limit=60`);
+    cachedCongress = data.trades || [];
+    congressTeaser = data.teaser ? { total: data.total } : null;
     renderCongress();
   } catch (err) { console.error('Congress load error:', err); }
 }
@@ -1299,6 +1314,9 @@ function renderCongress() {
         </button>
       </div>`;
   }).join('');
+  if (congressTeaser && !congressSearchQuery) {
+    list.insertAdjacentHTML('beforeend', upgradeNote(`Showing ${cachedCongress.length} of ${congressTeaser.total} disclosures — unlock the full feed on Plus.`));
+  }
 }
 
 async function toggleFollow(type, ref, label, btnEl) {
@@ -1366,6 +1384,7 @@ function switchToPage(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('hidden', p.id !== `page-${page}`));
   if (page === 'analytics') updateSentimentChart(activeFilter && cachedSentiments[activeFilter] ? { [activeFilter]: cachedSentiments[activeFilter] } : cachedSentiments);
   if (page === 'ai') loadDailyBrief();
+  if (page === 'profile') { populateProfilePage(currentUser); loadPlans(); }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1569,10 +1588,15 @@ function initBriefModal() {
 
 // ─── Daily Brief (E5 — the analyst voice) ────────────────────
 async function loadDailyBrief() {
+  const el = document.getElementById('daily-brief');
   try {
     const data = await api('/api/reports/daily');
     renderDailyBrief(data.brief);
   } catch (err) {
+    if (err.status === 402 && el) {
+      el.innerHTML = `<div class="empty-state"><p>The AI Workspace — daily brief + Ask — is a <strong>Plus</strong> feature.</p>${upgradeNote('Unlock your personalized daily brief and portfolio Q&A.')}</div>`;
+      return;
+    }
     console.error('Daily brief error:', err);
   }
 }
@@ -1640,7 +1664,9 @@ async function askPortfolio(question) {
       <div class="ask-answer-meta"><span class="ask-writer">${writerTag}</span><span class="ask-disclaimer">Informational only — not advice.</span></div>`;
     renderAskQuota(data.quota);
   } catch (err) {
-    answerEl.innerHTML = `<div class="ask-answer-text">${escapeHtml(err.message)}</div>`;
+    answerEl.innerHTML = err.status === 402
+      ? `<div class="ask-answer-text">Portfolio Q&A is a Plus feature.</div>${upgradeNote('Upgrade to ask anything about your portfolio.')}`
+      : `<div class="ask-answer-text">${escapeHtml(err.message)}</div>`;
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Ask'; }
   }
@@ -1657,6 +1683,103 @@ function initAsk() {
   document.querySelectorAll('.ask-chip').forEach((c) => c.addEventListener('click', () => askPortfolio(c.dataset.q)));
 }
 
+// ─── Tiers & billing (Phase 6) ───────────────────────────────
+const TIER_LABEL = { free: 'Free', plus: 'Plus', pro: 'Pro' };
+let instTeaser = null;     // {total} when the smart-money list is teaser-limited (Free)
+let congressTeaser = null;
+
+function currentTier() { return (currentUser && currentUser.subscription_tier) || 'free'; }
+
+function upgradeNote(text, tier = 'plus') {
+  return `<div class="upgrade-note"><span>${escapeHtml(text)}</span>
+    <button class="btn btn-primary btn-xs" onclick="goToPlans()">Upgrade to ${TIER_LABEL[tier]}</button></div>`;
+}
+
+function renderTierControl() {
+  const badge = document.getElementById('tier-badge');
+  const adminWrap = document.getElementById('admin-tier');
+  const sel = document.getElementById('admin-tier-select');
+  const tier = currentTier();
+  if (badge) { badge.textContent = TIER_LABEL[tier] || 'Free'; badge.className = `tier-badge ${tier}`; }
+  const profBadge = document.getElementById('profile-plan-badge');
+  if (profBadge) { profBadge.textContent = `${TIER_LABEL[tier] || 'Free'} Plan`; profBadge.className = `plan-badge ${tier}`; }
+  if (currentUser && currentUser.is_admin) {
+    adminWrap?.classList.remove('hidden');
+    if (sel) sel.value = tier;
+  } else {
+    adminWrap?.classList.add('hidden');
+  }
+}
+
+// Admin-only: flip the account's tier and refresh every tier-gated view in place.
+async function onAdminTierChange(tier) {
+  try {
+    await api('/api/admin/tier', { method: 'PUT', body: JSON.stringify({ tier }) });
+    currentUser.subscription_tier = tier;
+    renderTierControl();
+    showToast(`Now viewing as ${TIER_LABEL[tier]}`, 'success');
+    reloadTierViews();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+// Re-pull everything whose output depends on tier (after a switch or an upgrade).
+function reloadTierViews() {
+  loadPortfolio();
+  loadImpactFeed();
+  loadDailyBrief();
+  loadInstitutions();
+  loadCongress();
+}
+
+function initTierControl() {
+  const sel = document.getElementById('admin-tier-select');
+  if (sel) sel.addEventListener('change', () => onAdminTierChange(sel.value));
+}
+
+function goToPlans() {
+  switchToPage('profile');
+  setTimeout(() => document.getElementById('plans-section')?.scrollIntoView({ behavior: 'smooth' }), 60);
+}
+
+// Plans / upgrade UI (profile page). Checkout is a dev stub (see routes/billing.js).
+async function loadPlans() {
+  const wrap = document.getElementById('plans-grid');
+  if (!wrap) return;
+  try {
+    const { plans, currentTier: cur } = await api('/api/billing/plans');
+    wrap.innerHTML = plans.map(p => {
+      const isCur = p.id === cur;
+      const price = p.price.usd === 0 ? 'Free' : `$${p.price.usd}<span class="plan-per">/mo</span>`;
+      const feats = [
+        p.maxHoldings === null || p.maxHoldings > 999 ? 'Unlimited holdings' : `${p.maxHoldings} holdings`,
+        p.impactFeed === 'full' ? 'Full impact feed' : 'Top event only',
+        p.smartMoney === 'full' ? 'Full smart money' : 'Smart-money teaser',
+        p.claudeReportsPerDay > 0 ? `Daily brief + Q&A` : 'No AI workspace',
+        p.webhooks ? 'Outbound webhooks' : null,
+        p.apiAccess ? 'API / MCP access' : null,
+      ].filter(Boolean);
+      return `<div class="plan-card ${isCur ? 'current' : ''} ${p.id}">
+        <div class="plan-name">${escapeHtml(p.label)}</div>
+        <div class="plan-price">${price}</div>
+        <ul class="plan-feats">${feats.map(f => `<li>${escapeHtml(f)}</li>`).join('')}</ul>
+        ${isCur ? '<div class="plan-current-badge">Current plan</div>'
+          : `<button class="btn ${p.id === 'free' ? 'btn-ghost' : 'btn-primary'} btn-sm" onclick="checkout('${p.id}')">${p.id === 'free' ? 'Downgrade' : 'Choose ' + escapeHtml(p.label)}</button>`}
+      </div>`;
+    }).join('');
+  } catch (err) { wrap.innerHTML = `<p class="empty-state small">${escapeHtml(err.message)}</p>`; }
+}
+
+async function checkout(tier) {
+  try {
+    const res = await api('/api/billing/checkout', { method: 'POST', body: JSON.stringify({ tier, period: 'monthly' }) });
+    currentUser.subscription_tier = tier;
+    renderTierControl();
+    showToast(res.message || `Switched to ${TIER_LABEL[tier]}`, 'success');
+    loadPlans();
+    reloadTierViews();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
 // ─── Init ────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   initAuth();
@@ -1668,6 +1791,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initSmartMoney();
   initAsk();
   initBriefModal();
+  initTierControl();
   document.getElementById('brief-refresh')?.addEventListener('click', refreshDailyBrief);
 
   // Filter clear button

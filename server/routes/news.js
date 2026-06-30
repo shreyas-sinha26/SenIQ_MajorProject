@@ -9,9 +9,10 @@ const { isUrl, scrapeArticle } = require('../services/articleScraper');
 const { explainForPortfolio } = require('../services/ollamaExplainer');
 const { scoreTicker } = require('../services/sentimentScoring');
 const { getImpactFeed } = require('../services/impactScoring');
+const { attachTier } = require('../middleware/tier');
 
 const router = express.Router();
-router.use(authMiddleware);
+router.use(authMiddleware, attachTier);
 
 // ─── GET /api/news/feed ──────────────────────────────────────
 // Phase 3.5: a de-spammed feed in the three buckets a user actually cares about —
@@ -180,6 +181,11 @@ router.get('/portfolio-sentiment', async (req, res) => {
 router.get('/impact', async (req, res) => {
   try {
     const feed = await getImpactFeed(req.user.id, 20);
+    // Phase 6 — Free tier sees only today's single most important event; Plus/Pro get the
+    // full ranked feed.
+    if (req.tierCfg?.impactFeed === 'top') {
+      return res.json({ topEvent: feed[0] || null, feed: feed.slice(0, 1), gated: true, upgrade: { requiredTier: 'plus', requiredLabel: 'Plus' } });
+    }
     res.json({ topEvent: feed[0] || null, feed });
   } catch (err) {
     console.error('Impact feed error:', err);
