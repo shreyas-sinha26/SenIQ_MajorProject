@@ -567,12 +567,63 @@ provider, cron in-process vs worker). Phases 5 (OAuth), 6 (tiers/billing — fin
 smart-money + report/QA tier split and the per-tier quotas E5/E6 stubbed), 7 (strategies), 8 (API/MCP),
 9 (agent email delivery) follow. The engine work above feeds Phase 9's report/alert delivery.
 
-## Next step (product track, separate)
-Start **Phase 4 — Cloud Deployment, Domain & HTTPS** (see `SenIQ_Roadmap.pdf`). Per the working
-agreement, ask the Phase 4 kickoff questions first: Render vs Fly vs VPS; which domain + registrar;
-managed Postgres provider; keep node-cron in-process or split a worker. (The old "Phase 4 = billing"
-is now **Phase 6**.) Per the working agreement, **ask the Phase 4
-kickoff questions first** (final price points + annual discount; Stripe/Razorpay readiness; global
-daily kill-switch $ ceiling; region-gate by card BIN). Phase 4 adds `subscription_tier` + gating
-middleware, which is what finally enforces the smart-money tier split (Free teaser / Plus+ full /
-Pro webhooks) that Phase 3 left open. (Phases 3 and 4 were planned to run in parallel — 3 is done.)
+## Session 2026-06-30 — GitHub unification + Congress live + Phase 6 + scaffolds
+
+This session merged the solo engine track onto the **team GitHub repo**
+`shreyas-sinha26/SenIQ_MajorProject` and shipped several product features. Repo + account
+notes: push only via the **`Annas-Shariff`** gh account (`annas05shariff` is pull-only → 403);
+commit author `Annas Shariff <annasshariff05@gmail.com>`.
+
+**1. Engine unified onto the GitHub base.** GitHub had Phase 4 cloud-deploy artifacts
+(`render.yaml`, `DEPLOY.md`, `observability.js`/Sentry, prod-hardened `index.js`), a Phase 5
+landing page + 5-page nav + profile, and FinBERT on the **HuggingFace Inference API**. Local had
+the full engine (E1–E6). Merged GitHub-base + grafted the engine: 9 engine services + migrations
+0006–0011 + reports route + universe + tests are pure adds; took the engine versions of the
+shared backend files (scheduler/config/impactScoring/materiality/news/portfolio), folded in the
+Phase-4 `captureException` + `seedUniverse` + landing route; kept HF FinBERT, dropped local
+transformers; integrated the engine UI (daily brief, Ask, brief modal) into the 5-page frontend.
+Verified clean boot (all migrations + seed), `npm test` 66/66, UI in-browser.
+
+**2. Congress data now LIVE.** Was on the bundled sample; now uses **Financial Modeling Prep**
+(`/stable/senate-latest` + `/stable/house-latest`, comma-separated in `CONGRESS_TRADES_URL`).
+`congress.js` extended to parse the FMP shape (firstName/lastName→politician, symbol→ticker,
+assetDescription, dateRecieved) + multi-URL fetch + chamber stamped from the URL. FMP free tier:
+single-symbol/stable endpoints only (v4 + batch are dead/premium), ~250 calls/day.
+
+**3. Search bars** on Institutions (by fund/manager) and Congress (by politician/ticker/company)
+— client-side filters over the loaded lists.
+
+**4. Phase 6 — Tiers & billing — DONE (see PLAN.md).** Migration 0012 (`subscription_tier`,
+`is_admin`, fwd-compat billing cols); tier read **per-request from the DB, not the JWT**;
+`middleware/tier.js`; gating on holdings cap / smart-money teaser / impact-feed depth / AI
+Workspace; `routes/admin.js` + `routes/billing.js` (checkout is a **dev stub** — flips tier
+directly; real Stripe/Razorpay at deploy); nav **tier switcher** for `is_admin`; `seedAdmin.js`
+seeds `admin@seniq.local` from `ADMIN_PASSWORD`. Plans/upgrade UI on the profile page.
+
+**5. Strategies sidebar scaffold.** New nav group with **Strategy Builder / Your Strategies /
+Backtest / Paper Trade** + placeholder pages — the shell for Phase 7.
+
+**6. Live prices next to each holding.** `priceService.js` now returns price + day-change %:
+crypto via CoinGecko (24h change, no key), equities via **Finnhub** (if `FINNHUB_API_KEY`) else
+**FMP** `/stable/quote` (single-symbol, cached 5 min vs the shared 250/day budget), commodities
+via FMP (gold/metals work; oil is premium → use yfinance later). `FMP_API_KEY` env added. UI
+shows `$price ▲/▼ chg%` next to the ticker.
+
+**Activation knobs:** `ANTHROPIC_API_KEY`+`FEATURES.CLAUDE_REPORTS=true` (Claude brief/Q&A);
+`HF_API_TOKEN`+`FINBERT_CLASSIFY=1` (FinBERT); `FINNHUB_API_KEY` (unthrottled US prices);
+`FMP_API_KEY`+`CONGRESS_TRADES_URL` (congress + FMP prices); `ADMIN_PASSWORD` (admin account).
+
+## Next — Phase 7 (Strategies) + Phase 8 (MCP) — see STRATEGY_PLAN.md
+The Strategies scaffold needs the real engine. **Locked decisions:** reuse the **zeuniq Python
+engine as a separate strategy service** (backtest + paper only; live/Dhan stays in zeuniq);
+data = **Finnhub** (US live), **yfinance** (India + commodities + backtest), CoinGecko/Binance
+(crypto), Dhan (India, from zeuniq); the visual builder mixes **technical factors** (EMA/RSI/MACD)
+with **SenIQ signal factors** (sentiment/z-score/smart-money/impact) in one strategy schema; the
+**MCP server (Phase 8)** is the signal-delivery bridge feeding SenIQ signals into the engine and
+exposing tools to external agents. Honest caveat: technical backtests go back years, but
+SenIQ-signal backtests are limited to SenIQ's recorded history (grows over time). Full design,
+schema sketch, and data adapters in **`STRATEGY_PLAN.md`**.
+
+Still open product-side: **Phase 4 cloud deploy** (artifacts exist; not confirmed live) and
+**Phase 5 OAuth** (Google/GitHub — not built; the teammates' "Phase 5" was nav/profile UI, not
+sign-in). Email provider (Resend/SES) still needed for OAuth verification + Phase 9 alerts.
