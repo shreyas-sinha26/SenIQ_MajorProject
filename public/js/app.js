@@ -265,10 +265,15 @@ function renderHoldings() {
     const exposure = h.weight_pct != null
       ? `${h.weight_pct}%`
       : h.quantity != null ? `${h.quantity} units` : '—';
+    const priceInline = h.price != null
+      ? `<span class="ht-price">${fmtUsd(h.price)}${h.change_pct != null
+          ? ` <span class="ht-chg ${h.change_pct >= 0 ? 'up' : 'down'}">${h.change_pct >= 0 ? '▲' : '▼'}${Math.abs(h.change_pct).toFixed(2)}%</span>`
+          : ''}</span>`
+      : '<span class="ht-price muted">—</span>';
     return `
     <tr class="${rowClass}" data-ticker="${h.ticker}" onclick="toggleFilter('${h.ticker}')">
       <td>
-        <div class="ht-ticker">${h.ticker} <span class="asset-class-badge ${cls}">${clsLabel}</span></div>
+        <div class="ht-ticker">${h.ticker} <span class="asset-class-badge ${cls}">${clsLabel}</span> ${priceInline}</div>
         <div class="ht-name">${h.company_name || h.ticker}</div>
       </td>
       <td class="ht-exposure">${exposure}</td>
@@ -1489,6 +1494,13 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+// Format a USD price: 2 decimals for ≥$1, up to 6 for sub-dollar (small-cap crypto).
+function fmtUsd(n) {
+  if (n == null || isNaN(n)) return '—';
+  const d = Number(n) >= 1 ? 2 : 6;
+  return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 }
 
 // ─── Company Brief (E4 onboarding) ───────────────────────────
