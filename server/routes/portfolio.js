@@ -1,15 +1,16 @@
 const express = require('express');
-const { queryOne, execute } = require('../db');
+const { query, queryOne, execute } = require('../db');
 const { getCompanyName } = require('../services/tickerMatcher');
 const { resolveAsset, isLaunchAssetClass } = require('../services/assetRegistry');
 const { getWeightedHoldings } = require('../services/portfolioService');
 const { onboardHolding, buildCompanyBrief } = require('../services/onboarding');
 const { authMiddleware } = require('./auth');
+const { attachTier, upsell } = require('../middleware/tier');
 
 const router = express.Router();
 
-// All portfolio routes require auth
-router.use(authMiddleware);
+// All portfolio routes require auth + tier context (req.tier / req.tierCfg).
+router.use(authMiddleware, attachTier);
 
 // Parse an optional non-negative number; '' / null / undefined → null.
 // Returns the sentinel `INVALID` for anything that isn't a valid number.
@@ -61,6 +62,16 @@ router.post('/', async (req, res) => {
       [req.user.id, ticker]
     );
     if (existing) return res.status(409).json({ error: `${ticker} already in portfolio` });
+
+    // Phase 6 — tier holdings cap (Free = 7; Plus/Pro unlimited).
+    const cap = req.tierCfg?.maxHoldings ?? Infinity;
+    if (Number.isFinite(cap)) {
+      const { n } = await queryOne('SELECT count(*)::int AS n FROM portfolio WHERE user_id = $1', [req.user.id]);
+      if (n >= cap) {
+        return res.status(402).json(upsell('plus',
+          `Free plan is limited to ${cap} holdings. Upgrade to add more.`));
+      }
+    }
 
     const created = await queryOne(
       `INSERT INTO portfolio (user_id, ticker, company_name, asset_class, exchange, quantity, cost_basis)
