@@ -12,18 +12,25 @@ politicians) is moving, and surfaces **what actually matters to _your_ holdings*
 
 ---
 
-## Features (Phases 0–3.5 + Engine E1–E6, shipped)
+## Features (Phases 0–3.5 + 6 + Engine E1–E6, shipped)
 
 - **Multi-asset portfolio** — equities / crypto / commodities with quantity + cost basis →
-  exposure weights. Live prices via Finnhub (US equities) and CoinGecko (crypto, no key).
+  exposure weights. **Live price + day-change shown next to each holding:** crypto via
+  CoinGecko (no key), US equities + commodities via FMP (`FMP_API_KEY`) — or Finnhub
+  (`FINNHUB_API_KEY`) for unthrottled real-time equity quotes; commodities (incl. oil) and
+  Indian stocks fall back to yfinance via the strategy service.
 - **Sentiment engine v2** — decay-weighted acute score + momentum + 90-day z-score baseline,
   computed on read. Multi-source ingest (GDELT + Indian RSS + Reddit). Optional **FinBERT**
   classifier via the Hugging Face Inference API; keyword lexicon by default.
 - **Portfolio Impact Scoring** — per-event, exposure-weighted impact ranking + a per-user feed.
-- **Smart money** — 13F filings via free **SEC EDGAR** (10 seeded funds) + Congress trades,
-  follows, and signed outbound webhooks.
+- **Smart money** — 13F filings via free **SEC EDGAR** (10 seeded funds) + **live Congress
+  trades** (Financial Modeling Prep, both chambers — see `CONGRESS_TRADES_URL`), follows,
+  signed outbound webhooks, and a **search bar** on both Institutions and Congress.
 - **News relevance & de-spam** — a 3-bucket feed (Holdings / Markets / World), event
   clustering (one card per story), and materiality-gated alerts.
+- **Tiers & billing (Phase 6)** — Free / Plus / Pro with real gating (holdings cap, smart-money
+  teaser, impact-feed depth, AI Workspace), a Plans/upgrade page (Stripe/Razorpay stubbed until
+  deploy), and an **admin tier switcher** to preview every tier live (`is_admin` + `ADMIN_*`).
 
 **Intelligence engine (E1–E6):**
 - **E1 — entity resolution + durable events** — a curated company universe (~US 100 / Nifty 50 /
@@ -39,8 +46,14 @@ politicians) is moving, and surfaces **what actually matters to _your_ holdings*
   what changed since yesterday. Server-scheduled, behind a flag, with hard cost guardrails.
 - **E6 — Ask anything** — natural-language portfolio Q&A grounded strictly on engine data.
 
-See [`PLAN.md`](PLAN.md) (product roadmap), [`ENGINE_PLAN.md`](ENGINE_PLAN.md) (engine track), and
-[`handoff.md`](handoff.md) for build notes.
+**In progress — Strategies (Phase 7) + MCP (Phase 8):** a visual **strategy builder** (pick
+EMA/RSI/MACD…), **backtesting**, and **paper trading** for US stocks + crypto (+ India), reusing
+the zeuniq Python engine as a separate service, plus an **MCP server** exposing SenIQ signals to
+agents. Strategies sit in the sidebar (Builder / Your Strategies / Backtest / Paper Trade) as
+scaffolds today. Design + decisions in [`STRATEGY_PLAN.md`](STRATEGY_PLAN.md).
+
+See [`PLAN.md`](PLAN.md) (product roadmap), [`ENGINE_PLAN.md`](ENGINE_PLAN.md) (engine track),
+[`STRATEGY_PLAN.md`](STRATEGY_PLAN.md) (strategies/MCP), and [`handoff.md`](handoff.md) for build notes.
 
 ---
 
@@ -82,13 +95,15 @@ Optional API keys (all degrade gracefully — see inline comments in `.env.examp
 
 | Variable | Purpose | Without it |
 |---|---|---|
-| `FINNHUB_API_KEY` | Live US equity prices ([free](https://finnhub.io)) | Equities show N/A; crypto still prices free |
+| `FMP_API_KEY` | Live US-equity + commodity (gold) prices, congress data ([free](https://financialmodelingprep.com)) | Those prices show N/A; crypto still prices free |
+| `FINNHUB_API_KEY` | Unthrottled real-time US-equity prices ([free](https://finnhub.io), preferred over FMP) | Falls back to FMP (cached, rate-limited) |
 | `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | Reddit social ingest | Skipped; GDELT + RSS still feed news |
 | `FINBERT_CLASSIFY=1` | Use the FinBERT classifier (HF Inference API) | Keyword lexicon (default) |
 | `HF_API_TOKEN` | Hugging Face token for FinBERT | FinBERT disabled; lexicon used |
 | `SEC_USER_AGENT` | SEC EDGAR contact (real email) | Default UA used |
 | `CONGRESS_TRADES_URL` | Live congress-trade data | Bundled sample (`data/congress_sample.json`) |
 | `ANTHROPIC_API_KEY` | Claude — daily brief (E5) + Q&A (E6) | Free deterministic writer |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Seed an admin account (tier switcher, set any user's tier) | No admin account seeded |
 
 ### 4. Run
 ```powershell
