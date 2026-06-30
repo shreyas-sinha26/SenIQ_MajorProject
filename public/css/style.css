@@ -1285,3 +1285,10 @@ tr:hover .ht-info { opacity: 1; }
 .strat-placeholder { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; padding: 36px 20px; color: var(--text-secondary); }
 .strat-placeholder p { max-width: 540px; line-height: 1.6; font-size: .92rem; margin: 0; }
 .strat-ph-icon { font-size: 44px; color: var(--accent); opacity: .85; }
+
+/* ═══ Live price next to holding (Phase 6.5) ═══ */
+.ht-price { font-size: .82rem; font-weight: 700; color: var(--text-primary); margin-left: 6px; white-space: nowrap; }
+.ht-price.muted { color: var(--text-muted); font-weight: 500; }
+.ht-chg { font-size: .72rem; font-weight: 700; margin-left: 2px; }
+.ht-chg.up { color: var(--positive); }
+.ht-chg.down { color: var(--negative); }

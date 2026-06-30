@@ -33,6 +33,7 @@ async function getWeightedHoldings(userId) {
       cost_basis: h.cost_basis != null ? Number(h.cost_basis) : null,
       price,
       currency: quote ? quote.currency : null,
+      change_pct: quote && quote.changePct != null ? Math.round(quote.changePct * 100) / 100 : null,
       market_value: marketValue,
       weight_pct: null,   // display: true value/total, null when unpriced
       exposure_pct: null, // scoring: same, but with an equal-weight fallback
