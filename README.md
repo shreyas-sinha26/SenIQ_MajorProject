@@ -53,7 +53,8 @@ agents. Strategies sit in the sidebar (Builder / Your Strategies / Backtest / Pa
 scaffolds today. Design + decisions in [`STRATEGY_PLAN.md`](STRATEGY_PLAN.md).
 
 See [`PLAN.md`](PLAN.md) (product roadmap), [`ENGINE_PLAN.md`](ENGINE_PLAN.md) (engine track),
-[`STRATEGY_PLAN.md`](STRATEGY_PLAN.md) (strategies/MCP), and [`handoff.md`](handoff.md) for build notes.
+[`STRATEGY_PLAN.md`](STRATEGY_PLAN.md) (strategies/MCP), [`IPO_PLAN.md`](IPO_PLAN.md) (IPO +
+small/mid-cap sentiment optimization), and [`handoff.md`](handoff.md) for build notes.
 
 ---
 
