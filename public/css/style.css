@@ -1278,3 +1278,10 @@ tr:hover .ht-info { opacity: 1; }
 .plan-current-badge { font-size: .72rem; font-weight: 700; text-transform: uppercase; color: var(--accent-light); text-align: center; padding: 8px; }
 .plan-badge.plus { color: #0ea5e9; }
 .plan-badge.pro { color: #a855f7; }
+
+/* ═══ Strategies nav group + placeholder pages (Phase 7 scaffold) ═══ */
+.main-nav-group { font-size: .62rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); padding: 14px 14px 4px; margin-top: 6px; border-top: 1px solid var(--line); }
+.strat-section { padding: 24px; }
+.strat-placeholder { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; padding: 36px 20px; color: var(--text-secondary); }
+.strat-placeholder p { max-width: 540px; line-height: 1.6; font-size: .92rem; margin: 0; }
+.strat-ph-icon { font-size: 44px; color: var(--accent); opacity: .85; }

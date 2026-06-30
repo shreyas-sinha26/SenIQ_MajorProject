@@ -255,6 +255,24 @@
           <span class="material-symbols-outlined">psychology</span>
           <span class="main-tab-label">AI Workspace</span>
         </button>
+
+        <div class="main-nav-group">Strategies</div>
+        <button class="main-tab" data-page="strategy-builder">
+          <span class="material-symbols-outlined">build</span>
+          <span class="main-tab-label">Strategy Builder</span>
+        </button>
+        <button class="main-tab" data-page="strategies">
+          <span class="material-symbols-outlined">bookmarks</span>
+          <span class="main-tab-label">Your Strategies</span>
+        </button>
+        <button class="main-tab" data-page="backtest">
+          <span class="material-symbols-outlined">query_stats</span>
+          <span class="main-tab-label">Backtest</span>
+        </button>
+        <button class="main-tab" data-page="paper-trade">
+          <span class="material-symbols-outlined">candlestick_chart</span>
+          <span class="main-tab-label">Paper Trade</span>
+        </button>
       </nav>
 
       <!-- ═══ PAGE: Dashboard (executive summary) ═══ -->
@@ -579,6 +597,74 @@
           </div>
         </section>
       </div><!-- /page-ai -->
+
+      <!-- ═══ PAGE: Strategy Builder ═══ -->
+      <div id="page-strategy-builder" class="page hidden">
+        <section class="strat-section glass">
+          <div class="section-header">
+            <h2>Strategy Builder</h2>
+            <span class="impact-subtitle">Compose a rule-based strategy — no code</span>
+          </div>
+          <div class="strat-placeholder">
+            <span class="material-symbols-outlined strat-ph-icon">build</span>
+            <p>Pick indicators (EMA, RSI, MACD…), set their parameters, and compose entry/exit
+              rules with crossovers and thresholds. Save it to <strong>Your Strategies</strong>,
+              then backtest or paper-trade it across US stocks &amp; crypto.</p>
+            <span class="badge">Coming in Phase 7 · Plus &amp; Pro</span>
+          </div>
+        </section>
+      </div><!-- /page-strategy-builder -->
+
+      <!-- ═══ PAGE: Your Strategies ═══ -->
+      <div id="page-strategies" class="page hidden">
+        <section class="strat-section glass">
+          <div class="section-header">
+            <h2>Your Strategies</h2>
+            <span class="impact-subtitle">Saved strategies + their live signals</span>
+          </div>
+          <div class="strat-placeholder">
+            <span class="material-symbols-outlined strat-ph-icon">bookmarks</span>
+            <p>Every strategy you build lands here with its current <strong>signal</strong>
+              (buy / sell / hold) on the tickers you chose, the conditions that fired, and a
+              one-click jump to backtest or paper-trade it.</p>
+            <span class="badge">Coming in Phase 7</span>
+          </div>
+        </section>
+      </div><!-- /page-strategies -->
+
+      <!-- ═══ PAGE: Backtest ═══ -->
+      <div id="page-backtest" class="page hidden">
+        <section class="strat-section glass">
+          <div class="section-header">
+            <h2>Backtest</h2>
+            <span class="impact-subtitle">Run a strategy over historical data</span>
+          </div>
+          <div class="strat-placeholder">
+            <span class="material-symbols-outlined strat-ph-icon">query_stats</span>
+            <p>Replay any strategy over years of US-equity &amp; crypto history — equity curve,
+              win rate, drawdown, and trade log. Powered by the engine, starting with daily
+              data and adding intraday next.</p>
+            <span class="badge">Coming in Phase 7 · Plus &amp; Pro</span>
+          </div>
+        </section>
+      </div><!-- /page-backtest -->
+
+      <!-- ═══ PAGE: Paper Trade ═══ -->
+      <div id="page-paper-trade" class="page hidden">
+        <section class="strat-section glass">
+          <div class="section-header">
+            <h2>Paper Trade</h2>
+            <span class="impact-subtitle">Run a strategy live on virtual money</span>
+          </div>
+          <div class="strat-placeholder">
+            <span class="material-symbols-outlined strat-ph-icon">candlestick_chart</span>
+            <p>Deploy a strategy forward on live prices with simulated fills — virtual cash,
+              positions, and P&amp;L, no broker and no real money. Watch how it would have traded
+              in real time.</p>
+            <span class="badge">Coming in Phase 7 · Pro</span>
+          </div>
+        </section>
+      </div><!-- /page-paper-trade -->
 
       <!-- ═══ PAGE: Profile ═══ -->
       <div id="page-profile" class="page hidden">
