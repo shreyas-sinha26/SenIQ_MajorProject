@@ -603,14 +603,74 @@
         <section class="strat-section glass">
           <div class="section-header">
             <h2>Strategy Builder</h2>
-            <span class="impact-subtitle">Compose a rule-based strategy — no code</span>
+            <span class="impact-subtitle">Compose a rule-based strategy — no code. Educational, not investment advice.</span>
           </div>
-          <div class="strat-placeholder">
-            <span class="material-symbols-outlined strat-ph-icon">build</span>
-            <p>Pick indicators (EMA, RSI, MACD…), set their parameters, and compose entry/exit
-              rules with crossovers and thresholds. Save it to <strong>Your Strategies</strong>,
-              then backtest or paper-trade it across US stocks &amp; crypto.</p>
-            <span class="badge">Coming in Phase 7 · Plus &amp; Pro</span>
+
+          <div id="sb-status" class="hidden"></div>
+
+          <div id="sb-editor" class="sb-editor hidden">
+            <label class="bt-field sb-name-field">
+              <span>Strategy name</span>
+              <input id="sb-name" type="text" placeholder="My strategy" maxlength="80" />
+            </label>
+
+            <div class="sb-block">
+              <h3><span class="material-symbols-outlined">functions</span> Indicators</h3>
+              <p class="sb-hint">Define the indicators your rules will reference.</p>
+              <div id="sb-factors"></div>
+              <button type="button" class="sb-add" id="sb-add-factor">+ Add indicator</button>
+            </div>
+
+            <div class="sb-block">
+              <h3><span class="material-symbols-outlined">login</span> Entry — BUY when ALL of these are true</h3>
+              <div id="sb-entry"></div>
+              <button type="button" class="sb-add" id="sb-add-entry">+ Add condition</button>
+            </div>
+
+            <div class="sb-block">
+              <h3><span class="material-symbols-outlined">logout</span> Exit — SELL when ANY of these is true</h3>
+              <div id="sb-exit"></div>
+              <button type="button" class="sb-add" id="sb-add-exit">+ Add condition</button>
+              <div class="sb-risk">
+                <label class="bt-field">
+                  <span>Stop-loss % (optional)</span>
+                  <input id="sb-stop" type="number" min="0.1" max="99" step="0.1" placeholder="e.g. 5" />
+                </label>
+                <label class="bt-field">
+                  <span>Take-profit % (optional)</span>
+                  <input id="sb-target" type="number" min="0.1" max="99" step="0.1" placeholder="e.g. 12" />
+                </label>
+              </div>
+            </div>
+
+            <div class="sb-block">
+              <h3><span class="material-symbols-outlined">pie_chart</span> Position sizing</h3>
+              <div class="sb-risk">
+                <label class="bt-field">
+                  <span>Method</span>
+                  <select id="sb-sizing-type">
+                    <option value="percent_equity" selected>% of equity per trade</option>
+                    <option value="fixed_cash">Fixed cash per trade</option>
+                  </select>
+                </label>
+                <label class="bt-field">
+                  <span id="sb-sizing-label">Percent (1–100)</span>
+                  <input id="sb-sizing-value" type="number" value="25" min="1" step="1" />
+                </label>
+              </div>
+            </div>
+
+            <div id="sb-errors" class="sb-errors hidden"></div>
+
+            <div class="sb-actions">
+              <button type="button" id="sb-backtest" class="btn-primary">
+                <span class="material-symbols-outlined">query_stats</span> Backtest this strategy
+              </button>
+              <button type="button" id="sb-save" class="sb-reset">
+                <span class="material-symbols-outlined">bookmark_add</span> Save to Your Strategies
+              </button>
+              <button type="button" id="sb-reset" class="sb-reset">Reset</button>
+            </div>
           </div>
         </section>
       </div><!-- /page-strategy-builder -->
@@ -620,31 +680,113 @@
         <section class="strat-section glass">
           <div class="section-header">
             <h2>Your Strategies</h2>
-            <span class="impact-subtitle">Saved strategies + their live signals</span>
+            <span class="impact-subtitle">Saved strategies + their live rule signals — educational, not investment advice</span>
           </div>
-          <div class="strat-placeholder">
-            <span class="material-symbols-outlined strat-ph-icon">bookmarks</span>
-            <p>Every strategy you build lands here with its current <strong>signal</strong>
-              (buy / sell / hold) on the tickers you chose, the conditions that fired, and a
-              one-click jump to backtest or paper-trade it.</p>
-            <span class="badge">Coming in Phase 7</span>
-          </div>
+          <div id="ys-status" class="hidden"></div>
+          <div id="ys-list" class="ys-list"></div>
         </section>
       </div><!-- /page-strategies -->
+
+      <!-- Save-strategy modal (used by Builder + Backtest pages) -->
+      <div class="modal-overlay hidden" id="save-strategy-modal">
+        <div class="modal glass">
+          <div class="modal-header">
+            <h3>Save strategy</h3>
+            <button type="button" class="modal-close" id="ss-close">×</button>
+          </div>
+          <div class="modal-body">
+            <label class="bt-field">
+              <span>Name</span>
+              <input id="ss-name" type="text" maxlength="80" placeholder="My strategy" />
+            </label>
+            <label class="bt-field">
+              <span>Watch symbols (up to 5, comma-separated — default US; use TICKER:NSE / TICKER:CRYPTO for other markets)</span>
+              <input id="ss-symbols" type="text" placeholder="NVDA, AAPL, BTC:CRYPTO" />
+            </label>
+            <div id="ss-error" class="sb-errors hidden"></div>
+            <button type="button" id="ss-save" class="btn-primary">
+              <span class="material-symbols-outlined">bookmark_add</span> Save
+            </button>
+          </div>
+        </div>
+      </div>
 
       <!-- ═══ PAGE: Backtest ═══ -->
       <div id="page-backtest" class="page hidden">
         <section class="strat-section glass">
           <div class="section-header">
             <h2>Backtest</h2>
-            <span class="impact-subtitle">Run a strategy over historical data</span>
+            <span class="impact-subtitle">Replay a strategy over historical data — educational, not investment advice</span>
           </div>
-          <div class="strat-placeholder">
-            <span class="material-symbols-outlined strat-ph-icon">query_stats</span>
-            <p>Replay any strategy over years of US-equity &amp; crypto history — equity curve,
-              win rate, drawdown, and trade log. Powered by the engine, starting with daily
-              data and adding intraday next.</p>
-            <span class="badge">Coming in Phase 7 · Plus &amp; Pro</span>
+
+          <div id="bt-status" class="hidden"></div>
+
+          <form id="bt-form" class="bt-form hidden">
+            <div class="bt-grid">
+              <label class="bt-field bt-field-wide">
+                <span>Strategy</span>
+                <select id="bt-strategy"></select>
+                <small id="bt-strategy-desc"></small>
+              </label>
+              <div id="bt-params" class="bt-params"></div>
+              <label class="bt-field">
+                <span>Symbol</span>
+                <input id="bt-symbol" type="text" placeholder="AAPL" required />
+              </label>
+              <label class="bt-field">
+                <span>Market</span>
+                <select id="bt-exchange">
+                  <option value="US" selected>US stocks</option>
+                  <option value="NSE">India (NSE)</option>
+                  <option value="BSE">India (BSE)</option>
+                  <option value="CRYPTO">Crypto</option>
+                  <option value="COMMODITY">Commodity</option>
+                </select>
+              </label>
+              <label class="bt-field">
+                <span>From</span>
+                <input id="bt-start" type="date" required />
+              </label>
+              <label class="bt-field">
+                <span>To</span>
+                <input id="bt-end" type="date" required />
+              </label>
+              <label class="bt-field">
+                <span>Starting capital</span>
+                <input id="bt-cash" type="number" value="100000" min="1000" step="1000" />
+              </label>
+            </div>
+            <div class="bt-actions">
+              <button type="submit" id="bt-run" class="btn-primary">
+                <span class="material-symbols-outlined">play_arrow</span> Run backtest
+              </button>
+              <button type="button" id="bt-save" class="sb-reset">
+                <span class="material-symbols-outlined">bookmark_add</span> Save
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section id="bt-results" class="strat-section glass hidden">
+          <div class="section-header">
+            <h2 id="bt-results-title">Results</h2>
+            <span class="impact-subtitle" id="bt-results-sub"></span>
+          </div>
+          <div id="bt-coverage" class="bt-coverage hidden"></div>
+          <div id="bt-metrics" class="bt-metrics"></div>
+          <div class="chart-container bt-chart-container">
+            <canvas id="bt-equity-chart"></canvas>
+          </div>
+          <div class="bt-trades">
+            <h3>Trades <span id="bt-trade-count" class="badge"></span></h3>
+            <div class="bt-trades-scroll">
+              <table id="bt-trades-table">
+                <thead>
+                  <tr><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>Entry px</th><th>Exit px</th><th>P&amp;L</th><th>Return</th><th>Days</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
           </div>
         </section>
       </div><!-- /page-backtest -->
@@ -654,15 +796,48 @@
         <section class="strat-section glass">
           <div class="section-header">
             <h2>Paper Trade</h2>
-            <span class="impact-subtitle">Run a strategy live on virtual money</span>
+            <span class="impact-subtitle">Deploy a saved strategy on virtual money — simulated fills, zero risk. Educational, not investment advice.</span>
           </div>
-          <div class="strat-placeholder">
-            <span class="material-symbols-outlined strat-ph-icon">candlestick_chart</span>
-            <p>Deploy a strategy forward on live prices with simulated fills — virtual cash,
-              positions, and P&amp;L, no broker and no real money. Watch how it would have traded
-              in real time.</p>
-            <span class="badge">Coming in Phase 7 · Pro</span>
+
+          <div id="pt-status" class="hidden"></div>
+
+          <form id="pt-deploy-form" class="bt-form hidden">
+            <div class="bt-grid">
+              <label class="bt-field">
+                <span>Saved strategy</span>
+                <select id="pt-strategy"></select>
+              </label>
+              <label class="bt-field">
+                <span>Symbol</span>
+                <input id="pt-symbol" type="text" placeholder="AAPL" required />
+              </label>
+              <label class="bt-field">
+                <span>Market</span>
+                <select id="pt-exchange">
+                  <option value="US" selected>US stocks</option>
+                  <option value="NSE">India (NSE)</option>
+                  <option value="BSE">India (BSE)</option>
+                  <option value="CRYPTO">Crypto</option>
+                  <option value="COMMODITY">Commodity</option>
+                </select>
+              </label>
+              <label class="bt-field">
+                <span>Paper cash</span>
+                <input id="pt-cash" type="number" value="100000" min="1000" step="1000" />
+              </label>
+            </div>
+            <button type="submit" id="pt-deploy" class="btn-primary">
+              <span class="material-symbols-outlined">rocket_launch</span> Deploy
+            </button>
+          </form>
+        </section>
+
+        <section class="strat-section glass">
+          <div class="section-header">
+            <h2>Deployments</h2>
+            <span class="impact-subtitle">Each replays deterministically from its deploy date through the sim engine</span>
           </div>
+          <div id="pt-list" class="pt-list"></div>
         </section>
       </div><!-- /page-paper-trade -->
 
@@ -766,6 +941,32 @@
             </div>
           </section>
         </div>
+
+        <!-- API Access — MCP keys (Phase 8) -->
+        <section class="profile-card glass" id="api-keys-section">
+          <div class="profile-card-header">
+            <h3>API Access (MCP)</h3>
+            <span class="profile-card-sub">Connect AI agents to your strategies — Pro plan</span>
+          </div>
+          <div class="profile-card-body">
+            <p class="form-hint">
+              Keys work on both the REST API at <code id="v1-endpoint-url">/v1</code> and the
+              MCP server at <code id="mcp-endpoint-url">/mcp</code> — read + run strategy tools:
+              catalog, validate, backtest, signals, saved strategies and paper deployments.
+              Send the key as <code>Authorization: Bearer &lt;key&gt;</code> ·
+              <a href="/docs" target="_blank" rel="noopener">Full API docs ↗</a>
+            </p>
+            <div id="api-key-new" class="api-key-new hidden"></div>
+            <div id="api-keys-list" class="api-keys-list">
+              <div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+            </div>
+            <div class="api-key-create">
+              <input type="text" id="api-key-name" placeholder="Key name (e.g. Claude Desktop)" maxlength="60" autocomplete="off">
+              <button class="btn btn-primary btn-sm" id="api-key-create-btn">Create Key</button>
+            </div>
+            <div id="api-key-msg" class="profile-msg hidden"></div>
+          </div>
+        </section>
       </div><!-- /page-profile -->
 
       <!-- Global Disclaimer -->

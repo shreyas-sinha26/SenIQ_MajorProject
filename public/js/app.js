@@ -1106,6 +1106,8 @@ function openProfilePage() {
   document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
   document.getElementById('page-profile').classList.remove('hidden');
   populateProfilePage(currentUser);
+  loadPlans();
+  loadApiKeys();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1389,7 +1391,11 @@ function switchToPage(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('hidden', p.id !== `page-${page}`));
   if (page === 'analytics') updateSentimentChart(activeFilter && cachedSentiments[activeFilter] ? { [activeFilter]: cachedSentiments[activeFilter] } : cachedSentiments);
   if (page === 'ai') loadDailyBrief();
-  if (page === 'profile') { populateProfilePage(currentUser); loadPlans(); }
+  if (page === 'profile') { populateProfilePage(currentUser); loadPlans(); loadApiKeys(); }
+  if (page === 'backtest') initBacktestPage();
+  if (page === 'strategy-builder') initBuilderPage();
+  if (page === 'strategies') initStrategiesPage();
+  if (page === 'paper-trade') initPaperPage();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1397,6 +1403,909 @@ function initMainTabs() {
   document.querySelectorAll('.main-tab').forEach(tab => {
     tab.addEventListener('click', () => switchToPage(tab.dataset.page));
   });
+}
+
+// ─── Backtest page (Phase 7 — strategy engine) ───────────────
+let btCatalog = null;       // strategy list from the engine, loaded once per session
+let btChart = null;         // Chart.js instance for the equity curve
+let btInitDone = false;
+
+async function initBacktestPage() {
+  if (!btInitDone) {
+    btInitDone = true;
+    document.getElementById('bt-form').addEventListener('submit', runBacktest);
+    document.getElementById('bt-strategy').addEventListener('change', renderBtParams);
+    document.getElementById('bt-save').addEventListener('click', () => {
+      const sel = document.getElementById('bt-strategy');
+      if (sel.value === '__custom__') {
+        let spec = null;
+        try { spec = JSON.parse(localStorage.getItem(SB_SPEC_KEY)); } catch { /* ignore */ }
+        if (!spec) { showToast('No Builder strategy to save', 'error'); return; }
+        openSaveModal({ custom: spec }, spec.name);
+      } else {
+        const entry = btSelectedStrategy();
+        if (!entry) return;
+        const params = {};
+        document.querySelectorAll('#bt-params input[data-param]').forEach(inp => {
+          if (inp.value !== '') params[inp.dataset.param] = Number(inp.value);
+        });
+        openSaveModal({ strategy: entry.name, params }, entry.label);
+      }
+    });
+    // Default range: last 2 years, ending today.
+    const end = new Date(), start = new Date();
+    start.setFullYear(end.getFullYear() - 2);
+    document.getElementById('bt-end').value = end.toISOString().slice(0, 10);
+    document.getElementById('bt-start').value = start.toISOString().slice(0, 10);
+  }
+  if (!btCatalog) await loadBtCatalog();
+}
+
+function btStatus(html) {
+  const el = document.getElementById('bt-status');
+  el.classList.toggle('hidden', !html);
+  el.innerHTML = html || '';
+}
+
+async function loadBtCatalog() {
+  btStatus('<div class="empty-state small"><p>Connecting to the strategy engine…</p></div>');
+  try {
+    const data = await api('/api/strategies/catalog');
+    btCatalog = data.strategies || [];
+    const sel = document.getElementById('bt-strategy');
+    sel.innerHTML = btCatalog.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.label)}</option>`).join('');
+    btAddCustomOption();
+    renderBtParams();
+    btStatus('');
+    document.getElementById('bt-form').classList.remove('hidden');
+  } catch (err) {
+    btCatalog = null;
+    document.getElementById('bt-form').classList.add('hidden');
+    const msg = err.status === 503
+      ? 'The strategy engine is offline. Start it and revisit this page.'
+      : (err.message || 'Could not load the strategy catalog.');
+    btStatus(`<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">cloud_off</span><p>${escapeHtml(msg)}</p></div>`);
+  }
+}
+
+function btSelectedStrategy() {
+  const name = document.getElementById('bt-strategy').value;
+  return (btCatalog || []).find(s => s.name === name);
+}
+
+// Param inputs are generated from the engine's ParamSpec schema, so new
+// strategies/params appear here with zero frontend changes. The Builder's
+// custom strategy has no params — it shows a rule summary instead.
+function renderBtParams() {
+  const wrap = document.getElementById('bt-params');
+  const descEl = document.getElementById('bt-strategy-desc');
+  if (document.getElementById('bt-strategy').value === '__custom__') {
+    let spec = null;
+    try { spec = JSON.parse(localStorage.getItem(SB_SPEC_KEY)); } catch { /* ignore */ }
+    const nf = spec ? spec.factors.length : 0;
+    const ne = spec && spec.entry && spec.entry.all ? spec.entry.all.length : 0;
+    descEl.textContent = spec
+      ? `Built in the Strategy Builder — ${nf} indicator${nf === 1 ? '' : 's'}, ${ne} entry condition${ne === 1 ? '' : 's'}. Edit it on the Builder page.`
+      : '';
+    wrap.innerHTML = '';
+    return;
+  }
+  const entry = btSelectedStrategy();
+  descEl.textContent = entry ? entry.description : '';
+  wrap.innerHTML = (entry ? entry.params : []).map(p => `
+    <label class="bt-field">
+      <span>${escapeHtml(p.description || p.name)}</span>
+      <input type="number" data-param="${escapeHtml(p.name)}" value="${p.default}"
+             ${p.min != null ? `min="${p.min}"` : ''} ${p.max != null ? `max="${p.max}"` : ''}
+             ${p.type === 'float' ? 'step="any"' : 'step="1"'} />
+    </label>`).join('');
+}
+
+async function runBacktest(e) {
+  e.preventDefault();
+  const isCustom = document.getElementById('bt-strategy').value === '__custom__';
+  let strategyPart;
+  if (isCustom) {
+    let spec = null;
+    try { spec = JSON.parse(localStorage.getItem(SB_SPEC_KEY)); } catch { /* ignore */ }
+    if (!spec) { showToast('No Builder strategy found — create one on the Strategy Builder page', 'error'); return; }
+    strategyPart = { custom: spec };
+  } else {
+    const entry = btSelectedStrategy();
+    if (!entry) return;
+    const params = {};
+    document.querySelectorAll('#bt-params input[data-param]').forEach(inp => {
+      if (inp.value !== '') params[inp.dataset.param] = Number(inp.value);
+    });
+    strategyPart = { strategy: entry.name, params };
+  }
+
+  const body = {
+    ...strategyPart,
+    symbol: document.getElementById('bt-symbol').value.trim().toUpperCase(),
+    exchange: document.getElementById('bt-exchange').value,
+    start_date: document.getElementById('bt-start').value,
+    end_date: document.getElementById('bt-end').value,
+    initial_cash: document.getElementById('bt-cash').value || '100000',
+  };
+  if (!body.symbol) { showToast('Enter a symbol to backtest', 'error'); return; }
+
+  const btn = document.getElementById('bt-run');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="material-symbols-outlined spin">progress_activity</span> Running…';
+  btStatus('');
+  try {
+    const data = await api('/api/strategies/backtest', { method: 'POST', body: JSON.stringify(body) });
+    renderBtResults(data);
+  } catch (err) {
+    document.getElementById('bt-results').classList.add('hidden');
+    if (err.status === 402) {
+      const need = err.data && err.data.upgrade ? err.data.upgrade.requiredLabel : 'Plus';
+      btStatus(`<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>Backtesting is a ${escapeHtml(need)} feature. <a href="#" onclick="switchToPage('profile');return false;">Upgrade your plan</a> to run strategies over history.</p></div>`);
+    } else if (err.status === 503) {
+      btStatus('<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">cloud_off</span><p>The strategy engine is offline. Start it and try again.</p></div>');
+    } else {
+      showToast(err.message || 'Backtest failed', 'error');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="material-symbols-outlined">play_arrow</span> Run backtest';
+  }
+}
+
+const btPct = v => v == null ? '—' : `${(Number(v) * 100).toFixed(1)}%`;
+const btNum = (v, d = 2) => v == null ? '—' : Number(v).toFixed(d);
+
+function renderBtResults(data) {
+  const m = data.report.metrics;
+  const req = data.request;
+  const positive = Number(m.total_return_pct) >= 0;
+
+  document.getElementById('bt-results-title').textContent = `${req.symbol} · ${req.strategy}`;
+  document.getElementById('bt-results-sub').textContent =
+    `${req.start_date} → ${req.end_date} · ${data.n_bars} bars · ${data.provider.name}`;
+
+  // Backtest-depth honesty: SenIQ signal history only reaches back as far as
+  // SenIQ has been recording — show how much of this run the factors covered.
+  const covEl = document.getElementById('bt-coverage');
+  const cov = data.seniq_coverage;
+  if (cov) {
+    const thin = cov.pct < 60;
+    covEl.className = `bt-coverage ${thin ? 'bt-coverage-warn' : 'bt-coverage-ok'}`;
+    covEl.innerHTML = `<span class="material-symbols-outlined">${thin ? 'warning' : 'insights'}</span>
+      SenIQ signal data covers <strong>${cov.bars_covered} of ${cov.bars_total} bars (${cov.pct}%)</strong>
+      ${cov.first_signal_date ? ` — from ${escapeHtml(cov.first_signal_date)} to ${escapeHtml(cov.last_signal_date)}` : ''}.
+      Signal conditions are false outside coverage${thin ? ' — consider narrowing the date range to the covered window; history grows as SenIQ keeps recording' : ''}.`;
+    covEl.classList.remove('hidden');
+  } else {
+    covEl.classList.add('hidden');
+  }
+
+  const cards = [
+    { label: 'Total return', value: btPct(m.total_return_pct), cls: positive ? 'pos' : 'neg' },
+    { label: 'Final equity', value: Number(m.final_equity).toLocaleString(undefined, { maximumFractionDigits: 0 }) },
+    { label: 'Max drawdown', value: btPct(m.max_drawdown_pct), cls: 'neg' },
+    { label: 'CAGR', value: btPct(m.cagr) },
+    { label: 'Sharpe', value: btNum(m.sharpe) },
+    { label: 'Win rate', value: btPct(m.win_rate) },
+    { label: 'Trades', value: m.n_trades },
+    { label: 'Exposure', value: btPct(m.exposure_pct) },
+  ];
+  document.getElementById('bt-metrics').innerHTML = cards.map(c =>
+    `<div class="bt-metric ${c.cls || ''}"><span class="bt-metric-value">${c.value}</span><span class="bt-metric-label">${c.label}</span></div>`
+  ).join('');
+
+  // Equity curve
+  const curve = data.report.equity_curve || [];
+  const labels = curve.map(p => p.timestamp.slice(0, 10));
+  const equity = curve.map(p => Number(p.equity));
+  if (btChart) btChart.destroy();
+  btChart = new Chart(document.getElementById('bt-equity-chart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Equity',
+        data: equity,
+        borderColor: positive ? '#34d399' : '#f87171',
+        backgroundColor: positive ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)',
+        fill: true, pointRadius: 0, borderWidth: 2, tension: 0.1,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { ticks: { maxTicksLimit: 8, color: '#8b93a7' }, grid: { display: false } },
+        y: { ticks: { color: '#8b93a7' }, grid: { color: 'rgba(139,147,167,0.1)' } },
+      },
+    },
+  });
+
+  // Trades table
+  const trades = data.report.trades || [];
+  document.getElementById('bt-trade-count').textContent = trades.length;
+  document.querySelector('#bt-trades-table tbody').innerHTML = trades.length
+    ? trades.map(t => {
+        const ret = Number(t.return_pct);
+        return `<tr>
+          <td><span class="bt-side ${t.side === 'LONG' ? 'pos' : 'neg'}">${escapeHtml(t.side)}</span></td>
+          <td>${t.entry_ts.slice(0, 10)}</td>
+          <td>${t.exit_ts.slice(0, 10)}</td>
+          <td>${t.quantity}</td>
+          <td>${btNum(t.entry_price)}</td>
+          <td>${btNum(t.exit_price)}</td>
+          <td class="${Number(t.net_pnl) >= 0 ? 'pos' : 'neg'}">${Number(t.net_pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+          <td class="${ret >= 0 ? 'pos' : 'neg'}">${btPct(ret)}</td>
+          <td>${t.holding_days}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="9" class="bt-no-trades">No completed trades in this window — the strategy never triggered (or a position is still open).</td></tr>';
+
+  document.getElementById('bt-results').classList.remove('hidden');
+  document.getElementById('bt-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ─── Strategy Builder (Phase 7) ──────────────────────────────
+// Rule-row editor that emits the engine's strategy spec (factors + entry/exit
+// trees). The UI model lives in localStorage; the emitted spec is handed to the
+// Backtest page as a "Custom — from Builder" strategy.
+const SB_UI_KEY = 'seniq_builder_ui';
+const SB_SPEC_KEY = 'seniq_custom_strategy';
+let sbInitDone = false;
+let sbVocab = null;   // builder vocabulary from the catalog (indicators, operators)
+
+// Param fields per factor fn (engine contract). SenIQ signal factors are
+// namespaced "seniq:<metric>" in the UI model and emitted as
+// {source:"seniq", metric} in the spec.
+const SB_PARAMS = {
+  sma: { period: 20 }, ema: { period: 20 }, rsi: { period: 14 },
+  highest: { period: 20 }, lowest: { period: 20 }, roc: { period: 20 },
+  macd: { fast: 12, slow: 26 }, macd_signal: { fast: 12, slow: 26, signal: 9 },
+  'seniq:sentiment_avg': {}, 'seniq:sentiment_zscore': {}, 'seniq:news_volume': {},
+  'seniq:congress_net_buys': { window_days: 30 },
+};
+const SB_SENIQ_LABELS = {
+  'seniq:sentiment_avg': 'Sentiment (daily avg)',
+  'seniq:sentiment_zscore': 'Sentiment z-score',
+  'seniq:news_volume': 'News volume',
+  'seniq:congress_net_buys': 'Congress net buys',
+};
+const sbIsSeniq = (fn) => fn.startsWith('seniq:');
+const sbFnLabel = (fn) => SB_SENIQ_LABELS[fn] || fn.toUpperCase();
+const SB_OPS = [
+  { v: 'crossover', label: 'crosses above' },
+  { v: 'crossunder', label: 'crosses below' },
+  { v: 'gt', label: '>' }, { v: 'lt', label: '<' },
+  { v: 'gte', label: '≥' }, { v: 'lte', label: '≤' },
+];
+
+function sbDefaultUi() {
+  return {
+    name: 'My strategy',
+    factors: [{ fn: 'ema', params: { period: 20 } }, { fn: 'ema', params: { period: 50 } }],
+    entry: [{ left: 'f1', op: 'crossover', right: 'f2', num: '' }],
+    exit: [{ left: 'f1', op: 'crossunder', right: 'f2', num: '' }],
+    stop: '', target: '', sizingType: 'percent_equity', sizingValue: 25,
+  };
+}
+
+function sbLoadUi() {
+  try { return JSON.parse(localStorage.getItem(SB_UI_KEY)) || sbDefaultUi(); }
+  catch { return sbDefaultUi(); }
+}
+
+function sbSaveUi(ui) { localStorage.setItem(SB_UI_KEY, JSON.stringify(ui)); }
+
+function sbFactorLabel(f, i) {
+  const ps = Object.values(f.params).join(',');
+  const base = sbIsSeniq(f.fn) ? sbFnLabel(f.fn) : f.fn.toUpperCase();
+  return `${base}${ps ? `(${ps})` : ''}  ·  f${i + 1}`;
+}
+
+// Reads the current DOM rows back into the UI model.
+function sbReadUi() {
+  const ui = { name: document.getElementById('sb-name').value.trim() || 'My strategy', factors: [], entry: [], exit: [] };
+  document.querySelectorAll('#sb-factors .sb-row').forEach(row => {
+    const fn = row.querySelector('.sb-fn').value;
+    const params = {};
+    row.querySelectorAll('.sb-param').forEach(inp => { params[inp.dataset.p] = Number(inp.value) || 1; });
+    ui.factors.push({ fn, params });
+  });
+  ['entry', 'exit'].forEach(kind => {
+    document.querySelectorAll(`#sb-${kind} .sb-row`).forEach(row => {
+      ui[kind].push({
+        left: row.querySelector('.sb-left').value,
+        op: row.querySelector('.sb-op').value,
+        right: row.querySelector('.sb-right').value,
+        num: row.querySelector('.sb-num').value,
+      });
+    });
+  });
+  ui.stop = document.getElementById('sb-stop').value;
+  ui.target = document.getElementById('sb-target').value;
+  ui.sizingType = document.getElementById('sb-sizing-type').value;
+  ui.sizingValue = Number(document.getElementById('sb-sizing-value').value) || 25;
+  return ui;
+}
+
+// Builds the engine spec from the UI model.
+function sbEmitSpec(ui) {
+  const factors = ui.factors.map((f, i) => sbIsSeniq(f.fn)
+    ? { id: `f${i + 1}`, source: 'seniq', metric: f.fn.slice(6), params: f.params }
+    : { id: `f${i + 1}`, fn: f.fn, params: f.params });
+  const cond = (r) => ({ [r.op]: [r.left, r.right === '__num__' ? Number(r.num) : r.right] });
+  const exitList = ui.exit.map(cond);
+  if (ui.stop) exitList.push({ stop_loss_pct: Number(ui.stop) });
+  if (ui.target) exitList.push({ take_profit_pct: Number(ui.target) });
+  return {
+    name: ui.name,
+    factors,
+    entry: { all: ui.entry.map(cond) },
+    exit: exitList.length ? { any: exitList } : undefined,
+    sizing: { type: ui.sizingType, value: ui.sizingValue },
+  };
+}
+
+function sbOperandOptions(ui, selected) {
+  const opts = ui.factors.map((f, i) => `<option value="f${i + 1}" ${selected === `f${i + 1}` ? 'selected' : ''}>${escapeHtml(sbFactorLabel(f, i).split('·')[0].trim())}</option>`);
+  ['price', 'volume'].forEach(b => opts.push(`<option value="${b}" ${selected === b ? 'selected' : ''}>${b}</option>`));
+  opts.push(`<option value="__num__" ${selected === '__num__' ? 'selected' : ''}>number…</option>`);
+  return opts.join('');
+}
+
+function sbRender() {
+  const ui = sbLoadUi();
+  document.getElementById('sb-name').value = ui.name;
+
+  const techOpts = Object.keys(SB_PARAMS).filter(fn => !sbIsSeniq(fn));
+  const seniqOpts = Object.keys(SB_PARAMS).filter(sbIsSeniq);
+  const fnSelect = (cur) =>
+    `<optgroup label="Technical">${techOpts.map(fn => `<option value="${fn}" ${cur === fn ? 'selected' : ''}>${fn.toUpperCase()}</option>`).join('')}</optgroup>` +
+    `<optgroup label="SenIQ Signals">${seniqOpts.map(fn => `<option value="${fn}" ${cur === fn ? 'selected' : ''}>${sbFnLabel(fn)}</option>`).join('')}</optgroup>`;
+  document.getElementById('sb-factors').innerHTML = ui.factors.map((f, i) => `
+    <div class="sb-row" data-i="${i}">
+      <span class="sb-fid">f${i + 1}</span>
+      <select class="sb-fn">${fnSelect(f.fn)}</select>
+      ${Object.entries(f.params).map(([k, v]) => `<label class="sb-plabel">${k}<input class="sb-param" data-p="${k}" type="number" value="${v}" min="1" max="500" /></label>`).join('')}
+      ${sbIsSeniq(f.fn) ? '<span class="sb-seniq-tag">SenIQ</span>' : ''}
+      <button type="button" class="sb-del" data-kind="factors" data-i="${i}">×</button>
+    </div>`).join('');
+
+  ['entry', 'exit'].forEach(kind => {
+    document.getElementById(`sb-${kind}`).innerHTML = ui[kind].map((r, i) => `
+      <div class="sb-row" data-i="${i}">
+        <select class="sb-left">${sbOperandOptions(ui, r.left)}</select>
+        <select class="sb-op">${SB_OPS.map(o => `<option value="${o.v}" ${r.op === o.v ? 'selected' : ''}>${o.label}</option>`).join('')}</select>
+        <select class="sb-right">${sbOperandOptions(ui, r.right)}</select>
+        <input class="sb-num ${r.right === '__num__' ? '' : 'hidden'}" type="number" step="any" value="${escapeHtml(String(r.num ?? ''))}" placeholder="value" />
+        <button type="button" class="sb-del" data-kind="${kind}" data-i="${i}">×</button>
+      </div>`).join('');
+  });
+
+  document.getElementById('sb-stop').value = ui.stop || '';
+  document.getElementById('sb-target').value = ui.target || '';
+  document.getElementById('sb-sizing-type').value = ui.sizingType;
+  document.getElementById('sb-sizing-value').value = ui.sizingValue;
+  document.getElementById('sb-sizing-label').textContent =
+    ui.sizingType === 'fixed_cash' ? 'Cash per trade' : 'Percent (1–100)';
+}
+
+function sbPersistAndRender() {
+  sbSaveUi(sbReadUi());
+  sbRender();
+}
+
+async function initBuilderPage() {
+  if (sbInitDone) return;
+  sbInitDone = true;
+
+  // Vocabulary check — also proves the engine is reachable.
+  const statusEl = document.getElementById('sb-status');
+  try {
+    const data = await api('/api/strategies/catalog');
+    sbVocab = data.builder || null;
+    statusEl.classList.add('hidden');
+    document.getElementById('sb-editor').classList.remove('hidden');
+  } catch (err) {
+    sbInitDone = false; // retry on next visit
+    statusEl.classList.remove('hidden');
+    statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">cloud_off</span><p>The strategy engine is offline. Start it and revisit this page.</p></div>';
+    return;
+  }
+
+  sbRender();
+
+  // One delegated listener per section keeps rows simple.
+  const editor = document.getElementById('sb-editor');
+  editor.addEventListener('change', (e) => {
+    if (e.target.classList.contains('sb-fn')) {
+      // Indicator changed → reset its params to defaults, re-render.
+      const ui = sbReadUi();
+      const i = Number(e.target.closest('.sb-row').dataset.i);
+      ui.factors[i] = { fn: e.target.value, params: { ...SB_PARAMS[e.target.value] } };
+      sbSaveUi(ui); sbRender();
+    } else if (e.target.classList.contains('sb-right')) {
+      e.target.closest('.sb-row').querySelector('.sb-num').classList.toggle('hidden', e.target.value !== '__num__');
+      sbSaveUi(sbReadUi());
+    } else {
+      sbSaveUi(sbReadUi());
+    }
+    if (e.target.id === 'sb-sizing-type') sbRender();
+  });
+  editor.addEventListener('click', (e) => {
+    if (!e.target.classList.contains('sb-del')) return;
+    const ui = sbReadUi();
+    const kind = e.target.dataset.kind, i = Number(e.target.dataset.i);
+    ui[kind].splice(i, 1);
+    if (kind === 'factors') {
+      // Rebase condition references: drop rows pointing at the removed factor,
+      // shift ids above it down by one.
+      ['entry', 'exit'].forEach(k => {
+        ui[k] = ui[k].filter(r => r.left !== `f${i + 1}` && r.right !== `f${i + 1}`)
+          .map(r => {
+            const shift = (x) => {
+              const m = /^f(\d+)$/.exec(x);
+              return (m && Number(m[1]) > i + 1) ? `f${Number(m[1]) - 1}` : x;
+            };
+            return { ...r, left: shift(r.left), right: shift(r.right) };
+          });
+      });
+    }
+    sbSaveUi(ui); sbRender();
+  });
+
+  document.getElementById('sb-add-factor').addEventListener('click', () => {
+    const ui = sbReadUi();
+    ui.factors.push({ fn: 'sma', params: { period: 20 } });
+    sbSaveUi(ui); sbRender();
+  });
+  document.getElementById('sb-add-entry').addEventListener('click', () => {
+    const ui = sbReadUi();
+    ui.entry.push({ left: 'f1', op: 'gt', right: '__num__', num: '' });
+    sbSaveUi(ui); sbRender();
+  });
+  document.getElementById('sb-add-exit').addEventListener('click', () => {
+    const ui = sbReadUi();
+    ui.exit.push({ left: 'f1', op: 'lt', right: '__num__', num: '' });
+    sbSaveUi(ui); sbRender();
+  });
+  document.getElementById('sb-reset').addEventListener('click', () => {
+    localStorage.removeItem(SB_UI_KEY);
+    sbRender();
+  });
+
+  document.getElementById('sb-backtest').addEventListener('click', sbBacktest);
+  document.getElementById('sb-save').addEventListener('click', async () => {
+    const ui = sbReadUi();
+    sbSaveUi(ui);
+    const spec = sbEmitSpec(ui);
+    const errEl = document.getElementById('sb-errors');
+    errEl.classList.add('hidden');
+    try {
+      const check = await api('/api/strategies/validate', { method: 'POST', body: JSON.stringify(spec) });
+      if (!check.valid) {
+        errEl.classList.remove('hidden');
+        errEl.innerHTML = '<strong>Fix these before saving:</strong><ul>' +
+          check.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('') + '</ul>';
+        return;
+      }
+    } catch (err) {
+      showToast(err.status === 503 ? 'Strategy engine is offline' : (err.message || 'Validation failed'), 'error');
+      return;
+    }
+    openSaveModal({ custom: spec }, spec.name);
+  });
+}
+
+async function sbBacktest() {
+  const ui = sbReadUi();
+  sbSaveUi(ui);
+  const spec = sbEmitSpec(ui);
+  const errEl = document.getElementById('sb-errors');
+  errEl.classList.add('hidden');
+  try {
+    const check = await api('/api/strategies/validate', { method: 'POST', body: JSON.stringify(spec) });
+    if (!check.valid) {
+      errEl.classList.remove('hidden');
+      errEl.innerHTML = '<strong>Fix these before running:</strong><ul>' +
+        check.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('') + '</ul>';
+      return;
+    }
+  } catch (err) {
+    showToast(err.status === 503 ? 'Strategy engine is offline' : (err.message || 'Validation failed'), 'error');
+    return;
+  }
+  localStorage.setItem(SB_SPEC_KEY, JSON.stringify(spec));
+  showToast(`“${spec.name}” sent to Backtest`, 'success');
+  switchToPage('backtest');
+  // Ensure the custom option exists + is selected once the catalog is in.
+  setTimeout(() => {
+    btAddCustomOption();
+    const sel = document.getElementById('bt-strategy');
+    if (sel.querySelector('option[value="__custom__"]')) {
+      sel.value = '__custom__';
+      sel.dispatchEvent(new Event('change'));
+    }
+  }, 400);
+}
+
+// Adds/refreshes the "Custom — from Builder" entry in the Backtest dropdown.
+function btAddCustomOption() {
+  const sel = document.getElementById('bt-strategy');
+  if (!sel || !sel.options.length) return;
+  let spec = null;
+  try { spec = JSON.parse(localStorage.getItem(SB_SPEC_KEY)); } catch { /* ignore */ }
+  let opt = sel.querySelector('option[value="__custom__"]');
+  if (!spec) { if (opt) opt.remove(); return; }
+  if (!opt) {
+    opt = document.createElement('option');
+    opt.value = '__custom__';
+    sel.prepend(opt);
+  }
+  opt.textContent = `⚙ ${spec.name} (from Builder)`;
+}
+
+// ─── Your Strategies (Phase 7 — save + live signals) ─────────
+let ysInitDone = false;
+
+// "NVDA, BTC:CRYPTO, RELIANCE:NSE" → [{symbol, exchange}] (default US).
+function ysParseSymbols(text) {
+  return String(text || '').split(',')
+    .map(t => t.trim()).filter(Boolean).slice(0, 5)
+    .map(t => {
+      const [symbol, exchange] = t.split(':').map(x => x.trim().toUpperCase());
+      return { symbol, exchange: exchange || 'US' };
+    })
+    .filter(s => s.symbol);
+}
+
+function ysSymbolLabel(s) {
+  return s.exchange === 'US' ? s.symbol : `${s.symbol}:${s.exchange}`;
+}
+
+// ── Save modal (shared by Builder + Backtest) ──
+let ssPayload = null;  // {custom} or {strategy, params}
+
+function openSaveModal(payload, defaultName) {
+  ssPayload = payload;
+  document.getElementById('ss-name').value = defaultName || '';
+  document.getElementById('ss-symbols').value = '';
+  document.getElementById('ss-error').classList.add('hidden');
+  document.getElementById('save-strategy-modal').classList.remove('hidden');
+  document.getElementById('ss-name').focus();
+}
+
+function initSaveModal() {
+  const modal = document.getElementById('save-strategy-modal');
+  document.getElementById('ss-close').addEventListener('click', () => modal.classList.add('hidden'));
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+  document.getElementById('ss-save').addEventListener('click', async () => {
+    const errEl = document.getElementById('ss-error');
+    errEl.classList.add('hidden');
+    const body = {
+      ...ssPayload,
+      name: document.getElementById('ss-name').value.trim(),
+      symbols: ysParseSymbols(document.getElementById('ss-symbols').value),
+    };
+    if (!body.name) { errEl.textContent = 'Give it a name.'; errEl.classList.remove('hidden'); return; }
+    try {
+      await api('/api/strategies/saved', { method: 'POST', body: JSON.stringify(body) });
+      modal.classList.add('hidden');
+      showToast(`“${body.name}” saved to Your Strategies`, 'success');
+      ysInitDone = false; // refresh the list on next visit
+    } catch (err) {
+      if (err.status === 402) {
+        errEl.textContent = 'Saving strategies is a Plus feature — upgrade to save.';
+      } else {
+        errEl.textContent = err.message || 'Save failed';
+      }
+      errEl.classList.remove('hidden');
+    }
+  });
+}
+
+// ── The page ──
+async function initStrategiesPage() {
+  if (ysInitDone) return;
+  ysInitDone = true;
+  const statusEl = document.getElementById('ys-status');
+  const listEl = document.getElementById('ys-list');
+  listEl.innerHTML = '';
+  statusEl.classList.remove('hidden');
+  statusEl.innerHTML = '<div class="empty-state small"><p>Loading your strategies…</p></div>';
+  let data;
+  try {
+    data = await api('/api/strategies/saved');
+  } catch (err) {
+    ysInitDone = false;
+    if (err.status === 402) {
+      statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>Your Strategies is a Plus feature. <a href="#" onclick="switchToPage(\'profile\');return false;">Upgrade your plan</a> to save strategies and watch their live signals.</p></div>';
+    } else {
+      statusEl.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message || 'Could not load strategies')}</p></div>`;
+    }
+    return;
+  }
+  statusEl.classList.add('hidden');
+  const list = data.strategies || [];
+  if (!list.length) {
+    statusEl.classList.remove('hidden');
+    statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">bookmarks</span><p>Nothing saved yet. Build one in the <a href="#" onclick="switchToPage(\'strategy-builder\');return false;">Strategy Builder</a>, or save a preset from the <a href="#" onclick="switchToPage(\'backtest\');return false;">Backtest page</a>.</p></div>';
+    return;
+  }
+  listEl.innerHTML = list.map(ysCardHtml).join('');
+  // Live signals load per card, in parallel — one slow symbol doesn't block the page.
+  list.forEach(s => ysLoadSignal(s.id, (s.symbols || []).length));
+}
+
+function ysSummary(s) {
+  if (s.kind === 'custom' && s.spec) {
+    const nf = (s.spec.factors || []).length;
+    const ne = s.spec.entry && s.spec.entry.all ? s.spec.entry.all.length : 0;
+    return `Builder — ${nf} indicator${nf === 1 ? '' : 's'}, ${ne} entry rule${ne === 1 ? '' : 's'}`;
+  }
+  const params = Object.entries(s.params || {}).map(([k, v]) => `${k}=${v}`).join(', ');
+  return `Preset — ${s.strategy_name}${params ? ` (${params})` : ''}`;
+}
+
+function ysCardHtml(s) {
+  const watch = (s.symbols || []).map(x => `<span class="ys-chip">${escapeHtml(ysSymbolLabel(x))}</span>`).join('') ||
+    '<span class="ys-chip ys-chip-empty">no symbols watched</span>';
+  return `
+    <div class="ys-card" data-id="${s.id}">
+      <div class="ys-card-head">
+        <div>
+          <span class="ys-name">${escapeHtml(s.name)}</span>
+          <span class="badge ys-kind">${s.kind === 'custom' ? 'Builder' : 'Preset'}</span>
+        </div>
+        <div class="ys-actions">
+          <button type="button" class="ys-btn" onclick="ysBacktest(${s.id})" title="Load in Backtest"><span class="material-symbols-outlined">query_stats</span></button>
+          <button type="button" class="ys-btn ys-btn-del" onclick="ysDelete(${s.id})" title="Delete"><span class="material-symbols-outlined">delete</span></button>
+        </div>
+      </div>
+      <div class="ys-summary">${escapeHtml(ysSummary(s))}</div>
+      <div class="ys-watch">${watch}</div>
+      <div class="ys-signals" id="ys-signals-${s.id}"></div>
+    </div>`;
+}
+
+async function ysLoadSignal(id, nSymbols) {
+  const el = document.getElementById(`ys-signals-${id}`);
+  if (!el) return;
+  if (!nSymbols) { el.innerHTML = ''; return; }
+  el.innerHTML = '<span class="ys-loading">evaluating signals…</span>';
+  try {
+    const data = await api(`/api/strategies/saved/${id}/signal`, { method: 'POST' });
+    const chips = (data.signals || []).map(sig => {
+      if (sig.error) return `<span class="ys-sig ys-sig-err" title="${escapeHtml(sig.error)}">${escapeHtml(sig.symbol)} — no data</span>`;
+      const cls = sig.state === 'long' ? 'ys-sig-long' : 'ys-sig-flat';
+      const fresh = sig.fired_on_latest_bar ? ' <span class="ys-new">NEW</span>' : '';
+      const last = sig.last_signal ? ` · ${sig.last_signal.side} ${sig.last_signal.date}` : ' · no signal yet';
+      return `<span class="ys-sig ${cls}" title="as of ${escapeHtml(sig.as_of || '')} · close ${escapeHtml(String(Number(sig.last_close || 0).toFixed(2)))}">${escapeHtml(sig.symbol)}: ${sig.state.toUpperCase()}${fresh}<small>${escapeHtml(last)}</small></span>`;
+    }).join('');
+    const note = data.has_protective_exits
+      ? '<div class="ys-note">Stop-loss / take-profit exits are order-level and not reflected in rule state.</div>' : '';
+    el.innerHTML = (chips || '<span class="ys-loading">no signals</span>') + note;
+  } catch (err) {
+    el.innerHTML = `<span class="ys-sig ys-sig-err">${escapeHtml(err.status === 503 ? 'engine offline' : (err.message || 'signal failed'))}</span>`;
+  }
+}
+
+async function ysDelete(id) {
+  if (!confirm('Delete this strategy?')) return;
+  try {
+    await api(`/api/strategies/saved/${id}`, { method: 'DELETE' });
+    ysInitDone = false;
+    initStrategiesPage();
+  } catch (err) {
+    showToast(err.message || 'Delete failed', 'error');
+  }
+}
+
+// Load a saved strategy into the Backtest page.
+async function ysBacktest(id) {
+  try {
+    const data = await api('/api/strategies/saved');
+    const s = (data.strategies || []).find(x => x.id === id);
+    if (!s) return;
+    if (s.kind === 'custom') {
+      localStorage.setItem(SB_SPEC_KEY, JSON.stringify(s.spec));
+      switchToPage('backtest');
+      setTimeout(() => {
+        btAddCustomOption();
+        const sel = document.getElementById('bt-strategy');
+        if (sel.querySelector('option[value="__custom__"]')) {
+          sel.value = '__custom__';
+          sel.dispatchEvent(new Event('change'));
+        }
+      }, 400);
+    } else {
+      switchToPage('backtest');
+      setTimeout(() => {
+        const sel = document.getElementById('bt-strategy');
+        if (sel.querySelector(`option[value="${s.strategy_name}"]`)) {
+          sel.value = s.strategy_name;
+          sel.dispatchEvent(new Event('change'));
+          setTimeout(() => {
+            Object.entries(s.params || {}).forEach(([k, v]) => {
+              const inp = document.querySelector(`#bt-params input[data-param="${k}"]`);
+              if (inp) inp.value = v;
+            });
+          }, 100);
+        }
+      }, 400);
+    }
+    const first = (s.symbols || [])[0];
+    if (first) setTimeout(() => {
+      document.getElementById('bt-symbol').value = first.symbol;
+      document.getElementById('bt-exchange').value = first.exchange;
+    }, 450);
+  } catch (err) {
+    showToast(err.message || 'Could not load strategy', 'error');
+  }
+}
+
+// ─── Paper Trade (Phase 7 — Pro) ─────────────────────────────
+// A deployment = {saved strategy snapshot, symbol, cash, deploy date}. State
+// is a deterministic replay deploy→today through the sim engine, computed on
+// read — nothing stored, nothing to drift.
+let ptInitDone = false;
+
+async function initPaperPage() {
+  if (ptInitDone) return;
+  ptInitDone = true;
+  const statusEl = document.getElementById('pt-status');
+  const listEl = document.getElementById('pt-list');
+  statusEl.classList.remove('hidden');
+  statusEl.innerHTML = '<div class="empty-state small"><p>Loading…</p></div>';
+  listEl.innerHTML = '';
+
+  let saved, deployments;
+  try {
+    [saved, deployments] = await Promise.all([
+      api('/api/strategies/saved'),
+      api('/api/paper'),
+    ]);
+  } catch (err) {
+    ptInitDone = false;
+    if (err.status === 402) {
+      statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>Paper trading is a Pro feature. <a href="#" onclick="switchToPage(\'profile\');return false;">Upgrade your plan</a> to deploy strategies on virtual money.</p></div>';
+    } else {
+      statusEl.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message || 'Could not load paper trading')}</p></div>`;
+    }
+    return;
+  }
+
+  const strategies = saved.strategies || [];
+  const sel = document.getElementById('pt-strategy');
+  if (!strategies.length) {
+    statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">candlestick_chart</span><p>Save a strategy first — build one in the <a href="#" onclick="switchToPage(\'strategy-builder\');return false;">Strategy Builder</a> or save a preset from the <a href="#" onclick="switchToPage(\'backtest\');return false;">Backtest page</a>, then deploy it here.</p></div>';
+  } else {
+    sel.innerHTML = strategies.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+    statusEl.classList.add('hidden');
+    document.getElementById('pt-deploy-form').classList.remove('hidden');
+    // Prefill symbol from the selected strategy's first watched symbol.
+    const prefill = () => {
+      const s = strategies.find(x => String(x.id) === sel.value);
+      const first = s && (s.symbols || [])[0];
+      if (first) {
+        document.getElementById('pt-symbol').value = first.symbol;
+        document.getElementById('pt-exchange').value = first.exchange;
+      }
+    };
+    sel.onchange = prefill;
+    prefill();
+  }
+
+  ptRenderList(deployments.deployments || []);
+
+  const form = document.getElementById('pt-deploy-form');
+  if (!form.dataset.wired) {
+    form.dataset.wired = '1';
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('pt-deploy');
+      btn.disabled = true;
+      try {
+        await api('/api/paper', {
+          method: 'POST',
+          body: JSON.stringify({
+            strategy_id: Number(document.getElementById('pt-strategy').value),
+            symbol: document.getElementById('pt-symbol').value.trim().toUpperCase(),
+            exchange: document.getElementById('pt-exchange').value,
+            initial_cash: document.getElementById('pt-cash').value || '100000',
+          }),
+        });
+        showToast('Deployed — trading starts with the next fresh signal', 'success');
+        ptInitDone = false;
+        initPaperPage();
+      } catch (err) {
+        showToast(err.message || 'Deploy failed', 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+}
+
+function ptRenderList(list) {
+  const listEl = document.getElementById('pt-list');
+  if (!list.length) {
+    listEl.innerHTML = '<div class="empty-state small"><p>No deployments yet — deploy a saved strategy above.</p></div>';
+    return;
+  }
+  listEl.innerHTML = list.map(d => `
+    <div class="pt-card ${d.status === 'stopped' ? 'pt-stopped' : ''}" data-id="${d.id}">
+      <div class="ys-card-head">
+        <div>
+          <span class="ys-name">${escapeHtml(d.name)}</span>
+          <span class="ys-chip">${escapeHtml(d.exchange === 'US' ? d.symbol : `${d.symbol}:${d.exchange}`)}</span>
+          <span class="badge ${d.status === 'active' ? 'pt-live' : ''}">${d.status === 'active' ? '● live' : 'stopped'}</span>
+        </div>
+        <div class="ys-actions">
+          ${d.status === 'active' ? `<button type="button" class="ys-btn" onclick="ptStop(${d.id})" title="Stop"><span class="material-symbols-outlined">stop_circle</span></button>` : ''}
+          <button type="button" class="ys-btn ys-btn-del" onclick="ptDelete(${d.id})" title="Delete"><span class="material-symbols-outlined">delete</span></button>
+        </div>
+      </div>
+      <div class="ys-summary">deployed ${escapeHtml(d.deployed_at)}${d.stopped_at ? ` · stopped ${escapeHtml(d.stopped_at)}` : ''} · paper cash ${Number(d.initial_cash).toLocaleString()}</div>
+      <div class="pt-state" id="pt-state-${d.id}"><span class="ys-loading">replaying…</span></div>
+    </div>`).join('');
+  list.forEach(d => ptLoadState(d.id));
+}
+
+async function ptLoadState(id) {
+  const el = document.getElementById(`pt-state-${id}`);
+  if (!el) return;
+  try {
+    const data = await api(`/api/paper/${id}/state`, { method: 'POST' });
+    const m = data.report.metrics;
+    const initial = Number(data.deployment.initial_cash);
+    if (!data.n_bars) {
+      el.innerHTML = '<span class="ys-loading">warming up — no completed bars since deploy yet</span>';
+      return;
+    }
+    const equity = Number(m.final_equity);
+    const pnl = equity - initial;
+    const pnlPct = (pnl / initial) * 100;
+    const cls = pnl >= 0 ? 'pos' : 'neg';
+    const pos = (data.open_positions || [])[0];
+    const posHtml = pos
+      ? `<span class="pt-pos">holding <strong>${pos.qty}</strong> ${escapeHtml(pos.symbol)} @ ${Number(pos.avg_cost).toFixed(2)} (now ${Number(pos.mark_price).toFixed(2)})</span>`
+      : '<span class="pt-pos pt-flat">no open position</span>';
+    el.innerHTML = `
+      <div class="pt-metrics">
+        <div class="bt-metric"><span class="bt-metric-value">${equity.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span><span class="bt-metric-label">Equity</span></div>
+        <div class="bt-metric ${cls}"><span class="bt-metric-value">${pnl >= 0 ? '+' : ''}${pnl.toLocaleString(undefined, { maximumFractionDigits: 0 })} (${pnlPct.toFixed(2)}%)</span><span class="bt-metric-label">P&amp;L since deploy</span></div>
+        <div class="bt-metric"><span class="bt-metric-value">${m.n_trades}</span><span class="bt-metric-label">Closed trades</span></div>
+        <div class="bt-metric"><span class="bt-metric-value">${data.n_bars}</span><span class="bt-metric-label">Bars traded</span></div>
+      </div>
+      ${posHtml}`;
+  } catch (err) {
+    el.innerHTML = `<span class="ys-sig ys-sig-err">${escapeHtml(err.status === 503 ? 'engine offline' : (err.message || 'replay failed'))}</span>`;
+  }
+}
+
+async function ptStop(id) {
+  if (!confirm('Stop this deployment? Its track record freezes as of today.')) return;
+  try {
+    await api(`/api/paper/${id}/stop`, { method: 'POST' });
+    ptInitDone = false;
+    initPaperPage();
+  } catch (err) {
+    showToast(err.message || 'Stop failed', 'error');
+  }
+}
+
+async function ptDelete(id) {
+  if (!confirm('Delete this deployment and its paper history?')) return;
+  try {
+    await api(`/api/paper/${id}`, { method: 'DELETE' });
+    ptInitDone = false;
+    initPaperPage();
+  } catch (err) {
+    showToast(err.message || 'Delete failed', 'error');
+  }
 }
 
 function initIntelTabs() {
@@ -1792,6 +2701,88 @@ async function checkout(tier) {
   } catch (err) { showToast(err.message, 'error'); }
 }
 
+// ─── API keys — MCP access (Phase 8) ─────────────────────────
+
+function initApiKeys() {
+  const url = document.getElementById('mcp-endpoint-url');
+  if (url) url.textContent = `${location.origin}/mcp`;
+  const v1 = document.getElementById('v1-endpoint-url');
+  if (v1) v1.textContent = `${location.origin}/v1`;
+  document.getElementById('api-key-create-btn')?.addEventListener('click', createApiKey);
+  document.getElementById('api-key-name')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') createApiKey();
+  });
+}
+
+async function loadApiKeys() {
+  const wrap = document.getElementById('api-keys-list');
+  if (!wrap) return;
+  try {
+    const { keys } = await api('/api/keys');
+    if (!keys.length) {
+      wrap.innerHTML = '<p class="empty-state small">No API keys yet — create one to connect an agent.</p>';
+      return;
+    }
+    wrap.innerHTML = keys.map(k => `
+      <div class="api-key-row ${k.revoked ? 'revoked' : ''}">
+        <span class="ak-prefix">${escapeHtml(k.key_prefix)}…</span>
+        <span class="ak-name">${escapeHtml(k.name)}</span>
+        <span class="ak-meta">${k.revoked
+          ? 'revoked'
+          : (k.last_used_at ? `last used ${new Date(k.last_used_at).toLocaleDateString()}` : 'never used')}</span>
+        ${k.revoked ? '' : `<button class="btn btn-ghost btn-xs" onclick="revokeApiKey(${k.id})">Revoke</button>`}
+      </div>`).join('');
+  } catch (err) {
+    wrap.innerHTML = `<p class="empty-state small">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function createApiKey() {
+  const nameInput = document.getElementById('api-key-name');
+  const msgEl = document.getElementById('api-key-msg');
+  const btn = document.getElementById('api-key-create-btn');
+  try {
+    btn.disabled = true;
+    const created = await api('/api/keys', {
+      method: 'POST',
+      body: JSON.stringify({ name: nameInput.value.trim() }),
+    });
+    nameInput.value = '';
+    // The full key exists only in this response — show it once with a copy button.
+    const box = document.getElementById('api-key-new');
+    box.innerHTML = `
+      <div class="ak-new-label">Key created — copy it now, it won't be shown again:</div>
+      <div class="ak-new-row">
+        <code class="ak-new-key" id="ak-new-key-value">${escapeHtml(created.key)}</code>
+        <button class="btn btn-primary btn-xs" id="ak-copy-btn">Copy</button>
+      </div>`;
+    box.classList.remove('hidden');
+    document.getElementById('ak-copy-btn').addEventListener('click', async () => {
+      await navigator.clipboard.writeText(created.key);
+      showToast('Key copied to clipboard', 'success');
+    });
+    loadApiKeys();
+  } catch (err) {
+    if (err.status === 402) {
+      showProfileMsg(msgEl, err.message || 'API keys require the Pro plan.', 'error');
+      goToPlans();
+    } else {
+      showProfileMsg(msgEl, err.message, 'error');
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function revokeApiKey(id) {
+  if (!confirm('Revoke this key? Agents using it will stop working immediately.')) return;
+  try {
+    await api(`/api/keys/${id}`, { method: 'DELETE' });
+    showToast('Key revoked', 'info');
+    loadApiKeys();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
 // ─── Init ────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   initAuth();
@@ -1804,6 +2795,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   initAsk();
   initBriefModal();
   initTierControl();
+  initSaveModal();
+  initApiKeys();
   document.getElementById('brief-refresh')?.addEventListener('click', refreshDailyBrief);
 
   // Filter clear button
