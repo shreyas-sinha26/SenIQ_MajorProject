@@ -6,11 +6,12 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node test/entityResolver.test.js && node test/engine.test.js && node test/reports.test.js"
+    "test": "node test/entityResolver.test.js && node test/engine.test.js && node test/reports.test.js && node test/mcp.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
     "@huggingface/inference": "^4.13.19",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@sentry/node": "^8.55.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -19,7 +20,8 @@
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^3.0.3",
     "pg": "^8.21.0",
-    "sharp": "^0.35.2"
+    "sharp": "^0.35.2",
+    "zod": "^4.4.3"
   },
   "engines": {
     "node": ">=18.0.0"
