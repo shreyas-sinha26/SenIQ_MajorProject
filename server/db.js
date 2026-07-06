@@ -6,7 +6,24 @@ if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is not set — see .env.example');
 }
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// Managed Postgres (Neon / Render / Supabase) requires TLS; local dev does not. Auto-detect
+// by host, with an explicit override via DATABASE_SSL=require|disable. Managed providers serve
+// certs outside Node's default CA bundle, so we don't reject unauthorized — still encrypted.
+function sslConfig() {
+  const mode = (process.env.DATABASE_SSL || '').toLowerCase();
+  if (mode === 'disable') return false;
+  if (mode === 'require') return { rejectUnauthorized: false };
+  const url = process.env.DATABASE_URL || '';
+  const isLocal = /@(localhost|127\.0\.0\.1|\[?::1\]?)([:/]|$)/.test(url);
+  return isLocal ? false : { rejectUnauthorized: false };
+}
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: sslConfig() });
+
+// Surface unexpected idle-client errors instead of letting them crash the process.
+pool.on('error', (err) => {
+  console.error('⚠️  Unexpected Postgres pool error:', err.message);
+});
 
 // ─── Query helpers ───────────────────────────────────────────
 // Use $1, $2… placeholders (Postgres), not ?.
@@ -75,4 +92,21 @@ async function runMigrations() {
   console.log(count > 0 ? `✅ ${count} migration(s) applied` : '✅ Database up to date');
 }
 
-module.exports = { pool, query, queryOne, execute, tx, runMigrations };
+// ─── Ops helpers (Phase 4) ───────────────────────────────────
+// Connectivity probe for the /api/health endpoint.
+async function healthCheck() {
+  try {
+    await pool.query('SELECT 1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Drain the pool on graceful shutdown so in-flight queries finish and the host can
+// recycle the instance cleanly on deploy.
+async function closePool() {
+  await pool.end();
+}
+
+module.exports = { pool, query, queryOne, execute, tx, runMigrations, healthCheck, closePool };
