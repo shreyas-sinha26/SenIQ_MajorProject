@@ -1292,3 +1292,253 @@ tr:hover .ht-info { opacity: 1; }
 .ht-chg { font-size: .72rem; font-weight: 700; margin-left: 2px; }
 .ht-chg.up { color: var(--positive); }
 .ht-chg.down { color: var(--negative); }
+
+/* ─── Backtest page (Phase 7) ─────────────────────────────── */
+.bt-form { margin-top: 4px; }
+.bt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.bt-params { display: contents; }
+.bt-field { display: flex; flex-direction: column; gap: 6px; }
+.bt-field-wide { grid-column: 1 / -1; }
+.bt-field > span { font-size: .78rem; color: var(--muted); letter-spacing: .02em; }
+.bt-field small { color: var(--muted); font-size: .72rem; line-height: 1.35; }
+.bt-field input, .bt-field select {
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: .88rem;
+}
+.bt-field input:focus, .bt-field select:focus { outline: none; border-color: var(--purple); }
+
+#bt-run { display: inline-flex; align-items: center; gap: 6px; }
+#bt-run:disabled { opacity: .6; cursor: wait; }
+#bt-run .spin { animation: bt-rotate 1s linear infinite; }
+@keyframes bt-rotate { to { transform: rotate(360deg); } }
+
+.bt-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 6px 0 18px;
+}
+.bt-metric {
+  background: var(--bg-3);
+  border: 1px solid var(--glass-brd);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.bt-metric-value { font-size: 1.15rem; font-weight: 700; }
+.bt-metric-label { font-size: .72rem; color: var(--muted); }
+.bt-metric.pos .bt-metric-value { color: var(--green); }
+.bt-metric.neg .bt-metric-value { color: var(--red); }
+
+.bt-chart-container { height: 320px; margin-bottom: 20px; }
+
+.bt-trades h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.bt-trades-scroll { overflow-x: auto; }
+#bt-trades-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+#bt-trades-table th, #bt-trades-table td {
+  text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--glass-brd);
+  white-space: nowrap;
+}
+#bt-trades-table th:first-child, #bt-trades-table td:first-child { text-align: left; }
+#bt-trades-table th { color: var(--muted); font-weight: 600; font-size: .74rem; }
+#bt-trades-table td.pos { color: var(--green); }
+#bt-trades-table td.neg { color: var(--red); }
+.bt-side { font-weight: 700; font-size: .76rem; }
+.bt-side.pos { color: var(--green); }
+.bt-side.neg { color: var(--red); }
+.bt-no-trades { text-align: center !important; color: var(--muted); padding: 18px !important; }
+
+/* ─── Strategy Builder (Phase 7) ──────────────────────────── */
+.sb-editor { display: flex; flex-direction: column; gap: 18px; }
+.sb-name-field { max-width: 380px; }
+.sb-block {
+  background: var(--bg-3);
+  border: 1px solid var(--glass-brd);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.sb-block h3 {
+  display: flex; align-items: center; gap: 8px;
+  font-size: .92rem; margin-bottom: 4px;
+}
+.sb-block h3 .material-symbols-outlined { font-size: 1.1rem; color: var(--purple); }
+.sb-hint { color: var(--muted); font-size: .76rem; margin-bottom: 10px; }
+.sb-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 0; border-bottom: 1px dashed var(--glass-brd);
+}
+.sb-row:last-of-type { border-bottom: none; }
+.sb-fid {
+  font-family: monospace; font-size: .74rem; color: var(--muted);
+  background: var(--bg-2); border-radius: 6px; padding: 3px 7px;
+}
+.sb-row select, .sb-row input {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
+  color: var(--text); padding: 7px 9px; font: inherit; font-size: .84rem;
+}
+.sb-row select:focus, .sb-row input:focus { outline: none; border-color: var(--purple); }
+.sb-plabel {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--muted); font-size: .76rem;
+}
+.sb-plabel input, .sb-num { width: 78px; }
+.sb-del {
+  margin-left: auto; background: none; border: none; color: var(--muted);
+  font-size: 1.05rem; cursor: pointer; padding: 2px 8px; border-radius: 6px;
+}
+.sb-del:hover { color: var(--red); background: rgba(255,77,109,.08); }
+.sb-add {
+  margin-top: 10px; background: none; border: 1px dashed var(--line);
+  color: var(--muted); border-radius: 8px; padding: 7px 12px;
+  font: inherit; font-size: .8rem; cursor: pointer;
+}
+.sb-add:hover { color: var(--text); border-color: var(--purple); }
+.sb-risk {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 220px));
+  gap: 14px; margin-top: 12px;
+}
+.sb-risk input, .sb-risk select {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
+  color: var(--text); padding: 8px 10px; font: inherit; font-size: .84rem;
+}
+.sb-errors {
+  background: rgba(255,77,109,.08); border: 1px solid rgba(255,77,109,.35);
+  border-radius: 10px; padding: 12px 16px; font-size: .82rem; color: var(--text);
+}
+.sb-errors ul { margin: 6px 0 0 18px; }
+.sb-errors li { margin: 3px 0; color: var(--red); }
+.sb-actions { display: flex; align-items: center; gap: 12px; }
+.sb-actions .btn-primary { display: inline-flex; align-items: center; gap: 6px; }
+.sb-reset {
+  background: none; border: 1px solid var(--line); color: var(--muted);
+  border-radius: 8px; padding: 9px 14px; font: inherit; font-size: .82rem; cursor: pointer;
+}
+.sb-reset:hover { color: var(--text); }
+
+/* ─── Your Strategies (Phase 7) ───────────────────────────── */
+.ys-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
+.ys-card {
+  background: var(--bg-3);
+  border: 1px solid var(--glass-brd);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ys-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.ys-name { font-weight: 700; font-size: .98rem; margin-right: 8px; }
+.ys-kind { vertical-align: 2px; }
+.ys-actions { display: flex; gap: 4px; }
+.ys-btn {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  padding: 4px; border-radius: 6px; display: inline-flex;
+}
+.ys-btn:hover { color: var(--text); background: rgba(148,163,184,.1); }
+.ys-btn-del:hover { color: var(--red); background: rgba(255,77,109,.08); }
+.ys-btn .material-symbols-outlined { font-size: 1.1rem; }
+.ys-summary { color: var(--muted); font-size: .78rem; }
+.ys-watch { display: flex; flex-wrap: wrap; gap: 6px; }
+.ys-chip {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 999px;
+  padding: 2px 10px; font-size: .72rem; font-family: monospace;
+}
+.ys-chip-empty { color: var(--muted); font-style: italic; font-family: inherit; }
+.ys-signals { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px; align-items: center; }
+.ys-loading { color: var(--muted); font-size: .74rem; font-style: italic; }
+.ys-sig {
+  border-radius: 8px; padding: 4px 10px; font-size: .76rem; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.ys-sig small { font-weight: 400; color: var(--muted); }
+.ys-sig-long { background: rgba(34,197,94,.12); color: var(--green); border: 1px solid rgba(34,197,94,.3); }
+.ys-sig-flat { background: rgba(148,163,184,.08); color: var(--muted); border: 1px solid var(--line); }
+.ys-sig-err  { background: rgba(255,77,109,.08); color: var(--red); border: 1px solid rgba(255,77,109,.3); }
+.ys-new {
+  background: var(--grad); color: #fff; border-radius: 6px;
+  font-size: .62rem; padding: 1px 6px; letter-spacing: .04em;
+}
+.ys-note { width: 100%; color: var(--muted); font-size: .7rem; margin-top: 2px; }
+.bt-actions { display: flex; align-items: center; gap: 12px; }
+#save-strategy-modal .modal-body { display: flex; flex-direction: column; gap: 14px; }
+#save-strategy-modal .btn-primary { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; }
+
+/* ─── Paper Trade (Phase 7) ───────────────────────────────── */
+.pt-list { display: flex; flex-direction: column; gap: 14px; }
+.pt-card {
+  background: var(--bg-3);
+  border: 1px solid var(--glass-brd);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.pt-card.pt-stopped { opacity: .65; }
+.badge.pt-live { color: var(--green); border-color: rgba(34,197,94,.4); }
+.pt-state { min-height: 30px; }
+.pt-metrics {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px; margin-bottom: 8px;
+}
+.pt-pos { font-size: .8rem; color: var(--text); }
+.pt-pos strong { color: var(--green); }
+.pt-pos.pt-flat { color: var(--muted); font-style: italic; }
+
+/* ─── SenIQ signal factors (Phase 7 step 5) ───────────────── */
+.sb-seniq-tag {
+  background: var(--grad); color: #fff; border-radius: 6px;
+  font-size: .62rem; font-weight: 700; padding: 2px 7px; letter-spacing: .04em;
+}
+.bt-coverage {
+  display: flex; align-items: flex-start; gap: 8px;
+  border-radius: 10px; padding: 10px 14px; margin-bottom: 14px;
+  font-size: .82rem; line-height: 1.45;
+}
+.bt-coverage .material-symbols-outlined { font-size: 1.1rem; margin-top: 1px; }
+.bt-coverage-warn {
+  background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.35);
+  color: var(--amber);
+}
+.bt-coverage-warn strong { color: var(--amber); }
+.bt-coverage-ok {
+  background: rgba(14,165,233,.07); border: 1px solid rgba(14,165,233,.3);
+  color: var(--text);
+}
+
+/* ─── API keys — MCP access (Phase 8) ─────────────────────── */
+.api-keys-list { margin: 10px 0 4px; }
+.api-key-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 0; border-top: 1px solid rgba(255,255,255,.05);
+  font-size: .82rem;
+}
+.api-key-row .ak-prefix { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+.api-key-row .ak-name   { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.api-key-row .ak-meta   { font-size: .72rem; color: var(--muted); white-space: nowrap; }
+.api-key-row.revoked .ak-prefix,
+.api-key-row.revoked .ak-name { text-decoration: line-through; opacity: .5; }
+.api-key-create { display: flex; gap: 8px; margin-top: 10px; }
+.api-key-create input {
+  flex: 1; background: rgba(255,255,255,.05); border: 1px solid var(--glass-brd);
+  border-radius: var(--radius-sm); color: var(--text); padding: 8px 12px;
+}
+.api-key-create input:focus { outline: none; border-color: var(--cyan); }
+.api-key-create .btn { margin-top: 0; align-self: center; }
+.api-key-new {
+  margin: 10px 0 4px; padding: 12px 14px;
+  background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.35);
+  border-radius: var(--radius-sm);
+}
+.api-key-new .ak-new-label { font-size: .78rem; color: var(--amber); font-weight: 600; margin-bottom: 8px; }
+.api-key-new .ak-new-row { display: flex; align-items: center; gap: 10px; }
+.api-key-new .ak-new-key {
+  flex: 1; font-family: var(--mono); font-size: .78rem; color: var(--text);
+  word-break: break-all; user-select: all;
+}

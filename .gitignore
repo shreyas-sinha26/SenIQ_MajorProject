@@ -53,3 +53,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# local dev workspace
+strategy-service/

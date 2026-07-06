@@ -327,4 +327,16 @@ const SMART_MONEY = {
   WEBHOOK_MAX_FAILURES: 10,      // auto-disable a webhook after this many consecutive fails
 };
 
-module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, INGEST, SMART_MONEY };
+// ─── Strategy service (Phase 7) ──────────────────────────────
+// The Python backtest engine runs as its own HTTP service; SenIQ proxies to it.
+// When the service isn't running, strategy routes return 503 and the rest of the
+// app is unaffected. The shared secret (when set on both sides) authenticates
+// SenIQ to the service.
+const STRATEGY_SERVICE = {
+  URL: process.env.STRATEGY_SERVICE_URL || 'http://localhost:8100',
+  SECRET: process.env.STRATEGY_SERVICE_SECRET || '',
+  TIMEOUT_MS: 120000,            // backtests fetch + replay years of bars; allow long runs
+  CATALOG_TIMEOUT_MS: 8000,
+};
+
+module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, INGEST, SMART_MONEY, STRATEGY_SERVICE };
