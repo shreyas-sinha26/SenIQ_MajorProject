@@ -172,18 +172,23 @@ async function runDailyBriefs() {
 }
 
 function startScheduler() {
+  // Collect the cron tasks so graceful shutdown can stop them (SIGTERM on deploy).
+  const tasks = [];
+
   setTimeout(runNewsPipeline, 2000);
-  cron.schedule('*/10 * * * *', runNewsPipeline);
+  tasks.push(cron.schedule('*/10 * * * *', runNewsPipeline));
   console.log('⏰ Scheduler started — news every 10 minutes');
 
   if (FEATURES.SMART_MONEY) {
     setTimeout(runSmartMoneyPoll, 8000); // stagger after the news pipeline kicks off
-    cron.schedule(SMART_MONEY.POLL_CRON, runSmartMoneyPoll);
+    tasks.push(cron.schedule(SMART_MONEY.POLL_CRON, runSmartMoneyPoll));
     console.log(`⏰ Smart-money poller started — ${SMART_MONEY.POLL_CRON}`);
   }
 
-  cron.schedule(REPORTS.CRON, runDailyBriefs);
+  tasks.push(cron.schedule(REPORTS.CRON, runDailyBriefs));
   console.log(`⏰ Daily-brief generator started — ${REPORTS.CRON}`);
+
+  return tasks;
 }
 
 module.exports = { startScheduler, runNewsPipeline, runSmartMoneyPoll, runDailyBriefs };
