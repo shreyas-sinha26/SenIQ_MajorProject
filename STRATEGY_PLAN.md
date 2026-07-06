@@ -86,10 +86,26 @@ Strategy JSON → Strategy Service:
   engine (`get_signal_history`); externally an agent calls the same tools to assemble + run the
   same schema.
 
-## MCP tools (Phase 8)
-`get_signal · get_signal_history · get_portfolio_sentiment · get_smart_money · create_strategy ·
-backtest · run_strategy · list_strategies · paper_status`. Per-user API key, **Pro-gated**. Report
-generation is never a free tool (existing cost guardrails).
+## MCP tools (Phase 8) — SHIPPED 2026-07-03
+Streamable HTTP endpoint at **`/mcp`** inside the Node app (`server/routes/mcp.js`), stateless —
+fresh server per request. Shipped surface is **read + run only** (kickoff decision; write tools
+like deploy/save are a later, separately-guarded step):
+`list_strategies · validate_strategy · run_backtest · get_signals · list_saved_strategies ·
+list_paper_deployments · get_paper_state`.
+Auth: per-user API key (`Authorization: Bearer seniq_…`), sha256-hashed in `api_keys` (migration
+0015), managed in Profile → API Access (create Pro-gated, shown once; revoke immediate). Tier read
+from DB per request — downgrade shuts keys off instantly. In-memory sliding-window rate limits per
+key: 30/h heavy (backtest/signals/paper replay), 240/h light. Report generation is never a free
+tool (existing cost guardrails).
+
+**Public REST API (`/v1`) — SHIPPED 2026-07-03:** the same read+run surface as plain JSON
+endpoints for scripts/notebooks/integrations (`server/routes/v1.js`): GET /v1 (index) ·
+GET /v1/strategies · POST /v1/strategies/validate · POST /v1/backtest · POST /v1/signals ·
+GET /v1/strategies/saved · GET /v1/paper · GET /v1/paper/:id/state. Same keys, same Pro gate,
+and a **shared rate budget per key across /v1 and /mcp** (`services/apiKeyGate.js` singleton
+limiters; `services/strategyClient.js` shared engine client). Responses carry
+X-RateLimit-Limit/-Remaining; 429 adds Retry-After. Docs: static **`/docs`** page
+(`public/docs.html`), linked from the API Access card.
 
 ## Honest caveat — backtest depth for SenIQ factors
 - **Technical-only rules** backtest back **years** (deep price history).
@@ -104,7 +120,7 @@ Builder + backtest = **Plus+** · Paper trading = **Pro** · MCP / API = **Pro**
 ## Phasing
 - **Phase 7:** strategy service + data adapters + schema + signals + visual builder + backtest UI
   + paper trading.
-- **Phase 8:** MCP server + per-user API keys; then Alpaca intraday.
+- **Phase 8:** MCP server + per-user API keys ✅ 2026-07-03; then Alpaca intraday.
 
 ## Open questions (resolve before coding)
 1. Where the Python service lives + how we lift zeuniq's engine (vendored `strategy-service/`

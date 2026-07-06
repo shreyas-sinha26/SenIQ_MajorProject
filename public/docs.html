@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SenIQ API — Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #05060f; --bg-2: #0a0c1a; --glass: rgba(255,255,255,.04);
+      --glass-brd: rgba(255,255,255,.09); --text: #e8e9f1; --muted: #9298ab;
+      --pink: #ff2d78; --cyan: #22d3ee; --amber: #fbbf24; --green: #22c55e;
+      --mono: 'JetBrains Mono', monospace; --font: 'Sora', sans-serif;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.6; }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 48px 24px 80px; }
+    h1 { font-size: 2rem; margin-bottom: 6px; }
+    h1 .grad { background: linear-gradient(90deg, var(--cyan), var(--pink)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .sub { color: var(--muted); margin-bottom: 36px; }
+    h2 { font-size: 1.15rem; margin: 40px 0 12px; padding-top: 18px; border-top: 1px solid var(--glass-brd); }
+    h3 { font-size: .95rem; margin: 24px 0 8px; font-family: var(--mono); }
+    p, li { font-size: .9rem; color: var(--muted); }
+    p strong, li strong { color: var(--text); }
+    ul { padding-left: 22px; margin: 8px 0; }
+    a { color: var(--cyan); text-decoration: none; }
+    code { font-family: var(--mono); font-size: .82em; background: var(--glass); border: 1px solid var(--glass-brd); border-radius: 5px; padding: 1px 6px; color: var(--text); }
+    pre { background: var(--bg-2); border: 1px solid var(--glass-brd); border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 10px 0 18px; }
+    pre code { background: none; border: none; padding: 0; font-size: .78rem; line-height: 1.55; color: var(--text); }
+    .method { display: inline-block; font-family: var(--mono); font-weight: 600; font-size: .72rem; border-radius: 5px; padding: 2px 8px; margin-right: 8px; vertical-align: 1px; }
+    .get  { background: rgba(34,211,238,.12); color: var(--cyan); border: 1px solid rgba(34,211,238,.35); }
+    .post { background: rgba(255,45,120,.12); color: var(--pink); border: 1px solid rgba(255,45,120,.35); }
+    table { border-collapse: collapse; width: 100%; margin: 10px 0 18px; font-size: .82rem; }
+    th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--glass-brd); }
+    th { color: var(--muted); font-weight: 600; font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; }
+    td { color: var(--muted); } td:first-child { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+    .note { background: rgba(251,191,36,.07); border: 1px solid rgba(251,191,36,.3); border-radius: 10px; padding: 12px 16px; font-size: .84rem; color: var(--amber); margin: 14px 0; }
+    .footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--glass-brd); font-size: .76rem; color: var(--muted); }
+    .back { font-size: .82rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="back"><a href="/app">← Back to SenIQ</a></p>
+    <h1>SenIQ <span class="grad">API</span></h1>
+    <p class="sub">Run backtests, evaluate live signals, and read your strategies &amp; paper deployments — from any script, notebook, or AI agent.</p>
+
+    <h2>Authentication</h2>
+    <p>Every request needs an API key in the <code>Authorization</code> header. Keys are personal:
+    each user creates their own (up to 5, named, revocable) in <strong>Profile → API Access</strong>.
+    The full key is shown <strong>once</strong> at creation. API access requires the <strong>Pro plan</strong> —
+    a downgrade or revocation cuts a key off on its very next request.</p>
+    <pre><code>Authorization: Bearer seniq_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX</code></pre>
+
+    <h2>Rate limits</h2>
+    <p>Per key, per hour, <strong>shared</strong> across this REST API and the MCP server —
+    one key = one budget, however you call it.</p>
+    <table>
+      <tr><th>Bucket</th><th>Limit</th><th>Applies to</th></tr>
+      <tr><td>heavy</td><td>30 / hour</td><td>backtest, signals, paper state</td></tr>
+      <tr><td>light</td><td>240 / hour</td><td>catalog, validate, listings, index</td></tr>
+    </table>
+    <p>Responses carry <code>X-RateLimit-Limit</code> and <code>X-RateLimit-Remaining</code>;
+    a <code>429</code> adds <code>Retry-After</code> (seconds).</p>
+
+    <h2>Endpoints</h2>
+
+    <h3><span class="method get">GET</span>/v1</h3>
+    <p>Index + key check: endpoint list, rate limits, disclaimer.</p>
+    <pre><code>curl https://YOUR-HOST/v1 -H "Authorization: Bearer $SENIQ_KEY"</code></pre>
+
+    <h3><span class="method get">GET</span>/v1/strategies</h3>
+    <p>Strategy catalog — built-in strategies with parameter schemas, plus the <code>builder</code>
+    vocabulary (indicators, SenIQ metrics, operators, risk, sizing) a custom spec may use.</p>
+
+    <h3><span class="method post">POST</span>/v1/strategies/validate</h3>
+    <p>Check a Builder spec without running it. Body: the spec itself. Returns
+    <code>{valid, errors, normalized}</code>.</p>
+
+    <h3><span class="method post">POST</span>/v1/backtest</h3>
+    <p>Run one strategy on one symbol. Provide <code>strategy</code> (registry name) <em>or</em>
+    <code>custom</code> (Builder spec). Returns metrics, trades, equity curve — and
+    <code>seniq_coverage</code> when SenIQ signal factors are used.</p>
+    <pre><code>curl -X POST https://YOUR-HOST/v1/backtest \
+  -H "Authorization: Bearer $SENIQ_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "EMACrossover",
+    "params": {"fast": 20, "slow": 50},
+    "symbol": "AAPL",
+    "exchange": "US",
+    "start_date": "2023-01-01",
+    "end_date": "2024-01-01",
+    "initial_cash": "100000"
+  }'</code></pre>
+    <table>
+      <tr><th>Field</th><th>Required</th><th>Notes</th></tr>
+      <tr><td>strategy | custom</td><td>one of</td><td>registry name from the catalog, or a Builder spec</td></tr>
+      <tr><td>symbol</td><td>yes</td><td>e.g. AAPL / RELIANCE / BTC</td></tr>
+      <tr><td>exchange</td><td>no</td><td>US · NASDAQ · NYSE · NSE · BSE · CRYPTO · COMMODITY (default US)</td></tr>
+      <tr><td>start_date, end_date</td><td>yes</td><td>YYYY-MM-DD</td></tr>
+      <tr><td>params</td><td>no</td><td>registry params (see catalog schema)</td></tr>
+      <tr><td>initial_cash</td><td>no</td><td>default 100000</td></tr>
+    </table>
+
+    <h3><span class="method post">POST</span>/v1/signals</h3>
+    <p>Current rule state (long/flat, last signal, fired-on-latest-bar) across up to 5 symbols.</p>
+    <pre><code>curl -X POST https://YOUR-HOST/v1/signals \
+  -H "Authorization: Bearer $SENIQ_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "SMACrossover",
+    "symbols": [{"symbol": "NVDA"}, {"symbol": "BTC", "exchange": "CRYPTO"}]
+  }'</code></pre>
+
+    <h3><span class="method get">GET</span>/v1/strategies/saved</h3>
+    <p>Your saved strategies (Builder specs and configured presets) with their watchlists.</p>
+
+    <h3><span class="method get">GET</span>/v1/paper</h3>
+    <p>Your paper-trading deployments (strategy, symbol, cash, deploy date, active/stopped).</p>
+
+    <h3><span class="method get">GET</span>/v1/paper/:id/state</h3>
+    <p>Replay a deployment from its deploy date to now (or to when it was stopped): current
+    equity, open position, trade log, metrics. Read-only — deploying and stopping stay in the app.</p>
+
+    <h2>MCP server (AI agents)</h2>
+    <p>The same surface is available to MCP-capable agents (Claude Desktop, Claude Code, etc.) at
+    <code>POST /mcp</code> (Streamable HTTP) using the same key — tools:
+    <code>list_strategies · validate_strategy · run_backtest · get_signals ·
+    list_saved_strategies · list_paper_deployments · get_paper_state</code>.</p>
+    <pre><code>{
+  "mcpServers": {
+    "seniq": {
+      "type": "http",
+      "url": "https://YOUR-HOST/mcp",
+      "headers": { "Authorization": "Bearer seniq_…" }
+    }
+  }
+}</code></pre>
+
+    <h2>Errors</h2>
+    <table>
+      <tr><th>Status</th><th>Meaning</th></tr>
+      <tr><td>400</td><td>invalid request — the <code>error</code> field explains (bad params, unknown symbol, invalid spec)</td></tr>
+      <tr><td>401</td><td>missing, malformed, or revoked API key</td></tr>
+      <tr><td>403</td><td>key is valid but the account isn't on the Pro plan</td></tr>
+      <tr><td>404</td><td>unknown endpoint / strategy / deployment</td></tr>
+      <tr><td>429</td><td>rate limit exceeded — honor <code>Retry-After</code></td></tr>
+      <tr><td>503</td><td>strategy engine offline — retry later</td></tr>
+    </table>
+
+    <div class="note">Backtests over custom specs that use SenIQ signal factors only reach as far
+    back as SenIQ has been recording — check <code>seniq_coverage</code> in the response before
+    trusting long-range results.</div>
+
+    <p class="footer" data-disclaimer>SenIQ is informational, not investment advice.</p>
+  </div>
+  <script>
+    fetch('/api/config').then(r => r.json())
+      .then(({ disclaimer }) => { if (disclaimer) document.querySelector('[data-disclaimer]').textContent = disclaimer; })
+      .catch(() => {});
+  </script>
+</body>
+</html>
