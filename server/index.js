@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 
-const { runMigrations } = require('./db');
+const { runMigrations, healthCheck, closePool } = require('./db');
 const { seedUniverse } = require('./services/entityResolver');
 const { seedAdmin } = require('./services/seedAdmin');
 const { DISCLAIMER } = require('./config');
@@ -14,6 +14,11 @@ const smartMoneyRouter = require('./routes/smartMoney');
 const reportsRouter = require('./routes/reports');
 const adminRouter = require('./routes/admin');
 const billingRouter = require('./routes/billing');
+const strategiesRouter = require('./routes/strategies');
+const paperRouter = require('./routes/paper');
+const apiKeysRouter = require('./routes/apiKeys');
+const mcpRouter = require('./routes/mcp');
+const v1Router = require('./routes/v1');
 const { startScheduler } = require('./scheduler');
 const { initSentry, sentryErrorHandler } = require('./observability');
 
@@ -23,8 +28,9 @@ const isProd = process.env.NODE_ENV === 'production';
 
 // ─── Fail fast on insecure prod config ───────────────────────
 // A real deployment must not run on the development JWT fallback.
-if (isProd && (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'dev-secret-change-me')) {
-  console.error('❌ JWT_SECRET is missing or still the dev default — refusing to start in production.');
+if (isProd && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32 ||
+    process.env.JWT_SECRET === 'dev-secret-change-me' || process.env.JWT_SECRET.includes('change-me'))) {
+  console.error('❌ JWT_SECRET is missing, weak (<32 chars), or still the dev default — refusing to start in production.');
   process.exit(1);
 }
 
@@ -39,8 +45,10 @@ if (isProd) app.set('trust proxy', 1);
 // ─── Security headers + force HTTPS (prod only) ──────────────
 app.use((req, res, next) => {
   if (isProd) {
-    // Redirect any plain-HTTP hit to HTTPS (proxy reports the original scheme).
-    if (req.secure === false && req.headers['x-forwarded-proto'] !== 'https') {
+    // Redirect any plain-HTTP hit to HTTPS (proxy reports the original scheme). The host's
+    // internal health probe may hit us over plain HTTP without the forwarded header — a
+    // redirect would read as unhealthy, so let /api/health through.
+    if (req.secure === false && req.headers['x-forwarded-proto'] !== 'https' && req.path !== '/api/health') {
       return res.redirect(308, `https://${req.headers.host}${req.originalUrl}`);
     }
     // HSTS: tell browsers to only ever use HTTPS for 1y (with preload eligibility).
@@ -66,10 +74,24 @@ app.use('/api/smart-money', smartMoneyRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/billing', billingRouter);
+app.use('/api/strategies', strategiesRouter);
+app.use('/api/paper', paperRouter);
+app.use('/api/keys', apiKeysRouter);
+// MCP server (Phase 8): strategy tools for AI agents, API-key auth (not JWT).
+app.use('/mcp', mcpRouter);
+// Public REST API: same read+run surface as /mcp, same keys, shared rate budget.
+app.use('/v1', v1Router);
 
 // ─── Health Check ───────────────────────────────────────────
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
+// Returns 503 if Postgres is unreachable so the host's health probe recycles a bad instance.
+app.get('/api/health', async (req, res) => {
+  const dbOk = await healthCheck();
+  res.status(dbOk ? 200 : 503).json({
+    status: dbOk ? 'ok' : 'degraded',
+    db: dbOk ? 'up' : 'down',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // ─── Public Config (disclaimer, etc.) ───────────────────────
@@ -81,6 +103,11 @@ app.get('/api/config', (req, res) => {
 // Root serves the public marketing page; the app itself lives at /app.
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'landing.html'));
+});
+
+// ─── API documentation (public, static) ─────────────────────
+app.get('/docs', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'docs.html'));
 });
 
 // ─── SPA Fallback (the app: auth + dashboard) ───────────────
@@ -98,11 +125,14 @@ app.use((err, req, res, _next) => {
 });
 
 // ─── Start Server ───────────────────────────────────────────
+let server;
+let schedulerTasks = [];
+
 async function start() {
   await runMigrations();
   await seedUniverse();
   await seedAdmin();
-  app.listen(PORT, () => {
+  server = app.listen(PORT, () => {
     console.log(`
   ╔══════════════════════════════════════════════════╗
   ║   🧠 SenIQ                                       ║
@@ -110,9 +140,30 @@ async function start() {
   ║   Press Ctrl+C to stop                           ║
   ╚══════════════════════════════════════════════════╝
   `);
-    startScheduler();
+    schedulerTasks = startScheduler();
   });
 }
+
+// ─── Graceful shutdown ───────────────────────────────────────
+// PaaS hosts send SIGTERM on deploy/scale-down. Stop cron, drain HTTP, close the pool.
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n${signal} received — shutting down gracefully…`);
+  try {
+    schedulerTasks.forEach((t) => t && typeof t.stop === 'function' && t.stop());
+    await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
+    await closePool();
+    console.log('✅ Clean shutdown complete.');
+    process.exit(0);
+  } catch (err) {
+    console.error('⚠️  Error during shutdown:', err.message);
+    process.exit(1);
+  }
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 start().catch((err) => {
   console.error('❌ Failed to start server:', err);
