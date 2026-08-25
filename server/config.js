@@ -287,6 +287,27 @@ const QA = {
   MAX_HOLDINGS: 30,              // all holdings up to this cap (not just top-N)
 };
 
+// ─── Instant alert email + Pro narrative (Phase 9) ───────────
+// The materiality engine (Phase 3.5) already decides WHEN an alert fires and dedupes it
+// per (user, event). Phase 9 adds DELIVERY: realtime alerts are emailed to Plus/Pro via
+// the existing Resend sender (Free = in-app digest only, no email). For Pro, a short
+// Claude narrative is attached, reusing the same guardrails as the daily brief/Q&A —
+// counted separately as claude_calls.kind='alert_narrative' so it can't cannibalise the
+// brief/Q&A budgets, but sharing the global $/day kill-switch and cost logging. Claude →
+// Ollama → deterministic template, same fallback order as the rest of the analyst voice.
+const ALERT_EMAIL = {
+  SUBJECT_PREFIX: '[SenIQ]',    // "[SenIQ] Portfolio Alert: <headline>"
+  DASHBOARD_PATH: '/app',       // link back into the app (APP_URL + this)
+  REALTIME_ONLY: true,          // only 'realtime' alerts email; 'digest' stays in-app
+};
+const ALERT_NARRATIVE = {
+  MODEL: 'claude-haiku-4-5',    // cheapest-viable; matches the brief/Q&A default
+  MAX_OUTPUT_TOKENS: 400,       // 150–250 words ≈ ~350 tokens; hard per-call cap
+  PER_USER_DAILY_QUOTA: 5,      // Pro narratives/user/day — aligns with ALERT_BUDGET realtime cap
+  MIN_WORDS: 150,
+  MAX_WORDS: 250,
+};
+
 // ─── Ingestion sources (Phase 2b) ────────────────────────────
 const INGEST = {
   GDELT_MAX_RECORDS: 30,
@@ -378,4 +399,4 @@ const AUTH_LIMITS = {
   TOKEN_TTL_MIN: { RESET: 30, VERIFY: 60 * 24 },    // emailed link lifetimes
 };
 
-module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, INGEST, SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS };
+module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, INGEST, SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS };
