@@ -339,4 +339,43 @@ const STRATEGY_SERVICE = {
   CATALOG_TIMEOUT_MS: 8000,
 };
 
-module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, INGEST, SMART_MONEY, STRATEGY_SERVICE };
+// ─── OAuth sign-in (Phase 5) ─────────────────────────────────
+// Authorization-code flow, callback at /api/auth/oauth/<provider>/callback.
+// A provider is live only when both its ID and SECRET are set; the frontend asks
+// /api/config which buttons to show, so unset providers simply don't appear.
+// APP_URL builds the callback + emailed links; local dev falls back to localhost.
+const APP_URL = (process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/$/, '');
+const OAUTH = {
+  GOOGLE: {
+    ID: process.env.GOOGLE_CLIENT_ID || '',
+    SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
+    get enabled() { return !!(this.ID && this.SECRET); },
+  },
+  GITHUB: {
+    ID: process.env.GITHUB_CLIENT_ID || '',
+    SECRET: process.env.GITHUB_CLIENT_SECRET || '',
+    get enabled() { return !!(this.ID && this.SECRET); },
+  },
+  STATE_TTL_MIN: 10,             // signed state token lifetime (CSRF guard)
+};
+
+// ─── Transactional email (Phase 5 reset/verify; Phase 9 reuses this) ──
+// Resend (https://resend.com) — one HTTPS POST, no SDK. Without a key the app
+// still works: password-reset links are returned in dev responses instead of
+// emailed, and verification emails are skipped.
+const EMAIL = {
+  RESEND_API_KEY: process.env.RESEND_API_KEY || '',
+  FROM: process.env.EMAIL_FROM || 'SenIQ <onboarding@resend.dev>',
+  get enabled() { return !!this.RESEND_API_KEY; },
+};
+
+// ─── Auth endpoint rate limits (Phase 5 hardening) ───────────
+// Per-IP sliding windows (in-memory, same limiter as the API keys). Aimed at
+// credential stuffing / reset spam, not accounting — counters reset on restart.
+const AUTH_LIMITS = {
+  LOGIN:  { limit: 20, windowMs: 10 * 60 * 1000 },  // login + signup attempts
+  RESET:  { limit: 5,  windowMs: 15 * 60 * 1000 },  // forgot-password requests
+  TOKEN_TTL_MIN: { RESET: 30, VERIFY: 60 * 24 },    // emailed link lifetimes
+};
+
+module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, INGEST, SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS };
