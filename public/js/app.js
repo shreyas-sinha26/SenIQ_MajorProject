@@ -101,18 +101,23 @@ function selectAuthTab(name) {
   if (tab) tab.click();
 }
 
+let showAuthForm = () => {}; // assigned inside initAuth; used by the Phase 5 boot code
+let pendingResetToken = null; // ?reset=<token> from an emailed password-reset link
+
 function initAuth() {
-  // ── Tab switching (tabs + cross-form links) ──
+  // ── Form switching (tabs + cross-form links + forgot/reset panels) ──
   function switchTab(name) {
     document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
     const tab = document.querySelector(`.auth-tab[data-tab="${name}"]`);
     if (tab) tab.classList.add('active');
-    document.getElementById('login-form').classList.toggle('hidden', name !== 'login');
-    document.getElementById('signup-form').classList.toggle('hidden', name !== 'signup');
-    document.getElementById('auth-error').classList.add('hidden');
-    const signupErr = document.getElementById('auth-error-signup');
-    if (signupErr) signupErr.classList.add('hidden');
+    ['login', 'signup', 'forgot', 'reset'].forEach(f => {
+      const form = document.getElementById(`${f}-form`);
+      if (form) form.classList.toggle('hidden', name !== f);
+    });
+    ['auth-error', 'auth-error-signup', 'auth-error-forgot', 'auth-error-reset', 'auth-success', 'auth-success-forgot']
+      .forEach(id => document.getElementById(id)?.classList.add('hidden'));
   }
+  showAuthForm = switchTab;
 
   document.querySelectorAll('.auth-tab').forEach(tab => {
     tab.addEventListener('click', () => switchTab(tab.dataset.tab));
@@ -202,6 +207,78 @@ function initAuth() {
       span.textContent = origText;
     }
   });
+
+  // ── Forgot password (Phase 5) ──
+  document.getElementById('forgot-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('auth-error-forgot');
+    const okEl = document.getElementById('auth-success-forgot');
+    errEl.classList.add('hidden'); okEl.classList.add('hidden');
+    const btn = document.getElementById('forgot-btn');
+    btn.disabled = true;
+    try {
+      const data = await api('/api/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({ email: document.getElementById('forgot-email').value }),
+      });
+      okEl.textContent = data.message;
+      // Local dev without an email provider: the server hands the link back.
+      if (data.devResetLink) {
+        okEl.innerHTML = `${data.message}<br><a href="${data.devResetLink}" style="color:inherit;text-decoration:underline">Dev: open reset link</a>`;
+      }
+      okEl.classList.remove('hidden');
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ── Set new password (arrived via ?reset=<token>) ──
+  document.getElementById('reset-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('auth-error-reset');
+    errEl.classList.add('hidden');
+    const pw = document.getElementById('reset-password').value;
+    const confirm = document.getElementById('reset-password-confirm').value;
+    if (pw !== confirm) {
+      errEl.textContent = 'Passwords do not match';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    const btn = document.getElementById('reset-btn');
+    btn.disabled = true;
+    try {
+      const data = await api('/api/auth/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ token: pendingResetToken, password: pw }),
+      });
+      pendingResetToken = null;
+      showAuthForm('login');
+      const okEl = document.getElementById('auth-success');
+      okEl.textContent = data.message;
+      okEl.classList.remove('hidden');
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ── OAuth buttons (visibility driven by /api/config) ──
+  document.querySelectorAll('[data-oauth-provider]').forEach(btn => {
+    btn.addEventListener('click', () => { location.href = `/api/auth/oauth/${btn.dataset.oauthProvider}`; });
+  });
+  fetch('/api/config').then(r => r.json()).then(cfg => {
+    const o = cfg.oauth || {};
+    if (!o.google && !o.github) return;
+    document.querySelectorAll('.oauth-only').forEach(el => el.classList.remove('hidden'));
+    ['google', 'github'].forEach(p => {
+      if (o[p]) document.querySelectorAll(`[data-oauth-provider="${p}"]`).forEach(b => b.classList.remove('hidden'));
+    });
+  }).catch(() => {});
 }
 
 
@@ -2837,6 +2914,37 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Mark all alerts as read
   document.getElementById('mark-all-read-btn').addEventListener('click', markAllRead);
+
+  // ── Phase 5 boot: OAuth return, OAuth errors, reset + verify links ──
+  {
+    const qp = new URLSearchParams(location.search);
+    const oauthTok = qp.get('oauth');
+    if (oauthTok) {
+      // Callback landed with a fresh SenIQ JWT — adopt it and clean the URL.
+      token = oauthTok;
+      localStorage.setItem('copilot_token', token);
+      history.replaceState({}, '', '/app');
+    }
+    const oauthErr = qp.get('oauth_error');
+    if (oauthErr) {
+      const errEl = document.getElementById('auth-error');
+      errEl.textContent = oauthErr;
+      errEl.classList.remove('hidden');
+      history.replaceState({}, '', '/app');
+    }
+    const resetTok = qp.get('reset');
+    if (resetTok) {
+      pendingResetToken = resetTok;
+      showAuthForm('reset');
+      history.replaceState({}, '', '/app');
+    }
+    if (qp.get('verified') === '1') {
+      const okEl = document.getElementById('auth-success');
+      okEl.textContent = 'Email verified ✓';
+      okEl.classList.remove('hidden');
+      history.replaceState({}, '', '/app');
+    }
+  }
 
   // Check for existing session
   if (token) {

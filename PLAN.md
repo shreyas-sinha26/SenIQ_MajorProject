@@ -97,21 +97,26 @@ news + smart-money cron jobs run in the cloud.
 
 ---
 
-## Phase 5 — Auth & Accounts (OAuth)  *(NEW)*
-**Goal:** add social sign-in beside the existing email/password so users onboard in one click.
-Depends on the public HTTPS domain (Phase 4) for callback URLs.
-**Kickoff Qs:** which providers at launch (Google only, or + GitHub/Apple)? Require email verification
-before use? Refresh tokens now or later?
+## Phase 5 — Auth & Accounts (OAuth) — ✅ DONE (2026-07-15)
+**Built:** Google **and** GitHub sign-in (authorization-code flow, no SDKs — two `fetch` calls per
+provider) at `/api/auth/oauth/<provider>` + `/callback` (`routes/oauth.js`); CSRF-guarded via a signed
+state JWT that must echo an HttpOnly cookie nonce. **Account model** per spec: identity matched on
+`(oauth_provider, oauth_sub)` first, else linked by **provider-verified email** so password + Google
+land on the same account; OAuth-born accounts have `password_hash = NULL` until they set one
+(migration 0016; profile Change-Password lets them set it without a current password). **Password
+reset:** `/forgot-password` (no-enumeration reply) + `/reset-password` with single-use sha256-hashed
+30-min tokens (`auth_tokens`, `services/authTokens.js`); emailed via **Resend** (`services/emailService.js`,
+one HTTPS POST, no SDK) — without a key, dev builds return the link in the response so the flow stays
+testable. **Verification:** best-effort email on signup + `/verify-email` (non-blocking, `email_verified`
+flag). **Hardening:** per-IP sliding-window rate limits on login/signup (20/10 min) and forgot (5/15 min),
+case-insensitive email lookups, provider-aware login errors. Frontend: provider buttons appear only when
+`/api/config.oauth` says configured; forgot/reset panels in the auth card; `?oauth=`/`?reset=`/`?verified=`
+boot handling. Offline tests in `test/auth.test.js`.
+**Deferred:** refresh tokens (7-day JWT stands), Apple sign-in, blocking email verification (soft flag only),
+SMTP transport (Resend only — Phase 9 can add SMTP).
 
-- **OAuth providers:** Google first (highest conversion), GitHub optional. Authorization-Code flow;
-  callback at `https://<domain>/api/auth/oauth/<provider>/callback`.
-- **Account model:** link an OAuth identity to a user row by **verified email** so password + Google
-  land on the same account; store `provider` + `provider_id`.
-- **Email flows:** email verification on signup + password reset (needs the email provider — cross-cutting).
-- **Hardening:** production JWT secret, sensible token expiry, optional refresh tokens, rate-limit auth endpoints.
-
-**Done when:** a user can sign in with Google and land in their portfolio, and email/password accounts
-can reset their password.
+**Config:** `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET`, `RESEND_API_KEY`, `EMAIL_FROM`, `APP_URL`
+(callback base). Redirect URIs to register: `<APP_URL>/api/auth/oauth/google/callback` (+ github).
 
 ---
 
