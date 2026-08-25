@@ -42,4 +42,28 @@ In 2-3 sentences, explain what this means for the investor's portfolio. Be speci
   return data.response?.trim() || null;
 }
 
-module.exports = { explainForPortfolio };
+/**
+ * Generic single-shot completion against the same local Ollama instance. Used as the
+ * middle fallback tier (Claude → Ollama → template) for prose that isn't the news
+ * explainer above. Throws if Ollama is unreachable/errors so callers can fall through
+ * to their deterministic template.
+ */
+async function generate(prompt, { numPredict = 300, temperature = 0.3, timeoutMs = 30000 } = {}) {
+  const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      prompt,
+      stream: false,
+      options: { temperature, num_predict: numPredict }
+    }),
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+
+  if (!response.ok) throw new Error(`Ollama returned ${response.status}`);
+  const data = await response.json();
+  return data.response?.trim() || null;
+}
+
+module.exports = { explainForPortfolio, generate, OLLAMA_MODEL };

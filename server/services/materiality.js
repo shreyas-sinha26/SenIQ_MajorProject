@@ -235,6 +235,11 @@ async function generateAlerts() {
           score: ev.tickers[topTicker]?.score ?? 0.5,
           message: `${icon} ${topTicker} — ${ev.title}${srcNote}`,
           priority: score,
+          // Phase 9 email context (ignored by the alerts insert; used by the notifier).
+          title: ev.title,
+          direction,
+          exposure_pct: exposureByUser[uid]?.[topTicker] ?? null,
+          source_count: ev.sourceCount,
         });
         alreadyAlerted.add(key);
       }
@@ -258,6 +263,11 @@ async function generateAlerts() {
           score: 0.5,
           message: `${icon} ${label}: ${ev.title}${srcNote}`,
           priority: broad,
+          // Phase 9 email context (ignored by the alerts insert; used by the notifier).
+          title: ev.title,
+          direction: 'neutral',
+          exposure_pct: null,
+          source_count: ev.sourceCount,
         });
         alreadyAlerted.add(key);
       }
@@ -286,14 +296,24 @@ async function generateAlerts() {
   planDeliveries(toInsert, { sentTodayByUser, cooldownByUser, nowHour, budget: ALERT_BUDGET });
 
   let realtime = 0;
+  const emailable = [];
   for (const a of toInsert) {
-    if (a.delivery === 'realtime') realtime++;
+    if (a.delivery === 'realtime') { realtime++; emailable.push(a); }
     await execute(
       `INSERT INTO alerts (user_id, ticker, event_id, alert_type, sentiment_label, sentiment_score, message, delivery)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [a.user_id, a.ticker, a.event_id, a.alert_type, a.label, a.score, a.message, a.delivery]
     );
   }
+
+  // Phase 9 — email delivery of the just-created realtime alerts (Plus/Pro; Free stays
+  // in-app). Fire-and-forget: alert generation never waits on email, and a delivery
+  // failure is logged inside the notifier, never thrown back into the pipeline.
+  if (emailable.length) {
+    const { deliverAlertEmails } = require('./alertNotifier');
+    deliverAlertEmails(emailable).catch((err) => console.error('Alert email dispatch error:', err.message));
+  }
+
   return { total: toInsert.length, realtime };
 }
 
