@@ -6,8 +6,9 @@ const path = require('path');
 const { runMigrations, healthCheck, closePool } = require('./db');
 const { seedUniverse } = require('./services/entityResolver');
 const { seedAdmin } = require('./services/seedAdmin');
-const { DISCLAIMER, FEATURES } = require('./config');
+const { DISCLAIMER, FEATURES, OAUTH } = require('./config');
 const { router: authRouter } = require('./routes/auth');
+const oauthRouter = require('./routes/oauth');
 const portfolioRouter = require('./routes/portfolio');
 const newsRouter = require('./routes/news');
 const smartMoneyRouter = require('./routes/smartMoney');
@@ -67,6 +68,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 
 // ─── API Routes ─────────────────────────────────────────────
+app.use('/api/auth/oauth', oauthRouter); // Phase 5 — Google/GitHub sign-in (before the generic auth router)
 app.use('/api/auth', authRouter);
 app.use('/api/portfolio', portfolioRouter);
 app.use('/api/news', newsRouter);
@@ -103,7 +105,12 @@ app.get('/api/health', async (req, res) => {
 
 // ─── Public Config (disclaimer, etc.) ───────────────────────
 app.get('/api/config', (req, res) => {
-  res.json({ disclaimer: DISCLAIMER, features: { strategies: FEATURES.STRATEGIES } });
+  res.json({
+    disclaimer: DISCLAIMER,
+    features: { strategies: FEATURES.STRATEGIES },
+    // Phase 5 — which sign-in buttons the frontend should show.
+    oauth: { google: OAUTH.GOOGLE.enabled, github: OAUTH.GITHUB.enabled },
+  });
 });
 
 // ─── Marketing Landing Page ─────────────────────────────────
