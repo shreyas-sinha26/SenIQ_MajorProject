@@ -12,7 +12,7 @@ politicians) is moving, and surfaces **what actually matters to _your_ holdings*
 
 ---
 
-## Features (Phases 0–3.5 + 6 + Engine E1–E6, shipped)
+## Features (Phases 0–3.5 + 5 + 6 + Engine E1–E6, shipped)
 
 - **Multi-asset portfolio** — equities / crypto / commodities with quantity + cost basis →
   exposure weights. **Live price + day-change shown next to each holding:** crypto via
@@ -31,6 +31,10 @@ politicians) is moving, and surfaces **what actually matters to _your_ holdings*
 - **Tiers & billing (Phase 6)** — Free / Plus / Pro with real gating (holdings cap, smart-money
   teaser, impact-feed depth, AI Workspace), a Plans/upgrade page (Stripe/Razorpay stubbed until
   deploy), and an **admin tier switcher** to preview every tier live (`is_admin` + `ADMIN_*`).
+- **OAuth & account recovery (Phase 5)** — **Sign in with Google / GitHub** (buttons appear once the
+  provider keys are set; identities link to password accounts by verified email), **password reset**
+  via emailed one-time links (Resend; dev builds show the link without a key), optional email
+  verification, and per-IP rate limits on the credential endpoints.
 
 **Intelligence engine (E1–E6):**
 - **E1 — entity resolution + durable events** — a curated company universe (~US 100 / Nifty 50 /
@@ -105,6 +109,9 @@ Optional API keys (all degrade gracefully — see inline comments in `.env.examp
 | `CONGRESS_TRADES_URL` | Live congress-trade data | Bundled sample (`data/congress_sample.json`) |
 | `ANTHROPIC_API_KEY` | Claude — daily brief (E5) + Q&A (E6) | Free deterministic writer |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Seed an admin account (tier switcher, set any user's tier) | No admin account seeded |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | "Sign in with Google" (callback `<APP_URL>/api/auth/oauth/google/callback`) | Button hidden; email/password only |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | "Sign in with GitHub" | Button hidden |
+| `RESEND_API_KEY` / `EMAIL_FROM` | Emails password-reset + verification links ([free](https://resend.com)) | Dev builds show the reset link inline; verification skipped |
 
 ### 4. Run
 ```powershell

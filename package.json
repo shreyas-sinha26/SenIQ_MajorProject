@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node test/entityResolver.test.js && node test/engine.test.js && node test/reports.test.js && node test/qa.test.js && node test/mcp.test.js"
+    "test": "node test/entityResolver.test.js && node test/engine.test.js && node test/reports.test.js && node test/qa.test.js && node test/mcp.test.js && node test/auth.test.js && node test/alerts.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

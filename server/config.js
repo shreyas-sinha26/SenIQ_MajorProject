@@ -318,6 +318,27 @@ const NEWS_SEARCH = {
   MIN_SIMILARITY: 0.3,           // below this cosine a match is noise, not relevance (MiniLM scale)
 };
 
+// ─── Instant alert email + Pro narrative (Phase 9) ───────────
+// The materiality engine (Phase 3.5) already decides WHEN an alert fires and dedupes it
+// per (user, event). Phase 9 adds DELIVERY: realtime alerts are emailed to Plus/Pro via
+// the existing Resend sender (Free = in-app digest only, no email). For Pro, a short
+// Claude narrative is attached, reusing the same guardrails as the daily brief/Q&A —
+// counted separately as claude_calls.kind='alert_narrative' so it can't cannibalise the
+// brief/Q&A budgets, but sharing the global $/day kill-switch and cost logging. Claude →
+// Ollama → deterministic template, same fallback order as the rest of the analyst voice.
+const ALERT_EMAIL = {
+  SUBJECT_PREFIX: '[SenIQ]',    // "[SenIQ] Portfolio Alert: <headline>"
+  DASHBOARD_PATH: '/app',       // link back into the app (APP_URL + this)
+  REALTIME_ONLY: true,          // only 'realtime' alerts email; 'digest' stays in-app
+};
+const ALERT_NARRATIVE = {
+  MODEL: 'claude-haiku-4-5',    // cheapest-viable; matches the brief/Q&A default
+  MAX_OUTPUT_TOKENS: 400,       // 150–250 words ≈ ~350 tokens; hard per-call cap
+  PER_USER_DAILY_QUOTA: 5,      // Pro narratives/user/day — aligns with ALERT_BUDGET realtime cap
+  MIN_WORDS: 150,
+  MAX_WORDS: 250,
+};
+
 // ─── Ingestion sources (Phase 2b) ────────────────────────────
 const INGEST = {
   GDELT_MAX_RECORDS: 30,
@@ -370,4 +391,43 @@ const STRATEGY_SERVICE = {
   CATALOG_TIMEOUT_MS: 8000,
 };
 
-module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, STRATEGY_SERVICE };
+// ─── OAuth sign-in (Phase 5) ─────────────────────────────────
+// Authorization-code flow, callback at /api/auth/oauth/<provider>/callback.
+// A provider is live only when both its ID and SECRET are set; the frontend asks
+// /api/config which buttons to show, so unset providers simply don't appear.
+// APP_URL builds the callback + emailed links; local dev falls back to localhost.
+const APP_URL = (process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/$/, '');
+const OAUTH = {
+  GOOGLE: {
+    ID: process.env.GOOGLE_CLIENT_ID || '',
+    SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
+    get enabled() { return !!(this.ID && this.SECRET); },
+  },
+  GITHUB: {
+    ID: process.env.GITHUB_CLIENT_ID || '',
+    SECRET: process.env.GITHUB_CLIENT_SECRET || '',
+    get enabled() { return !!(this.ID && this.SECRET); },
+  },
+  STATE_TTL_MIN: 10,             // signed state token lifetime (CSRF guard)
+};
+
+// ─── Transactional email (Phase 5 reset/verify; Phase 9 reuses this) ──
+// Resend (https://resend.com) — one HTTPS POST, no SDK. Without a key the app
+// still works: password-reset links are returned in dev responses instead of
+// emailed, and verification emails are skipped.
+const EMAIL = {
+  RESEND_API_KEY: process.env.RESEND_API_KEY || '',
+  FROM: process.env.EMAIL_FROM || 'SenIQ <onboarding@resend.dev>',
+  get enabled() { return !!this.RESEND_API_KEY; },
+};
+
+// ─── Auth endpoint rate limits (Phase 5 hardening) ───────────
+// Per-IP sliding windows (in-memory, same limiter as the API keys). Aimed at
+// credential stuffing / reset spam, not accounting — counters reset on restart.
+const AUTH_LIMITS = {
+  LOGIN:  { limit: 20, windowMs: 10 * 60 * 1000 },  // login + signup attempts
+  RESET:  { limit: 5,  windowMs: 15 * 60 * 1000 },  // forgot-password requests
+  TOKEN_TTL_MIN: { RESET: 30, VERIFY: 60 * 24 },    // emailed link lifetimes
+};
+
+module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS };
