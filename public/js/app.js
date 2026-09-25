@@ -209,6 +209,7 @@ function initAuth() {
 async function showDashboard() {
   document.getElementById('auth-view').classList.add('hidden');
   document.getElementById('dashboard-view').classList.remove('hidden');
+  requestAnimationFrame(moveNavIndicator); // nav is measurable only once the view is shown
 
   // Set user info
   if (currentUser) {
@@ -801,11 +802,11 @@ function updateSentimentChart(sentiments) {
   const scores = tickers.map(t => Math.round(sentiments[t].score * 100));
   const colors = tickers.map(t => {
     const s = sentiments[t].score;
-    return s > 0.6 ? 'rgba(16,185,129,0.8)' : s < 0.4 ? 'rgba(239,68,68,0.8)' : 'rgba(245,158,11,0.8)';
+    return s > 0.6 ? 'rgba(20,184,106,0.85)' : s < 0.4 ? 'rgba(239,68,68,0.85)' : 'rgba(100,116,139,0.55)';
   });
   const borderColors = tickers.map(t => {
     const s = sentiments[t].score;
-    return s > 0.6 ? '#10b981' : s < 0.4 ? '#ef4444' : '#f59e0b';
+    return s > 0.6 ? '#14B86A' : s < 0.4 ? '#EF4444' : '#64748B';
   });
 
   if (sentimentChart) sentimentChart.destroy();
@@ -830,10 +831,10 @@ function updateSentimentChart(sentiments) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: 'rgba(17,17,32,0.95)',
-          titleColor: '#e2e2e8',
-          bodyColor: '#a0a0b0',
-          borderColor: 'rgba(255,45,120,0.3)',
+          backgroundColor: '#FFFFFF',
+          titleColor: '#1E293B',
+          bodyColor: '#64748B',
+          borderColor: '#E2E8F0',
           borderWidth: 1,
           cornerRadius: 8,
           padding: 12,
@@ -843,12 +844,12 @@ function updateSentimentChart(sentiments) {
       scales: {
         y: {
           min: 0, max: 100,
-          grid: { color: 'rgba(255,255,255,0.04)' },
-          ticks: { color: '#666677', font: { family: 'Sora' } }
+          grid: { color: '#EEF2F7' },
+          ticks: { color: '#64748B', font: { family: 'Inter' } }
         },
         x: {
           grid: { display: false },
-          ticks: { color: '#a0a0b0', font: { family: 'Sora', weight: 600 } }
+          ticks: { color: '#1E293B', font: { family: 'Inter', weight: 600 } }
         }
       },
       animation: { duration: 1200, easing: 'easeOutQuart' }
@@ -1108,6 +1109,7 @@ function openProfilePage() {
   populateProfilePage(currentUser);
   loadPlans();
   loadApiKeys();
+  moveNavIndicator();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1400,6 +1402,7 @@ function switchToPage(page) {
   if (page === 'strategy-builder') initBuilderPage();
   if (page === 'strategies') initStrategiesPage();
   if (page === 'paper-trade') initPaperPage();
+  moveNavIndicator();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1407,6 +1410,37 @@ function initMainTabs() {
   document.querySelectorAll('.main-tab').forEach(tab => {
     tab.addEventListener('click', () => switchToPage(tab.dataset.page));
   });
+  window.addEventListener('resize', moveNavIndicator);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(moveNavIndicator);
+  moveNavIndicator();
+}
+
+// Slide the active-tab indicator under (horizontal bar) or beside (sidebar) the active tab.
+// Hidden when no tab is active (e.g. the Profile page).
+function moveNavIndicator() {
+  const nav = document.querySelector('.main-nav');
+  if (!nav) return;
+  let bar = nav.querySelector('.main-nav-indicator');
+  if (!bar) {
+    bar = document.createElement('span');
+    bar.className = 'main-nav-indicator';
+    bar.setAttribute('aria-hidden', 'true');
+    nav.appendChild(bar);
+  }
+  const active = nav.querySelector('.main-tab.active');
+  if (!active || active.offsetParent === null) { bar.style.opacity = '0'; return; }
+  const sidebar = window.matchMedia('(min-width: 1024px)').matches;
+  if (sidebar) {
+    bar.style.width = '';
+    bar.style.height = `${active.offsetHeight - 16}px`;
+    bar.style.transform = `translateY(${active.offsetTop + 8}px)`;
+  } else {
+    bar.style.height = '';
+    bar.style.width = `${active.offsetWidth - 24}px`;
+    bar.style.transform = `translateX(${active.offsetLeft + 12}px)`;
+    active.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  }
+  bar.style.opacity = '1';
 }
 
 // ─── Backtest page (Phase 7 — strategy engine) ───────────────
@@ -1611,8 +1645,8 @@ function renderBtResults(data) {
       datasets: [{
         label: 'Equity',
         data: equity,
-        borderColor: positive ? '#34d399' : '#f87171',
-        backgroundColor: positive ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)',
+        borderColor: positive ? '#14B86A' : '#EF4444',
+        backgroundColor: positive ? 'rgba(20,184,106,0.08)' : 'rgba(239,68,68,0.08)',
         fill: true, pointRadius: 0, borderWidth: 2, tension: 0.1,
       }],
     },
@@ -1621,8 +1655,8 @@ function renderBtResults(data) {
       plugins: { legend: { display: false } },
       interaction: { mode: 'index', intersect: false },
       scales: {
-        x: { ticks: { maxTicksLimit: 8, color: '#8b93a7' }, grid: { display: false } },
-        y: { ticks: { color: '#8b93a7' }, grid: { color: 'rgba(139,147,167,0.1)' } },
+        x: { ticks: { maxTicksLimit: 8, color: '#64748B' }, grid: { display: false } },
+        y: { ticks: { color: '#64748B' }, grid: { color: '#EEF2F7' } },
       },
     },
   });

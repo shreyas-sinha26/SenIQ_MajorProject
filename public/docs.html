@@ -5,37 +5,38 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SenIQ API — Documentation</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #05060f; --bg-2: #0a0c1a; --glass: rgba(255,255,255,.04);
-      --glass-brd: rgba(255,255,255,.09); --text: #e8e9f1; --muted: #9298ab;
-      --pink: #ff2d78; --cyan: #22d3ee; --amber: #fbbf24; --green: #22c55e;
-      --mono: 'JetBrains Mono', monospace; --font: 'Sora', sans-serif;
+      --bg: #F8FAFC; --bg-2: #FFFFFF; --glass: #F1F5F9;
+      --glass-brd: #E2E8F0; --text: #1E293B; --muted: #64748B;
+      --royal: #0A2540; --electric: #1E40AF; --cyan: #00C2FF; --amber: #B45309; --green: #14B86A;
+      --mono: 'JetBrains Mono', monospace; --font: 'Inter', -apple-system, sans-serif;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.6; }
     .wrap { max-width: 860px; margin: 0 auto; padding: 48px 24px 80px; }
     h1 { font-size: 2rem; margin-bottom: 6px; }
-    h1 .grad { background: linear-gradient(90deg, var(--cyan), var(--pink)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    h1 .grad { background: linear-gradient(90deg, var(--electric), var(--cyan)); -webkit-background-clip: text; background-clip: text; color: transparent; }
     .sub { color: var(--muted); margin-bottom: 36px; }
     h2 { font-size: 1.15rem; margin: 40px 0 12px; padding-top: 18px; border-top: 1px solid var(--glass-brd); }
     h3 { font-size: .95rem; margin: 24px 0 8px; font-family: var(--mono); }
     p, li { font-size: .9rem; color: var(--muted); }
     p strong, li strong { color: var(--text); }
     ul { padding-left: 22px; margin: 8px 0; }
-    a { color: var(--cyan); text-decoration: none; }
+    a { color: var(--electric); text-decoration: none; }
+    a:hover { text-decoration: underline; }
     code { font-family: var(--mono); font-size: .82em; background: var(--glass); border: 1px solid var(--glass-brd); border-radius: 5px; padding: 1px 6px; color: var(--text); }
-    pre { background: var(--bg-2); border: 1px solid var(--glass-brd); border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 10px 0 18px; }
+    pre { background: var(--bg-2); border: 1px solid var(--glass-brd); box-shadow: 0 10px 30px rgba(15,23,42,.05); border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 10px 0 18px; }
     pre code { background: none; border: none; padding: 0; font-size: .78rem; line-height: 1.55; color: var(--text); }
     .method { display: inline-block; font-family: var(--mono); font-weight: 600; font-size: .72rem; border-radius: 5px; padding: 2px 8px; margin-right: 8px; vertical-align: 1px; }
-    .get  { background: rgba(34,211,238,.12); color: var(--cyan); border: 1px solid rgba(34,211,238,.35); }
-    .post { background: rgba(255,45,120,.12); color: var(--pink); border: 1px solid rgba(255,45,120,.35); }
+    .get  { background: rgba(20,184,106,.10); color: #0F7A4A; border: 1px solid rgba(20,184,106,.35); }
+    .post { background: rgba(30,64,175,.08); color: var(--electric); border: 1px solid rgba(30,64,175,.30); }
     table { border-collapse: collapse; width: 100%; margin: 10px 0 18px; font-size: .82rem; }
     th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--glass-brd); }
     th { color: var(--muted); font-weight: 600; font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; }
     td { color: var(--muted); } td:first-child { font-family: var(--mono); color: var(--text); white-space: nowrap; }
-    .note { background: rgba(251,191,36,.07); border: 1px solid rgba(251,191,36,.3); border-radius: 10px; padding: 12px 16px; font-size: .84rem; color: var(--amber); margin: 14px 0; }
+    .note { background: rgba(180,83,9,.06); border: 1px solid rgba(180,83,9,.25); border-radius: 10px; padding: 12px 16px; font-size: .84rem; color: var(--amber); margin: 14px 0; }
     .footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--glass-brd); font-size: .76rem; color: var(--muted); }
     .back { font-size: .82rem; }
   </style>
