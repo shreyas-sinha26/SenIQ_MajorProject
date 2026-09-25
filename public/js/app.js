@@ -1386,7 +1386,11 @@ async function deleteWebhook(id) {
 }
 
 // Top-level page switcher (called from nav tabs and inline onclick).
+const STRATEGY_PAGES = ['strategy-builder', 'strategies', 'backtest', 'paper-trade'];
+const strategiesEnabled = () => !document.body.classList.contains('no-strategies');
+
 function switchToPage(page) {
+  if (STRATEGY_PAGES.includes(page) && !strategiesEnabled()) page = 'dashboard';
   document.querySelectorAll('.main-tab').forEach(t => t.classList.toggle('active', t.dataset.page === page));
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('hidden', p.id !== `page-${page}`));
   if (page === 'analytics') updateSentimentChart(activeFilter && cachedSentiments[activeFilter] ? { [activeFilter]: cachedSentiments[activeFilter] } : cachedSentiments);
@@ -2754,7 +2758,7 @@ async function loadPlans() {
         p.smartMoney === 'full' ? 'Full smart money' : 'Smart-money teaser',
         p.claudeReportsPerDay > 0 ? `Daily brief + Q&A` : 'No AI workspace',
         p.webhooks ? 'Outbound webhooks' : null,
-        p.apiAccess ? 'API / MCP access' : null,
+        p.apiAccess && strategiesEnabled() ? 'API / MCP access' : null,
       ].filter(Boolean);
       return `<div class="plan-card ${isCur ? 'current' : ''} ${p.id}">
         <div class="plan-name">${escapeHtml(p.label)}</div>
@@ -2792,6 +2796,7 @@ function initApiKeys() {
 }
 
 async function loadApiKeys() {
+  if (!strategiesEnabled()) return;
   const wrap = document.getElementById('api-keys-list');
   if (!wrap) return;
   try {
