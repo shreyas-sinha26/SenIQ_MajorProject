@@ -4,26 +4,35 @@
 AI Workspace) and v2 (+ Strategy Builder, Your Strategies, Backtest, Paper Trade, MCP, public
 API) run from **one codebase** on `main`, split by a feature switch. Ask is now a
 tool-calling agent with news retrieval (RAG), saved conversations and cost controls. The
-whole frontend is re-themed to a light brand palette with a sliding nav indicator. Everything
-since July is **committed locally and tagged, but NOT pushed**.
+whole frontend is re-themed to a light brand palette with a sliding nav indicator. Shreyas's
+Google/GitHub sign-in + alert emails (pushed in August) are merged in. **Everything is pushed
+to GitHub** (`main` = `537612d` + handoff commit) with tags `v1.0`–`v2.2`.
 
 ---
 
-## 1. Versions & tags (local only)
+## 1. Versions & tags (all on GitHub)
 
 | Tag | Commit | What it is | How to run |
 |---|---|---|---|
 | `v1.0` | `24148b2` | v1 on the old dark theme (presentation fallback) | `npm start` |
 | `v1.1` | `673791a` | v1 on the light theme + sliding nav | `npm start` |
 | `v2.1` | `673791a` | same code, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
+| `v1.2` | `537612d` | v1.1 + Google/GitHub sign-in, password reset, alert emails | `npm start` |
+| `v2.2` | `537612d` | same code as v1.2, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
 
-Local commits ahead of GitHub (`origin/main` = `ac6d217`, fetched in July):
+History since the July push (`ac6d217`), newest first:
 ```
+537612d Merge origin/main: Google/GitHub sign-in + alert emails        (v1.2, v2.2)
+ff9fe88 Add alert notification and narrative services with tests       (Shreyas)
+9121338 Google Auth added                                              (Shreyas)
+5b04cbe Ask eval set: 30 golden cases (eval/ask/cases.json)
+406f7d4 Handoff: current state
 673791a Light theme on the brand palette + sliding nav indicator      (v1.1, v2.1)
 24148b2 v1/v2 split: STRATEGIES feature switch (off by default)       (v1.0)
 d08fe98 Ask v2 — tool-calling agent, news search (RAG), saved conversations
 ```
-Uncommitted on purpose: `eval/` (Ask test set) and `.github/` (CI workflow — see §8).
+Still local only: `.github/` (CI workflow — see §8) and `strategy-service/` (gitignored).
+`v1.2`/`v2.2` pass `npm test` but have **not been clicked through in the browser** yet.
 
 **Why one branch, not two:** strategy commits are interleaved in history (since `ecb9c83`),
 so no commit is "v1 without strategies". The switch `FEATURES.STRATEGIES`
@@ -88,6 +97,19 @@ bg `#F8FAFC`, cards white, borders `#E2E8F0`; Inter (numbers in JetBrains Mono).
 CSS variables in `public/css/style.css` / `landing.css` `:root` → a dark-mode toggle later is
 mostly a second token set. Nav: sliding underline (horizontal) / left accent bar (sidebar).
 
+### Merged from Shreyas (Aug 2026) — tags v1.2 / v2.2
+- **Sign-in (Phase 5):** Google + GitHub OAuth (`server/routes/oauth.js`), forgot/reset
+  password + email verification (`authTokens.js`, `emailService.js` via Resend), per-IP rate
+  limits on login/reset (`AUTH_LIMITS`). Migration `0016_oauth_accounts` (nullable
+  `password_hash`, OAuth identity columns, `auth_tokens`). Buttons show only for providers
+  whose ID + SECRET are set (`/api/config` → `oauth`).
+- **Alert emails:** `alertNotifier.js` emails realtime alerts (Free: none, Plus: standard,
+  Pro: + a 150–250-word narrative from `alertNarrative.js`: Claude → Ollama → template
+  fallback, 5 narratives/user/day). Needs `RESEND_API_KEY` to actually send.
+- **Merge notes:** `/api/config` returns both `features.strategies` and `oauth`; two
+  migrations share the `0016` prefix (`ask_threads`, `oauth_accounts`) — fine, the runner
+  keys on the full filename and they touch different tables.
+
 ### Live prices
 `FINNHUB_API_KEY` (US stocks + company news) and `FMP_API_KEY` (gold/silver) are set in `.env`
 and verified. Crypto via CoinGecko (no key). **Indian stocks: not priced yet** (see §6).
@@ -106,6 +128,10 @@ and verified. Crypto via CoinGecko (no key). **Indian stocks: not priced yet** (
 | `FEATURES_STRATEGIES` | unset = v1 | `1` = v2 |
 | `CONGRESS_TRADES_URL` | not set locally | live congress data (set on the deploy host); local uses sample |
 | `REDDIT_CLIENT_ID/SECRET`, `SENTRY_DSN` | not set | Reddit ingest, error monitoring |
+| `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET` | not set | OAuth sign-in buttons (hidden until set) |
+| `RESEND_API_KEY`, `EMAIL_FROM` | not set | reset/verify + alert emails (dev: reset link returned in the response) |
+| `APP_URL` | not set | OAuth callback + email links; falls back to `http://localhost:$PORT` |
+| `OLLAMA_URL`, `OLLAMA_MODEL` | not set | local fallback for alert narratives |
 
 Full API inventory: price (Finnhub, FMP, CoinGecko, Upstox planned) · news (Finnhub news,
 GDELT, RSS: ET/Mint/Moneycontrol/Business Standard, Reddit) · smart money (SEC EDGAR, FMP
@@ -113,8 +139,8 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
 (Postgres/Neon, Render, Sentry, Docker) · v2 (FastAPI + yfinance strategy service, MCP, `/v1`).
 
 ## 5. Tests & evaluation
-- `npm test` — offline, no DB/API calls: 16 + 27 + 23 + **38 (Ask: `test/qa.test.js`)** + 12, all passing.
-- **Ask eval set** `eval/ask/cases.json` (uncommitted): 30 cases over a fixture portfolio
+- `npm test` — offline, no DB/API calls: 16 + 27 + 23 + **38 (Ask: `test/qa.test.js`)** + 12 + 9 (auth) + 23 (alerts), all passing.
+- **Ask eval set** `eval/ask/cases.json` (committed `5b04cbe`): 30 cases over a fixture portfolio
   (AAPL, NVDA, BTC, XAU, RELIANCE, TCS) — portfolio moves, holding news, risk, smart money,
   macro, RAG search, education, out-of-scope, advice, data gaps, follow-ups/injection. Graded
   against each run's own tool results (not frozen answers). All 30 route correctly through the
@@ -136,7 +162,9 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
    preview tool can't start the engine (macOS blocks its venv), so run it in your terminal.
 6. **Dark-mode toggle** (tokens are ready).
 7. **Realistic demo portfolio quantities** (and add gold so commodities show).
-8. Pre-existing quirk: `reports.js` counts **all** of a user's `claude_calls` for the daily-brief
+8. **Browser check of v1.2/v2.2** — sign-in page with the OAuth buttons on the light theme
+   (set Google keys to see them), reset-password flow.
+9. Pre-existing quirk: `reports.js` counts **all** of a user's `claude_calls` for the daily-brief
    quota, including Ask questions.
 
 ## 7. Where things live
@@ -149,16 +177,19 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
 | Config, tiers, feature flags, caps | `server/config.js` (`FEATURES`, `TIERS`, `QA`, `NEWS_SEARCH`) |
 | v1/v2 route gating | `server/index.js` |
 | Frontend | `public/index.html`, `public/js/app.js`, `public/css/style.css`; landing: `public/landing.html`, `public/css/landing.css`, `public/js/landing.js`; `public/docs.html` (v2) |
-| Tests / eval | `test/qa.test.js`, `eval/ask/cases.json` |
+| Sign-in / email / alerts (Shreyas) | `server/routes/oauth.js`, `auth.js`, `server/services/authTokens.js`, `emailService.js`, `alertNotifier.js`, `alertNarrative.js` |
+| Tests / eval | `test/qa.test.js`, `test/auth.test.js`, `test/alerts.test.js`, `eval/ask/cases.json` |
 
-## 8. Pushing to GitHub (when you decide)
+## 8. Pushing to GitHub
 - Repo `shreyas-sinha26/SenIQ_MajorProject` is **private**: only the `Annas-Shariff` gh account
   can fetch/push (`gh auth switch --user Annas-Shariff`, push, switch back).
-- **Fetch first** — the local `origin/main` ref is from July; teammates may have pushed since.
-- Push the commits **and** tags (`v1.0`, `v1.1`, `v2.1`). Commits are authored as Annas
-  Shariff with no AI attribution.
-- Decide whether `eval/` goes up. `.github/workflows/ci.yml` still can't be pushed until the
-  token has the `workflow` scope (`gh auth refresh -h github.com -s workflow`, interactive).
+- **Done 2026-09-26:** fetched Shreyas's 2 August commits, merged them (no rebase, so the
+  tagged commits keep their hashes), pushed `main` + tags `v1.0`, `v1.1`, `v2.1`, `v1.2`, `v2.2`.
+  Commits are authored as Annas Shariff with no AI attribution.
+- Next time: **fetch first**, merge (not rebase) if teammates pushed, run `npm test`, then
+  push `main` and any new tags (`git push origin main <tag>`).
+- `.github/workflows/ci.yml` still can't be pushed until the token has the `workflow` scope
+  (`gh auth refresh -h github.com -s workflow`, interactive).
 - `strategy-service/` stays gitignored / local-only (your IP) unless you say otherwise.
 
 ---
