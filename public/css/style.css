@@ -337,6 +337,34 @@ body::before {
   border-radius: var(--radius-sm); color: var(--red);
   font-size: .83rem; text-align: center; font-family: var(--mono);
 }
+.auth-success {
+  margin-bottom: 14px; padding: 12px 14px;
+  background: rgba(34,197,94,.1); border: 1px solid rgba(34,197,94,.3);
+  border-radius: var(--radius-sm); color: var(--green);
+  font-size: .83rem; text-align: center; font-family: var(--mono);
+  line-height: 1.5; word-break: break-word;
+}
+
+/* ─── Phase 5: OAuth sign-in + forgot password ─── */
+.auth-forgot-row { text-align: right; margin-top: 10px; font-size: .78rem; }
+.auth-divider {
+  display: flex; align-items: center; gap: 12px; margin: 20px 0 14px;
+  color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em;
+}
+.auth-divider::before, .auth-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--glass-brd);
+}
+.oauth-row { display: flex; gap: 10px; }
+.btn-oauth {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  background: rgba(255,255,255,.05); border: 1px solid var(--glass-brd);
+  color: var(--text); font-family: var(--font); font-size: .86rem; font-weight: 600;
+  cursor: pointer; transition: var(--transition);
+}
+.btn-oauth:hover { background: rgba(255,255,255,.09); border-color: rgba(255,255,255,.25); transform: translateY(-1px); }
+.btn-oauth svg { flex-shrink: 0; }
+.btn-oauth.hidden { display: none; }
 
 /* Disclaimer */
 .auth-disclaimer {

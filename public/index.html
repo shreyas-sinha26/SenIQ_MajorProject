@@ -121,10 +121,23 @@
               </div>
             </div>
             <div id="auth-error" class="auth-error hidden"></div>
+            <div id="auth-success" class="auth-success hidden"></div>
             <button type="submit" class="btn btn-primary btn-full auth-submit" id="login-btn">
               <span>Sign In</span>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             </button>
+            <p class="auth-forgot-row"><button type="button" class="auth-link" data-tab="forgot">Forgot password?</button></p>
+            <div class="auth-divider oauth-only hidden"><span>or continue with</span></div>
+            <div class="oauth-row oauth-only hidden">
+              <button type="button" class="btn-oauth hidden" data-oauth-provider="google">
+                <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.2-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.3 0-9.7-3.4-11.3-8.1l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C36.9 39.2 44 34 44 24c0-1.2-.1-2.4-.4-3.5z"/></svg>
+                Google
+              </button>
+              <button type="button" class="btn-oauth hidden" data-oauth-provider="github">
+                <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                GitHub
+              </button>
+            </div>
             <p class="auth-switch-hint">No account? <button type="button" class="auth-link" data-tab="signup">Create one free &rarr;</button></p>
           </form>
 
@@ -162,7 +175,73 @@
               <span>Create Free Account</span>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             </button>
+            <div class="auth-divider oauth-only hidden"><span>or continue with</span></div>
+            <div class="oauth-row oauth-only hidden">
+              <button type="button" class="btn-oauth hidden" data-oauth-provider="google">
+                <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.2-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.3 0-9.7-3.4-11.3-8.1l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C36.9 39.2 44 34 44 24c0-1.2-.1-2.4-.4-3.5z"/></svg>
+                Google
+              </button>
+              <button type="button" class="btn-oauth hidden" data-oauth-provider="github">
+                <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                GitHub
+              </button>
+            </div>
             <p class="auth-switch-hint">Already have an account? <button type="button" class="auth-link" data-tab="login">Sign in &rarr;</button></p>
+          </form>
+
+          <!-- ─ Forgot password (Phase 5) ─ -->
+          <form id="forgot-form" class="auth-form hidden">
+            <div class="auth-form-header">
+              <h3>Reset your password</h3>
+              <p>Enter your account email and we'll send a reset link</p>
+            </div>
+            <div class="form-group">
+              <label for="forgot-email">
+                <span class="material-symbols-outlined">mail</span> Email
+              </label>
+              <input type="email" id="forgot-email" placeholder="you@example.com" autocomplete="email" required>
+            </div>
+            <div id="auth-error-forgot" class="auth-error hidden"></div>
+            <div id="auth-success-forgot" class="auth-success hidden"></div>
+            <button type="submit" class="btn btn-primary btn-full auth-submit" id="forgot-btn">
+              <span>Send Reset Link</span>
+            </button>
+            <p class="auth-switch-hint"><button type="button" class="auth-link" data-tab="login">&larr; Back to sign in</button></p>
+          </form>
+
+          <!-- ─ Set new password (arrives via emailed ?reset= link) ─ -->
+          <form id="reset-form" class="auth-form hidden">
+            <div class="auth-form-header">
+              <h3>Choose a new password</h3>
+              <p>You followed a reset link — set the new password below</p>
+            </div>
+            <div class="form-group">
+              <label for="reset-password">
+                <span class="material-symbols-outlined">lock</span> New Password
+              </label>
+              <div class="input-pw-wrap">
+                <input type="password" id="reset-password" placeholder="Min 6 characters" autocomplete="new-password" required minlength="6">
+                <button type="button" class="pw-toggle" data-target="reset-password" aria-label="Toggle password">
+                  <span class="material-symbols-outlined">visibility</span>
+                </button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="reset-password-confirm">
+                <span class="material-symbols-outlined">lock</span> Confirm Password
+              </label>
+              <div class="input-pw-wrap">
+                <input type="password" id="reset-password-confirm" placeholder="Repeat new password" autocomplete="new-password" required minlength="6">
+                <button type="button" class="pw-toggle" data-target="reset-password-confirm" aria-label="Toggle password">
+                  <span class="material-symbols-outlined">visibility</span>
+                </button>
+              </div>
+            </div>
+            <div id="auth-error-reset" class="auth-error hidden"></div>
+            <button type="submit" class="btn btn-primary btn-full auth-submit" id="reset-btn">
+              <span>Set New Password</span>
+            </button>
+            <p class="auth-switch-hint"><button type="button" class="auth-link" data-tab="login">&larr; Back to sign in</button></p>
           </form>
 
           <!-- Disclaimer -->
