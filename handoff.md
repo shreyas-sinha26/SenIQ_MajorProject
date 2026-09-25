@@ -1,6 +1,173 @@
-# Handoff — SenIQ (Phases 0–3.5 + Engine E1–E3 complete)
+# Handoff — SenIQ (updated 2026-09-26)
 
-## Goal
+**Current state in one paragraph:** v1 (Dashboard → Portfolio → Intelligence → Analytics →
+AI Workspace) and v2 (+ Strategy Builder, Your Strategies, Backtest, Paper Trade, MCP, public
+API) run from **one codebase** on `main`, split by a feature switch. Ask is now a
+tool-calling agent with news retrieval (RAG), saved conversations and cost controls. The
+whole frontend is re-themed to a light brand palette with a sliding nav indicator. Everything
+since July is **committed locally and tagged, but NOT pushed**.
+
+---
+
+## 1. Versions & tags (local only)
+
+| Tag | Commit | What it is | How to run |
+|---|---|---|---|
+| `v1.0` | `24148b2` | v1 on the old dark theme (presentation fallback) | `npm start` |
+| `v1.1` | `673791a` | v1 on the light theme + sliding nav | `npm start` |
+| `v2.1` | `673791a` | same code, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
+
+Local commits ahead of GitHub (`origin/main` = `ac6d217`, fetched in July):
+```
+673791a Light theme on the brand palette + sliding nav indicator      (v1.1, v2.1)
+24148b2 v1/v2 split: STRATEGIES feature switch (off by default)       (v1.0)
+d08fe98 Ask v2 — tool-calling agent, news search (RAG), saved conversations
+```
+Uncommitted on purpose: `eval/` (Ask test set) and `.github/` (CI workflow — see §8).
+
+**Why one branch, not two:** strategy commits are interleaved in history (since `ecb9c83`),
+so no commit is "v1 without strategies". The switch `FEATURES.STRATEGIES`
+(env `FEATURES_STRATEGIES=1`, default off) hides the v2 UI (`body.no-strategies`) and makes
+`/api/strategies`, `/api/paper`, `/api/keys`, `/mcp`, `/v1`, `/docs` return 404.
+
+## 2. Run it locally
+
+```bash
+pg_isready                                   # Postgres@15 via brew services; if down: brew services start postgresql@15
+cd ~/Downloads/SenIQ_MajorProject && npm start   # v1 → http://localhost:3010/app
+```
+v2 needs two terminals:
+```bash
+cd ~/Downloads/SenIQ_MajorProject/strategy-service && ./venv/bin/uvicorn app:app --port 8100
+cd ~/Downloads/SenIQ_MajorProject && FEATURES_STRATEGIES=1 PORT=3030 npm start   # → http://localhost:3030/app
+```
+- Port busy → `lsof -ti :3010 | xargs kill`. Health → `curl -s localhost:3010/api/health`.
+- Start ~5 min before a demo so the first news-pipeline run has finished.
+- **Demo account:** `demo@xynthis.com` (Pro). The password is a bcrypt hash — it can't be
+  recovered; set a new one with the one-liner below (prompts silently, local DB only):
+  ```bash
+  cd ~/Downloads/SenIQ_MajorProject && read -s -p "New demo password: " PW && echo && PW="$PW" node -e "require('dotenv').config();const b=require('bcryptjs');const {pool}=require('./server/db');b.hash(process.env.PW,10).then(h=>pool.query('UPDATE users SET password_hash=\$1 WHERE email=\$2',[h,'demo@xynthis.com'])).then(r=>{console.log(r.rowCount?'Password updated':'User not found');return pool.end()})"
+  ```
+- Demo portfolio holds 5 units of everything → BTC ≈ 99% exposure, which skews every
+  portfolio answer. Consider realistic quantities before the next demo.
+
+## 3. What was built since the July handoff
+
+### Ask v2 (AI Workspace) — `server/services/qa.js`, `qaTools.js`, `newsSearch.js`, `askThreads.js`
+- **Tool-calling agent** (Claude Haiku 4.5) instead of one stuffed context. 8 tools:
+  portfolio overview, today's **attribution** (weight % × day change %), top impact events,
+  ticker news, sentiment, smart money, market news, `search_news`.
+- **RAG (`search_news`)**: corpus = headline + summary of relevant articles, last 90 days (no
+  full-article scraping). Hard filters first (allowed tickers + date), then pgvector cosine
+  similarity on HF `all-MiniLM-L6-v2` embeddings (384-d), deduped by story cluster, similarity
+  floor 0.3. Falls back to keyword search (≥2 word matches) without pgvector/token/flag.
+  The vector table is created **in code** (`ensureVectorStore`), not a migration, so a
+  Postgres without pgvector still boots. Pipeline step 8 embeds new articles (≤200/run).
+- **Scope:** user's holdings + market-wide news + general finance education. A question only
+  about stocks the user doesn't hold gets a fixed refusal **before** any Claude call (no quota);
+  every tool re-checks the holdings allowlist server-side (`requireHeld`).
+- **Saved conversations** (migration `0016_ask_threads`): threads + messages, "Recent
+  conversations" list, per-thread delete, 30-day purge (cron `15 4 * * *`). The **server**
+  supplies follow-up history (last 3 Q&As) from the thread — clients can't inject turns.
+  Routes: `POST /api/reports/ask {question, thread_id?}`, `GET/DELETE /api/reports/threads[/:id]`.
+- **Cost controls:** per-tier daily cap from `TIERS[tier].qaPerDay` (Plus 10 / Pro 30); ≤4 tool
+  rounds and a 25k input-token budget per question (then a "answer now" note — `tool_choice`
+  stays `auto` because changing it invalidates the prompt cache); tool results clamped to 4,000
+  chars; automatic prompt caching (Haiku 4.5 only caches prefixes ≥4,096 tokens, so only long
+  multi-tool questions benefit); billable cost logged cache-aware; failed runs logged as
+  `qa_failed` (counts toward the global $ ceiling, not the user quota).
+- Estimates (not yet measured with a real key): typical question ≈ 7k input / 400 output
+  tokens ≈ **$0.009**; worst case ≈ **$0.04**; peak context ~15% of Haiku's 200k window.
+
+### Frontend re-theme (tags v1.1 / v2.1)
+Light theme from the brand sheet — **colors and type only; SenIQ name/logo unchanged, Zeuniq
+stays a separate project.** Royal `#0A2540` (brand, primary buttons), electric `#1E40AF`
+(hover/links/text accents), AI cyan `#00C2FF` (gradients/charts only — never text), green
+`#14B86A`, red `#EF4444`, neutral sentiment slate `#64748B`, amber only for real warnings;
+bg `#F8FAFC`, cards white, borders `#E2E8F0`; Inter (numbers in JetBrains Mono). All tokens are
+CSS variables in `public/css/style.css` / `landing.css` `:root` → a dark-mode toggle later is
+mostly a second token set. Nav: sliding underline (horizontal) / left accent bar (sidebar).
+
+### Live prices
+`FINNHUB_API_KEY` (US stocks + company news) and `FMP_API_KEY` (gold/silver) are set in `.env`
+and verified. Crypto via CoinGecko (no key). **Indian stocks: not priced yet** (see §6).
+
+## 4. Environment (`.env` — never commit; names only)
+
+| Variable | Status | Purpose |
+|---|---|---|
+| `DATABASE_URL`, `PORT` | set | local Postgres `seniq`, port 3010 |
+| `STRATEGY_SERVICE_URL`, `STRATEGY_SERVICE_SECRET` | set | v2 engine at :8100 |
+| `FINNHUB_API_KEY` | set | US prices + company news |
+| `FMP_API_KEY` | set | commodities; US fallback |
+| `UPSTOX_ANALYTICS_TOKEN` | **empty** | Indian prices (code not built yet) |
+| `ANTHROPIC_API_KEY` | not set | Claude brief + Ask (also needs `CLAUDE_REPORTS`, §6) |
+| `HF_API_TOKEN` (+ `FINBERT_CLASSIFY=1`, `NEWS_EMBEDDINGS=1`) | not set | FinBERT sentiment, RAG embeddings |
+| `FEATURES_STRATEGIES` | unset = v1 | `1` = v2 |
+| `CONGRESS_TRADES_URL` | not set locally | live congress data (set on the deploy host); local uses sample |
+| `REDDIT_CLIENT_ID/SECRET`, `SENTRY_DSN` | not set | Reddit ingest, error monitoring |
+
+Full API inventory: price (Finnhub, FMP, CoinGecko, Upstox planned) · news (Finnhub news,
+GDELT, RSS: ET/Mint/Moneycontrol/Business Standard, Reddit) · smart money (SEC EDGAR, FMP
+congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) · infra
+(Postgres/Neon, Render, Sentry, Docker) · v2 (FastAPI + yfinance strategy service, MCP, `/v1`).
+
+## 5. Tests & evaluation
+- `npm test` — offline, no DB/API calls: 16 + 27 + 23 + **38 (Ask: `test/qa.test.js`)** + 12, all passing.
+- **Ask eval set** `eval/ask/cases.json` (uncommitted): 30 cases over a fixture portfolio
+  (AAPL, NVDA, BTC, XAU, RELIANCE, TCS) — portfolio moves, holding news, risk, smart money,
+  macro, RAG search, education, out-of-scope, advice, data gaps, follow-ups/injection. Graded
+  against each run's own tool results (not frozen answers). All 30 route correctly through the
+  scope pre-check. **Awaiting your sign-off on the cases**; then: grader (programmatic route /
+  tool / no-leak checks + LLM rubric), runner, and a small paid pilot. 30 cases × 2 reps ≈
+  ±13-point noise floor — fine for catching real failures, too coarse for small prompt tweaks.
+
+## 6. Open items (priority order)
+1. **Turn on real AI answers:** add `ANTHROPIC_API_KEY` **and** flip `CLAUDE_REPORTS` — it is
+   hard-coded `false` in `server/config.js`, so a key alone does nothing.
+2. **Indian prices via Upstox:** paste the Analytics Token (free, read-only, 1-year expiry;
+   Upstox Developer Apps → Analytics → Generate Token), then build the lookup: NSE ticker →
+   Upstox instrument key, fetch price + day change, test on RELIANCE/TCS. Treat the token as a
+   secret (it can also read account data).
+3. **RAG embeddings:** `HF_API_TOKEN` + `NEWS_EMBEDDINGS=1` + pgvector
+   (`brew install pgvector` locally; Neon has it). The semantic SQL path has **not run yet**.
+4. **Eval:** sign off the 30 cases → build grader + runner → pilot (ask before any paid run).
+5. **Visual check of v2 with the engine running** (Builder/Backtest with real content) — the
+   preview tool can't start the engine (macOS blocks its venv), so run it in your terminal.
+6. **Dark-mode toggle** (tokens are ready).
+7. **Realistic demo portfolio quantities** (and add gold so commodities show).
+8. Pre-existing quirk: `reports.js` counts **all** of a user's `claude_calls` for the daily-brief
+   quota, including Ask questions.
+
+## 7. Where things live
+| Area | Files |
+|---|---|
+| Ask agent / tools / RAG / threads | `server/services/qa.js`, `qaTools.js`, `newsSearch.js`, `askThreads.js`, `server/routes/reports.js` |
+| Grounding (fallback answers, attribution) | `server/services/grounding.js` |
+| Prices | `server/services/priceService.js`, `portfolioService.js` |
+| Pipeline / cron | `server/scheduler.js` |
+| Config, tiers, feature flags, caps | `server/config.js` (`FEATURES`, `TIERS`, `QA`, `NEWS_SEARCH`) |
+| v1/v2 route gating | `server/index.js` |
+| Frontend | `public/index.html`, `public/js/app.js`, `public/css/style.css`; landing: `public/landing.html`, `public/css/landing.css`, `public/js/landing.js`; `public/docs.html` (v2) |
+| Tests / eval | `test/qa.test.js`, `eval/ask/cases.json` |
+
+## 8. Pushing to GitHub (when you decide)
+- Repo `shreyas-sinha26/SenIQ_MajorProject` is **private**: only the `Annas-Shariff` gh account
+  can fetch/push (`gh auth switch --user Annas-Shariff`, push, switch back).
+- **Fetch first** — the local `origin/main` ref is from July; teammates may have pushed since.
+- Push the commits **and** tags (`v1.0`, `v1.1`, `v2.1`). Commits are authored as Annas
+  Shariff with no AI attribution.
+- Decide whether `eval/` goes up. `.github/workflows/ci.yml` still can't be pushed until the
+  token has the `workflow` scope (`gh auth refresh -h github.com -s workflow`, interactive).
+- `strategy-service/` stays gitignored / local-only (your IP) unless you say otherwise.
+
+---
+
+# Earlier sessions (up to 2026-07-06)
+
+## Original handoff (Phases 0–3.5 + Engine E1–E3, later sessions appended)
+
+### Goal
 Turn the existing `ai-portfolio-copilot` app into **SenIQ**, a sentiment-driven market
 intelligence platform: multi-asset portfolios → news + Reddit + macro sentiment → smart-money
 tabs (institutions + politicians) → Free/Plus/Pro tiers → API/MCP server → an agent that delivers
@@ -21,7 +188,7 @@ asked yet.**
 
 **Two biggest markets = US + India.** Pricing is region-aware (see memory).
 
-## Current state of the code — Phase 2 DONE, verified
+### Current state of the code — Phase 2 DONE, verified
 The app boots on **Postgres** (DB `seniq`, `DATABASE_URL`), runs migrations on boot, ingests from
 multiple sources, scores with decay/momentum/z-score, and computes per-user portfolio impact.
 
@@ -81,7 +248,7 @@ expected on a fresh DB); `/api/portfolio` → BTC weight_pct 100 (sole priced) b
 exposure_pct=25, summing to 100**. UI renders the hero + ranked rows correctly ("50% of your
 exposure", "2h ago").
 
-## Files actively edited this session
+### Files actively edited this session
 - `server/migrations/0003_sentiment_v2.sql` — NEW.
 - `server/config.js` — FEATURES (MACRO/RSS/REDDIT on, X off, FINBERT env-gated), SENTIMENT,
   SOURCE_WEIGHTS, IMPACT, INGEST blocks.
@@ -96,7 +263,7 @@ exposure", "2h ago").
 - Memory: `project_seniq.md` (Phase 2 done), `project_india_coverage_gap.md` (news closed, price
   still open).
 
-## Bugs found + fixed during verification
+### Bugs found + fixed during verification
 - **`portfolioService` exposure fallback gave every holding `exposure_pct=100`** when only one
   holding was priced (its weight is 100% by definition, and that "average priced weight" was then
   copied to all unpriced holdings). This broke the North Star ("affects 100% of your portfolio" for
@@ -107,7 +274,7 @@ exposure", "2h ago").
   string. **Fixed:** wrapped in `new Date(top.published_at)` (matches the other call sites). Verified
   → "2h ago".
 
-## Gotchas / known limitations (NOT bugs)
+### Gotchas / known limitations (NOT bugs)
 - **Stale preview server.** `preview_start` reuses a running server and won't pick up new
   migrations/routes — `preview_stop` then `preview_start` to actually restart. (Bit us again this
   session.) Same applies after editing server-side code; static assets (HTML/JS/CSS) just need a
@@ -126,12 +293,12 @@ exposure", "2h ago").
   ingest skips with a one-time warning. All degrade gracefully; RSS alone carries the feed.
 - Pre-existing matcher substring quirk (e.g. "Bitcoin" matches `COIN`) — noise, not introduced here.
 
-## Hard constraint — do NOT touch `zeuniq`
+### Hard constraint — do NOT touch `zeuniq`
 Separate, unrelated project: Postgres DB `zeuniq` + app at `~/Downloads/Zeuniq` (frontend launch
 config `zeuniq-frontend`). Name resembles SenIQ but it's a different project. Never connect to,
 query, modify, or build against it. SenIQ uses the `seniq` DB only. (Firm rule in memory.)
 
-## Phase 3 — Smart-money tracking — DONE, verified
+### Phase 3 — Smart-money tracking — DONE, verified
 
 **Phase 3 kickoff answers:** 13F source = **SEC EDGAR direct (free)**; institutions = **top-10 funds**
 (seeded); congress source = **free community dataset** (configurable URL + bundled sample); polling +
@@ -194,7 +361,7 @@ with a one-time secret; congress scope mine=2 vs all=12; bad url/entity_type →
 not captured** (no preview/headless tooling wired in this environment) — verification was API + asset +
 syntax level; the render functions are simple templating over verified shapes.
 
-## Bugs found + fixed during Phase 3 verification
+### Bugs found + fixed during Phase 3 verification
 - **Historical 13F filings alerted as "news" on the first steady-state poll.** The baseline guard only
   silenced the 2 most-recent filings; the next poll fetched recent[3]/[4] (older quarters), saw them as
   "not in DB", ingested them and **fired alerts for year-old filings**. **Fixed:** steady-state now
@@ -202,7 +369,7 @@ syntax level; the render functions are simple templating over verified shapes.
   late-fetched older filing is skipped, so it can't masquerade as a new disclosure. Re-verified: a
   follow-up poll is silent (0 new, 0 alerts).
 
-## Phase 3 known limitations / gotchas (NOT bugs)
+### Phase 3 known limitations / gotchas (NOT bugs)
 - **Live congress data needs a source decision (see "What I need from you").** Right now it runs on the
   bundled sample; institutions (EDGAR) is fully live.
 - **CUSIP→ticker is a ~50-name static map.** Holdings outside it show the issuer name with a null
@@ -213,7 +380,7 @@ syntax level; the render functions are simple templating over verified shapes.
 - **Amendments (13F-HR/A) are skipped** — we track the primary quarterly book only.
 - Scion/Appaloosa file sporadically, so their "latest" period may be older than Q1 — expected.
 
-## Phase 3.5 — News Relevance & De-spam — DONE, verified
+### Phase 3.5 — News Relevance & De-spam — DONE, verified
 
 **Why inserted before Phase 4:** the feed and alert path both spammed (dedupe was URL/id-only,
 so the same event from 4 outlets stored 4×; RSS pulled whole feeds so generic filler reached every
@@ -277,7 +444,7 @@ holdings bucket correctly showed Jio/NSE IPO news (Jio = Reliance alias).
 thresholds in `config.NEWS_RELEVANCE` / `config.MATERIALITY` are the tuning knobs. Frontend verified
 at API + asset + syntax level (SPA auth wall + documented preview flakiness — no browser screenshot).
 
-## UI restructure (2026-06-20) — top-level page tabs
+### UI restructure (2026-06-20) — top-level page tabs
 Smart Money used to sit mid-page on the single dashboard, sharing the page with the multi-asset
 portfolio. Per the user, it's now split into **top-level page tabs** at the top of the app:
 **📊 Dashboard** (portfolio + impact + news + alerts + chart + analyzer), **🏛️ Institutions**
@@ -290,7 +457,7 @@ refreshes congress only when that page is visible). `.main-tab(s)` styles added 
 the fund cards, Congress shows scope toggle + a Pelosi/AAPL disclosure (mine-scope matched the
 holder), no console errors.
 
-## Roadmap (2026-06-20) — re-sequenced, see SenIQ_Roadmap.pdf
+### Roadmap (2026-06-20) — re-sequenced, see SenIQ_Roadmap.pdf
 A full roadmap PDF now lives at `SenIQ_Roadmap.pdf` (regenerate with
 `python3 scripts/build_roadmap_pdf.py`). It **supersedes the phase ordering in PLAN.md** because two
 launch blockers — **OAuth** and **Stripe/Razorpay billing** — both need a public domain over HTTPS
@@ -313,7 +480,7 @@ launch blockers — **OAuth** and **Stripe/Razorpay billing** — both need a pu
 Sequencing: **4 → (5, 6 in parallel) → 7 → 8 → 9.** Cross-cutting: email provider (Resend/SES),
 monitoring/backups, Terms+Privacy before billing, live-congress data source still open.
 
-## Engine track (owned solo) — see ENGINE_PLAN.md
+### Engine track (owned solo) — see ENGINE_PLAN.md
 The user owns the **intelligence engine + alerts + reporting** and wants it perfect. Locked plan in
 `ENGINE_PLAN.md` (6 phases E1–E6 + a live-refinement testing approach + v2 scope). Key decisions made
 in discussion: **Events become first-class** (the keystone); knowledge "graph" right-sized to a
@@ -552,7 +719,7 @@ Claude (Haiku), grounded STRICTLY on the user's engine data, citing the numbers.
   grounded answer, writer badge, quota counter; no console errors). Test user cleaned up, preview stopped.
 - **To activate Claude (E5 + E6):** set `ANTHROPIC_API_KEY` in `.env` + `FEATURES.CLAUDE_REPORTS = true`.
 
-## Engine track COMPLETE — E1–E6 all shipped + verified
+### Engine track COMPLETE — E1–E6 all shipped + verified
 The locked `ENGINE_PLAN.md` v1 is done end-to-end: durable events + entity resolution (E1), event
 typing + 6-factor impact (E2), alert budgets + outcome logging (E3), smart new-holding onboarding (E4),
 the Claude analyst voice / daily brief (E5), and grounded NL Q&A (E6). Remaining engine work is the
@@ -560,14 +727,14 @@ the Claude analyst voice / daily brief (E5), and grounded NL Q&A (E6). Remaining
 deeper supplier/competitor graph, universe expansion, X/transcripts) — none started. The live-refinement
 testing loop (canary portfolios, config-tuned thresholds, replay over stored data) runs continuously.
 
-## Next (product track, separate from the engine)
+### Next (product track, separate from the engine)
 Per the re-sequenced roadmap, the product track resumes at **Phase 4 — Cloud Deployment, Domain &
 HTTPS** (NOT yet started; kickoff Qs unasked — Render vs Fly vs VPS, domain/registrar, managed Postgres
 provider, cron in-process vs worker). Phases 5 (OAuth), 6 (tiers/billing — finally enforces the
 smart-money + report/QA tier split and the per-tier quotas E5/E6 stubbed), 7 (strategies), 8 (API/MCP),
 9 (agent email delivery) follow. The engine work above feeds Phase 9's report/alert delivery.
 
-## Session 2026-06-30 — GitHub unification + Congress live + Phase 6 + scaffolds
+### Session 2026-06-30 — GitHub unification + Congress live + Phase 6 + scaffolds
 
 This session merged the solo engine track onto the **team GitHub repo**
 `shreyas-sinha26/SenIQ_MajorProject` and shipped several product features. Repo + account
@@ -613,7 +780,7 @@ shows `$price ▲/▼ chg%` next to the ticker.
 `HF_API_TOKEN`+`FINBERT_CLASSIFY=1` (FinBERT); `FINNHUB_API_KEY` (unthrottled US prices);
 `FMP_API_KEY`+`CONGRESS_TRADES_URL` (congress + FMP prices); `ADMIN_PASSWORD` (admin account).
 
-## Next — Phase 7 (Strategies) + Phase 8 (MCP) — see STRATEGY_PLAN.md
+### Next — Phase 7 (Strategies) + Phase 8 (MCP) — see STRATEGY_PLAN.md
 The Strategies scaffold needs the real engine. **Locked decisions:** reuse the **zeuniq Python
 engine as a separate strategy service** (backtest + paper only; live/Dhan stays in zeuniq);
 data = **Finnhub** (US live), **yfinance** (India + commodities + backtest), CoinGecko/Binance
