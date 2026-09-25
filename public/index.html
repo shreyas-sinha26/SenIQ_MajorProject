@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/css/style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
-<body>
+<body class="no-strategies">
   <!-- ═══ AUTH VIEW ═══ -->
   <div id="auth-view" class="view">
     <div class="auth-split">
@@ -256,20 +256,20 @@
           <span class="main-tab-label">AI Workspace</span>
         </button>
 
-        <div class="main-nav-group">Strategies</div>
-        <button class="main-tab" data-page="strategy-builder">
+        <div class="main-nav-group" data-feature="strategies">Strategies</div>
+        <button class="main-tab" data-page="strategy-builder" data-feature="strategies">
           <span class="material-symbols-outlined">build</span>
           <span class="main-tab-label">Strategy Builder</span>
         </button>
-        <button class="main-tab" data-page="strategies">
+        <button class="main-tab" data-page="strategies" data-feature="strategies">
           <span class="material-symbols-outlined">bookmarks</span>
           <span class="main-tab-label">Your Strategies</span>
         </button>
-        <button class="main-tab" data-page="backtest">
+        <button class="main-tab" data-page="backtest" data-feature="strategies">
           <span class="material-symbols-outlined">query_stats</span>
           <span class="main-tab-label">Backtest</span>
         </button>
-        <button class="main-tab" data-page="paper-trade">
+        <button class="main-tab" data-page="paper-trade" data-feature="strategies">
           <span class="material-symbols-outlined">candlestick_chart</span>
           <span class="main-tab-label">Paper Trade</span>
         </button>
@@ -946,7 +946,7 @@
         </div>
 
         <!-- API Access — MCP keys (Phase 8) -->
-        <section class="profile-card glass" id="api-keys-section">
+        <section class="profile-card glass" id="api-keys-section" data-feature="strategies">
           <div class="profile-card-header">
             <h3>API Access (MCP)</h3>
             <span class="profile-card-sub">Connect AI agents to your strategies — Pro plan</span>
@@ -1060,8 +1060,10 @@
     // Populate the disclaimer from the server (single source of truth: server/config.js)
     fetch('/api/config')
       .then(r => r.json())
-      .then(({ disclaimer }) => {
+      .then(({ disclaimer, features }) => {
         document.querySelectorAll('[data-disclaimer]').forEach(el => { el.textContent = disclaimer; });
+        // v2 (strategies, API/MCP) is hidden by default; shown only when the server enables it.
+        if (features && features.strategies) document.body.classList.remove('no-strategies');
       })
       .catch(() => {});
   </script>
