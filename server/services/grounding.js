@@ -76,10 +76,11 @@ function clamp(text, n = REPORTS.MAX_NEWS_CHARS) {
 }
 
 // Top holdings by exposure, enriched with current sentiment + sector.
-async function topHoldings(userId, limit = REPORTS.TOP_HOLDINGS) {
+// `raw` = preloaded getWeightedHoldings() rows, so callers that already priced the
+// portfolio don't fetch quotes twice.
+async function topHoldings(userId, limit = REPORTS.TOP_HOLDINGS, raw = null) {
   const { query } = require('../db');
-  const { getWeightedHoldings } = require('./portfolioService');
-  const raw = await getWeightedHoldings(userId);
+  if (!raw) raw = await require('./portfolioService').getWeightedHoldings(userId);
   const sectorByTicker = {};
   for (const r of await query('SELECT ticker, sector, name FROM companies')) {
     sectorByTicker[r.ticker] = { sector: r.sector, name: r.name };
@@ -165,10 +166,13 @@ async function buildGroundingPacket(userId, prevPacket = null, now = new Date())
 
 /**
  * Extended grounding context for Q&A (E6): ALL holdings (up to a cap) + the fuller impact
- * feed + sentiment + smart-money, so a question like "what's my biggest risk?" sees the
- * whole portfolio, not just the top-N the daily brief leads with. Read-only.
+ * feed + sentiment + smart-money + today's return attribution, so a question like "what's my
+ * biggest risk?" sees the whole portfolio, not just the top-N the daily brief leads with.
+ * Used by the deterministic (no-Claude) answer path. Read-only.
  */
-async function buildQAContext(userId) {
+async function buildQAContext(userId, raw = null) {
+  const { computeAttribution } = require('./qaTools');
+  if (!raw) raw = await require('./portfolioService').getWeightedHoldings(userId);
   const feed = await getImpactFeed(userId, QA.TOP_EVENTS);
   const top_events = feed.map((e) => ({
     event_id: e.event_id,
@@ -178,12 +182,13 @@ async function buildQAContext(userId) {
     direction: e.direction,
     last_seen: e.published_at,
   }));
-  const holdings = await topHoldings(userId, QA.MAX_HOLDINGS);
+  const holdings = await topHoldings(userId, QA.MAX_HOLDINGS, raw);
   const smart_money = await smartMoneyContext(userId);
   return {
     user_id: userId,
     date: new Date().toISOString().slice(0, 10),
     portfolio: { holdings_count: holdings.length, holdings },
+    attribution: computeAttribution(raw),
     top_events,
     most_important: top_events[0] || null,
     smart_money,

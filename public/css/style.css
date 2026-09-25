@@ -1253,6 +1253,19 @@ tr:hover .ht-info { opacity: 1; }
 .ask-answer-meta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; }
 .ask-writer { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent-light); background: rgba(99,102,241,0.1); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
 .ask-disclaimer { font-size: 0.72rem; color: var(--text-muted); }
+.ask-turn + .ask-turn { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--border); }
+.ask-q { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+.ask-reset { margin-top: 12px; font-size: 0.78rem; color: var(--text-muted); background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; }
+.ask-reset:hover { color: var(--text-primary); }
+.ask-threads { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); max-height: 240px; overflow-y: auto; }
+.ask-threads-head { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 6px; }
+.ask-thread-item { display: flex; align-items: center; gap: 6px; border-radius: var(--radius-sm); }
+.ask-thread-item:hover, .ask-thread-item.active { background: rgba(255,255,255,0.05); }
+.ask-thread-open { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; background: none; border: none; padding: 7px 8px; cursor: pointer; text-align: left; font-family: var(--font); }
+.ask-thread-title { font-size: 0.86rem; color: var(--text-primary); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-thread-meta { font-size: 0.72rem; color: var(--text-muted); }
+.ask-thread-del { background: none; border: none; color: var(--text-muted); font-size: 1.1rem; line-height: 1; padding: 4px 8px; cursor: pointer; border-radius: var(--radius-sm); }
+.ask-thread-del:hover { color: var(--text-primary); background: rgba(255,255,255,0.08); }
 
 /* Smart-money search bars (Institutions / Congress) */
 .sm-search { margin: 0 0 14px; max-width: 440px; }
