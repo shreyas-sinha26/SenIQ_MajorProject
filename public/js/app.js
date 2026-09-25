@@ -218,7 +218,7 @@ async function showDashboard() {
   renderTierControl();
 
   // Load all data
-  await Promise.all([loadPortfolio(), loadNewsFeed(), loadAlerts(), loadPortfolioSentiment(), loadImpactFeed(), loadDailyBrief(), loadSmartMoney()]);
+  await Promise.all([loadPortfolio(), loadNewsFeed(), loadAlerts(), loadPortfolioSentiment(), loadImpactFeed(), loadDailyBrief(), loadSmartMoney(), loadAskThreads()]);
 
   // Auto-refresh every 60s
   if (refreshInterval) clearInterval(refreshInterval);
@@ -1390,7 +1390,7 @@ function switchToPage(page) {
   document.querySelectorAll('.main-tab').forEach(t => t.classList.toggle('active', t.dataset.page === page));
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('hidden', p.id !== `page-${page}`));
   if (page === 'analytics') updateSentimentChart(activeFilter && cachedSentiments[activeFilter] ? { [activeFilter]: cachedSentiments[activeFilter] } : cachedSentiments);
-  if (page === 'ai') loadDailyBrief();
+  if (page === 'ai') { loadDailyBrief(); loadAskThreads(); }
   if (page === 'profile') { populateProfilePage(currentUser); loadPlans(); loadApiKeys(); }
   if (page === 'backtest') initBacktestPage();
   if (page === 'strategy-builder') initBuilderPage();
@@ -2567,29 +2567,99 @@ async function refreshDailyBrief() {
 }
 
 // ─── Ask it anything (E6) ────────────────────────────────────
+// Conversations are saved on the server: each answer returns a thread_id, follow-ups send it
+// back, and the server supplies the earlier turns itself. "New conversation" starts fresh;
+// the Recent list reopens or deletes saved threads (auto-deleted after 30 days idle).
+let askThreadId = null;
+let askThread = []; // [{ question, answer, writer }]
+
+const ASK_WRITER_TAG = { claude: 'AI answer', deterministic: 'Auto-generated from your data', scope: 'Not in your portfolio' };
+
+function renderAskThread(pending) {
+  const answerEl = document.getElementById('ask-answer');
+  const resetBtn = document.getElementById('ask-reset');
+  const turns = askThread.map((t) => `
+      <div class="ask-turn">
+        <div class="ask-q">${escapeHtml(t.question)}</div>
+        <div class="ask-answer-text">${escapeHtml(t.answer)}</div>
+        ${t.writer ? `<div class="ask-answer-meta"><span class="ask-writer">${ASK_WRITER_TAG[t.writer] || t.writer}</span><span class="ask-disclaimer">Informational only — not advice.</span></div>` : ''}
+      </div>`).join('');
+  const pendingHtml = pending ? `<div class="ask-turn"><div class="ask-q">${escapeHtml(pending)}</div><div class="ask-thinking">Thinking…</div></div>` : '';
+  answerEl.innerHTML = turns + pendingHtml;
+  answerEl.classList.toggle('hidden', !turns && !pendingHtml);
+  resetBtn?.classList.toggle('hidden', askThread.length === 0);
+}
+
+async function loadAskThreads() {
+  const wrap = document.getElementById('ask-threads');
+  if (!wrap) return;
+  let threads = [];
+  try { threads = (await api('/api/reports/threads')).threads || []; }
+  catch { wrap.classList.add('hidden'); return; } // e.g. 402 on Free — the Ask box shows the upsell
+  wrap.classList.toggle('hidden', threads.length === 0);
+  wrap.innerHTML = `<div class="ask-threads-head">Recent conversations</div>` + threads.map((t) => `
+      <div class="ask-thread-item${t.id === askThreadId ? ' active' : ''}" data-id="${t.id}">
+        <button class="ask-thread-open" type="button" data-id="${t.id}">
+          <span class="ask-thread-title">${escapeHtml(t.title || 'Untitled')}</span>
+          <span class="ask-thread-meta">${t.turns} ${t.turns === 1 ? 'question' : 'questions'} · ${timeAgo(new Date(t.updated_at))}</span>
+        </button>
+        <button class="ask-thread-del" type="button" data-id="${t.id}" title="Delete conversation" aria-label="Delete conversation">×</button>
+      </div>`).join('');
+}
+
+async function openAskThread(id) {
+  try {
+    const { thread, messages } = await api(`/api/reports/threads/${id}`);
+    askThreadId = thread.id;
+    askThread = [];
+    for (let i = 0; i + 1 < messages.length; i += 2) {
+      askThread.push({ question: messages[i].content, answer: messages[i + 1].content, writer: messages[i + 1].writer });
+    }
+    renderAskThread();
+    loadAskThreads();
+  } catch (err) {
+    showToast(err.message, 'error');
+    loadAskThreads();
+  }
+}
+
+async function deleteAskThread(id) {
+  if (!confirm('Delete this conversation?')) return;
+  try {
+    await api(`/api/reports/threads/${id}`, { method: 'DELETE' });
+    if (Number(id) === askThreadId) { askThreadId = null; askThread = []; renderAskThread(); }
+    loadAskThreads();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
 async function askPortfolio(question) {
   const input = document.getElementById('ask-input');
-  const answerEl = document.getElementById('ask-answer');
   const btn = document.getElementById('ask-btn');
   const q = (question || input.value || '').trim();
   if (!q) return showToast('Type a question first', 'error');
-  input.value = q;
+  input.value = '';
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
-  answerEl.classList.remove('hidden');
-  answerEl.innerHTML = '<div class="ask-thinking">Thinking…</div>';
+  renderAskThread(q);
   try {
-    const data = await api('/api/reports/ask', { method: 'POST', body: JSON.stringify({ question: q }) });
-    const writerTag = data.writer === 'claude' ? 'AI answer' : 'Auto-generated from your data';
-    answerEl.innerHTML = `
-      <div class="ask-answer-text">${escapeHtml(data.answer)}</div>
-      <div class="ask-answer-meta"><span class="ask-writer">${writerTag}</span><span class="ask-disclaimer">Informational only — not advice.</span></div>`;
+    const data = await api('/api/reports/ask', { method: 'POST', body: JSON.stringify({ question: q, thread_id: askThreadId }) });
+    askThreadId = data.thread_id;
+    askThread.push({ question: data.question || q, answer: data.answer, writer: data.writer });
+    renderAskThread();
     renderAskQuota(data.quota);
+    loadAskThreads();
   } catch (err) {
-    answerEl.innerHTML = err.status === 402
-      ? `<div class="ask-answer-text">Portfolio Q&A is a Plus feature.</div>${upgradeNote('Upgrade to ask anything about your portfolio.')}`
-      : `<div class="ask-answer-text">${escapeHtml(err.message)}</div>`;
+    if (err.status === 404) { askThreadId = null; askThread = []; loadAskThreads(); } // thread was deleted/expired
+    renderAskThread();
+    const answerEl = document.getElementById('ask-answer');
+    answerEl.classList.remove('hidden');
+    answerEl.insertAdjacentHTML('beforeend', err.status === 402
+      ? `<div class="ask-turn"><div class="ask-answer-text">Portfolio Q&A is a Plus feature.</div>${upgradeNote('Upgrade to ask anything about your portfolio.')}</div>`
+      : `<div class="ask-turn"><div class="ask-answer-text">${escapeHtml(err.message)}</div></div>`);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Ask'; }
+    input.focus();
   }
 }
 
@@ -2602,6 +2672,13 @@ function initAsk() {
   document.getElementById('ask-btn')?.addEventListener('click', () => askPortfolio());
   document.getElementById('ask-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') askPortfolio(); });
   document.querySelectorAll('.ask-chip').forEach((c) => c.addEventListener('click', () => askPortfolio(c.dataset.q)));
+  document.getElementById('ask-reset')?.addEventListener('click', () => { askThreadId = null; askThread = []; renderAskThread(); loadAskThreads(); });
+  document.getElementById('ask-threads')?.addEventListener('click', (e) => {
+    const del = e.target.closest('.ask-thread-del');
+    if (del) return deleteAskThread(del.dataset.id);
+    const open = e.target.closest('.ask-thread-open');
+    if (open) openAskThread(open.dataset.id);
+  });
 }
 
 // ─── Tiers & billing (Phase 6) ───────────────────────────────
