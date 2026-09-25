@@ -81,6 +81,8 @@ body {
 
 /* ─── Utilities ─── */
 .hidden { display: none !important; }
+/* v1 build: strategies + API/MCP hidden unless /api/config enables them */
+.no-strategies [data-feature="strategies"] { display: none !important; }
 .view  { min-height: 100vh; }
 .mono  { font-family: var(--mono); }
 

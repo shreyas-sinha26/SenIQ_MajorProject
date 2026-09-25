@@ -85,6 +85,9 @@ const FEATURES = {
   FINBERT_CLASSIFY: process.env.FINBERT_CLASSIFY === '1', // HF Inference API batch classifier (needs HF_API_TOKEN)
   SMART_MONEY: true,     // Phase 3: 13F (EDGAR) + Congress tabs + instant filing alerts
   CLAUDE_REPORTS: false,
+  // v2 feature set: Strategy Builder / Your Strategies / Backtest / Paper Trade + the MCP
+  // server, public REST API (/v1), API keys and /docs. Off = v1 (portfolio → AI Workspace).
+  STRATEGIES: process.env.FEATURES_STRATEGIES === '1',
   NEWS_EMBEDDINGS: process.env.NEWS_EMBEDDINGS === '1', // embed articles for Ask's news search (needs HF_API_TOKEN + pgvector)
   BILLING: false,
 };

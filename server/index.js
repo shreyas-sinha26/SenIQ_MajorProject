@@ -6,7 +6,7 @@ const path = require('path');
 const { runMigrations, healthCheck, closePool } = require('./db');
 const { seedUniverse } = require('./services/entityResolver');
 const { seedAdmin } = require('./services/seedAdmin');
-const { DISCLAIMER } = require('./config');
+const { DISCLAIMER, FEATURES } = require('./config');
 const { router: authRouter } = require('./routes/auth');
 const portfolioRouter = require('./routes/portfolio');
 const newsRouter = require('./routes/news');
@@ -74,13 +74,20 @@ app.use('/api/smart-money', smartMoneyRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/billing', billingRouter);
-app.use('/api/strategies', strategiesRouter);
-app.use('/api/paper', paperRouter);
-app.use('/api/keys', apiKeysRouter);
-// MCP server (Phase 8): strategy tools for AI agents, API-key auth (not JWT).
-app.use('/mcp', mcpRouter);
-// Public REST API: same read+run surface as /mcp, same keys, shared rate budget.
-app.use('/v1', v1Router);
+// v2 surface (FEATURES.STRATEGIES): strategies, paper trading, API keys, MCP + public API.
+// Off (v1) → these paths answer 404 JSON instead of falling through to the SPA.
+const V2_PATHS = ['/api/strategies', '/api/paper', '/api/keys', '/mcp', '/v1', '/docs'];
+if (FEATURES.STRATEGIES) {
+  app.use('/api/strategies', strategiesRouter);
+  app.use('/api/paper', paperRouter);
+  app.use('/api/keys', apiKeysRouter);
+  // MCP server (Phase 8): strategy tools for AI agents, API-key auth (not JWT).
+  app.use('/mcp', mcpRouter);
+  // Public REST API: same read+run surface as /mcp, same keys, shared rate budget.
+  app.use('/v1', v1Router);
+} else {
+  app.use(V2_PATHS, (req, res) => res.status(404).json({ error: 'Not available in this version' }));
+}
 
 // ─── Health Check ───────────────────────────────────────────
 // Returns 503 if Postgres is unreachable so the host's health probe recycles a bad instance.
@@ -96,7 +103,7 @@ app.get('/api/health', async (req, res) => {
 
 // ─── Public Config (disclaimer, etc.) ───────────────────────
 app.get('/api/config', (req, res) => {
-  res.json({ disclaimer: DISCLAIMER });
+  res.json({ disclaimer: DISCLAIMER, features: { strategies: FEATURES.STRATEGIES } });
 });
 
 // ─── Marketing Landing Page ─────────────────────────────────
