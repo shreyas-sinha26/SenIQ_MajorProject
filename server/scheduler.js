@@ -23,8 +23,10 @@ const { recomputeImpacts } = require('./services/impactScoring');
 const { logEventFeatures, resolveOutcomes } = require('./services/outcomes');
 const { pollSmartMoney } = require('./services/smartMoney');
 const { generateDailyBriefs } = require('./services/reports');
+const { embedPendingArticles } = require('./services/newsSearch');
+const { purgeOldThreads } = require('./services/askThreads');
 const { captureException } = require('./observability');
-const { REPORTS } = require('./config');
+const { REPORTS, QA } = require('./config');
 
 let isRunning = false;
 
@@ -137,6 +139,15 @@ async function runNewsPipeline() {
     const logged = await logEventFeatures();
     const resolved = await resolveOutcomes();
     console.log(`   🧪 outcomes: ${logged} logged, ${resolved} price-resolved`);
+
+    // 8. Embed new relevant articles for Ask's news search (flag + HF token + pgvector;
+    //    otherwise Ask falls back to keyword search). Bounded per run; never fails the pipeline.
+    try {
+      const emb = await embedPendingArticles();
+      if (emb.embedded || emb.skipped !== 'disabled') console.log(`   🔎 news search: ${emb.embedded} embedded${emb.skipped ? ` (${emb.skipped})` : ''}`);
+    } catch (err) {
+      console.warn('   ⚠️  news embedding step failed:', err.message);
+    }
     console.log(`   ✅ Pipeline complete\n`);
   } catch (err) {
     console.error('Pipeline error:', err);
@@ -171,6 +182,17 @@ async function runDailyBriefs() {
   }
 }
 
+// Ask thread retention — drop conversations untouched for QA.THREAD_RETENTION_DAYS.
+async function runThreadPurge() {
+  try {
+    const n = await purgeOldThreads();
+    if (n) console.log(`🧹 Purged ${n} Ask conversation(s) older than ${QA.THREAD_RETENTION_DAYS} days`);
+  } catch (err) {
+    console.error('Ask thread purge error:', err);
+    captureException(err);
+  }
+}
+
 function startScheduler() {
   // Collect the cron tasks so graceful shutdown can stop them (SIGTERM on deploy).
   const tasks = [];
@@ -187,6 +209,8 @@ function startScheduler() {
 
   tasks.push(cron.schedule(REPORTS.CRON, runDailyBriefs));
   console.log(`⏰ Daily-brief generator started — ${REPORTS.CRON}`);
+
+  tasks.push(cron.schedule(QA.THREAD_PURGE_CRON, runThreadPurge));
 
   return tasks;
 }

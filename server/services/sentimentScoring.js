@@ -146,4 +146,4 @@ async function scoreTicker(ticker) {
   return computeWindowedSentiment(rows);
 }
 
-module.exports = { computeWindowedSentiment, scoreTicker, sourceWeight, decayWeight };
+module.exports = { computeWindowedSentiment, scoreTicker, sourceWeight, decayWeight, labelFor };

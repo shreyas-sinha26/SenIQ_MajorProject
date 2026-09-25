@@ -85,6 +85,7 @@ const FEATURES = {
   FINBERT_CLASSIFY: process.env.FINBERT_CLASSIFY === '1', // HF Inference API batch classifier (needs HF_API_TOKEN)
   SMART_MONEY: true,     // Phase 3: 13F (EDGAR) + Congress tabs + instant filing alerts
   CLAUDE_REPORTS: false,
+  NEWS_EMBEDDINGS: process.env.NEWS_EMBEDDINGS === '1', // embed articles for Ask's news search (needs HF_API_TOKEN + pgvector)
   BILLING: false,
 };
 
@@ -281,10 +282,37 @@ const REPORTS = {
 const QA = {
   MODEL: 'claude-haiku-4-5',
   MAX_OUTPUT_TOKENS: 1000,
-  PER_USER_DAILY_QUESTIONS: 10,  // becomes Plus tier later (Free 0 / Pro ~30) with billing
+  PER_USER_DAILY_QUESTIONS: 10,  // fallback only — the real cap is TIERS[tier].qaPerDay (Plus 10 / Pro 30)
   MAX_QUESTION_CHARS: 500,       // clamp the (untrusted) question before prompting
   TOP_EVENTS: 10,                // extended grounding: fuller impact feed than the daily brief
   MAX_HOLDINGS: 30,              // all holdings up to this cap (not just top-N)
+  // Agent (E6 v2): Claude pulls data through tools instead of one stuffed context.
+  MAX_TOOL_ROUNDS: 4,            // tool-call rounds per question; then it must answer
+  MAX_INPUT_TOKENS_PER_QUESTION: 25000, // stop calling tools past this summed input (worst question ≈ $0.04)
+  MAX_TOOL_RESULT_CHARS: 4000,   // clamp each tool result before it re-enters the prompt
+  HISTORY_TURNS: 3,              // follow-ups: last N question/answer pairs sent back
+  MAX_HISTORY_CHARS: 1200,       // clamp each (client-supplied, untrusted) history message
+  // Saved threads: the server stores conversations and supplies follow-up history itself.
+  THREAD_RETENTION_DAYS: 30,     // threads untouched this long are purged by the daily job
+  THREAD_PURGE_CRON: '15 4 * * *',
+  MAX_THREADS_LISTED: 20,
+  THREAD_TITLE_CHARS: 80,
+  NEWS_DAYS_DEFAULT: 7,
+  NEWS_DAYS_MAX: 90,             // matches the sentiment baseline window
+};
+
+// ─── News search (RAG over ingested headlines + summaries) ───
+// Embeddings via HF Inference (same HF_API_TOKEN as FinBERT), stored in pgvector.
+// Without pgvector or a token, search degrades to keyword matching — never a hard fail.
+const NEWS_SEARCH = {
+  EMBED_MODEL: 'sentence-transformers/all-MiniLM-L6-v2',
+  DIM: 384,                      // must match EMBED_MODEL's output size
+  WINDOW_DAYS: 90,               // only recent relevant articles are embedded/searched
+  EMBED_BATCH: 32,               // texts per HF request
+  MAX_EMBED_PER_RUN: 200,        // per pipeline run, bounds HF calls
+  MAX_TEXT_CHARS: 600,           // title + summary clamp before embedding
+  TOP_K: 6,
+  MIN_SIMILARITY: 0.3,           // below this cosine a match is noise, not relevance (MiniLM scale)
 };
 
 // ─── Ingestion sources (Phase 2b) ────────────────────────────
@@ -339,4 +367,4 @@ const STRATEGY_SERVICE = {
   CATALOG_TIMEOUT_MS: 8000,
 };
 
-module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, INGEST, SMART_MONEY, STRATEGY_SERVICE };
+module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, STRATEGY_SERVICE };

@@ -573,15 +573,18 @@
           </div>
           <div class="ask-box glass">
             <div class="ask-input-row">
-              <input type="text" id="ask-input" placeholder="e.g. What's my biggest risk right now?" autocomplete="off" maxlength="500">
+              <input type="text" id="ask-input" placeholder="e.g. Why is my portfolio down today? · News on AAPL?" autocomplete="off" maxlength="500">
               <button class="btn btn-primary" id="ask-btn">Ask</button>
             </div>
             <div class="ask-examples">
               <button class="ask-chip" data-q="Why is my portfolio down?">Why is my portfolio down?</button>
               <button class="ask-chip" data-q="What's my biggest risk right now?">What's my biggest risk?</button>
               <button class="ask-chip" data-q="Which of my holdings are improving?">Which holdings are improving?</button>
+              <button class="ask-chip" data-q="Any big news on my holdings this week?">News on my holdings</button>
             </div>
             <div class="ask-answer hidden" id="ask-answer"></div>
+            <button class="ask-reset hidden" id="ask-reset" type="button">New conversation</button>
+            <div class="ask-threads hidden" id="ask-threads"></div>
           </div>
         </section>
 
