@@ -6,7 +6,7 @@
 const assert = require('node:assert');
 const { classifyEventType } = require('../server/services/eventTyping');
 const { impactForEvent } = require('../server/services/impactScoring');
-const { planDeliveries, inQuietWindow, isPostWatermark } = require('../server/services/materiality');
+const { planDeliveries, inQuietWindow, isPostWatermark, holdingMateriality, typeFactor, storyTokens, regionOf, sameStory, groupStories, regionExposure, scoreStory } = require('../server/services/materiality');
 
 let passed = 0;
 function check(name, fn) {
@@ -111,6 +111,26 @@ check('quiet hours hold everything to digest', () => {
   assert.strictEqual(cands[0].delivery, 'digest');
 });
 
+check('not realtime-eligible → digest even with budget left', () => {
+  const cands = [{ ...mk(1, 'AAPL', 0.9), realtimeEligible: false }, mk(1, 'MSFT', 0.2)];
+  planDeliveries(cands, { budget, nowHour: 12 });
+  assert.deepStrictEqual(cands.map((c) => [c.ticker, c.delivery]).sort(), [['AAPL', 'digest'], ['MSFT', 'realtime']]);
+});
+
+check('market alerts have their own smaller cap; holdings keep the rest', () => {
+  const b2 = { ...budget, MAX_REALTIME_PER_DAY: 5, MAX_BROAD_REALTIME_PER_DAY: 2 };
+  const cands = [mk(1, 'MARKET', 0.9), mk(1, 'MARKET', 0.8), mk(1, 'MARKET', 0.7), mk(1, 'AAPL', 0.1)];
+  planDeliveries(cands, { budget: b2, nowHour: 12 });
+  assert.deepStrictEqual(cands.map((c) => c.delivery), ['realtime', 'realtime', 'digest', 'realtime']);
+});
+
+check('market cap counts what was already sent today', () => {
+  const b2 = { ...budget, MAX_REALTIME_PER_DAY: 5, MAX_BROAD_REALTIME_PER_DAY: 2 };
+  const cands = [mk(1, 'MARKET', 0.9)];
+  planDeliveries(cands, { budget: b2, nowHour: 12, sentTodayByUser: { 1: 2 }, sentBroadTodayByUser: { 1: 2 } });
+  assert.strictEqual(cands[0].delivery, 'digest');
+});
+
 check('inQuietWindow overnight wrap', () => {
   const b = { QUIET_HOURS_ENABLED: true, QUIET_START: 22, QUIET_END: 7 };
   assert.ok(inQuietWindow(23, b) && inQuietWindow(3, b) && !inQuietWindow(12, b));
@@ -124,5 +144,103 @@ check('event after watermark → allow', () => assert.strictEqual(isPostWatermar
 check('event before watermark → suppress', () => assert.strictEqual(isPostWatermark(T0, T1), false));
 check('event exactly at watermark → allow', () => assert.strictEqual(isPostWatermark(T0, T0), true));
 check('unknown event age → allow', () => assert.strictEqual(isPostWatermark(null, T1), true));
+
+console.log('\nholding materiality (threshold calibration):');
+{
+  const { MATERIALITY } = require('../server/config');
+  const ev = (type, score, confidence, sourceCount = 1) => ({ eventType: type, sourceCount, tickers: { AAPL: { score, confidence } } });
+  const m = (cluster, exposure, z = null) => holdingMateriality(cluster, { AAPL: exposure }, { AAPL: z }).score;
+
+  check('10% position + strong, confident earnings news → alerts', () => {
+    assert.ok(m(ev('earnings', 0.95, 0.9), 10) >= MATERIALITY.HOLDING_THRESHOLD);
+  });
+  check('same news as an opinion piece on a 10% position → does not', () => {
+    assert.ok(m(ev('other', 0.95, 0.9), 10) < MATERIALITY.HOLDING_THRESHOLD);
+  });
+  check('5% position: ordinary news no, surprising + widely covered serious news yes', () => {
+    assert.ok(m(ev('earnings', 0.95, 0.9), 5) < MATERIALITY.HOLDING_THRESHOLD);
+    assert.ok(m(ev('legal', 0.02, 0.9, 4), 5, -3) >= MATERIALITY.HOLDING_THRESHOLD);
+  });
+  check('mild sentiment on a big position → does not', () => {
+    assert.ok(m(ev('other', 0.58, 0.9), 40) < MATERIALITY.HOLDING_THRESHOLD);
+  });
+  check('a stock the user does not hold never scores', () => {
+    assert.strictEqual(holdingMateriality(ev('ma', 1, 1), { MSFT: 100 }, {}).score, 0);
+  });
+  check('M&A outranks an analyst rating', () => assert.ok(typeFactor('ma') > typeFactor('earnings') && typeFactor('earnings') > typeFactor('rating')));
+  check('low-confidence news reports its confidence (kept out of real time)', () => {
+    assert.ok(holdingMateriality(ev('earnings', 1, 0.3), { AAPL: 100 }, {}).topConfidence < MATERIALITY.REALTIME_MIN_CONFIDENCE);
+  });
+}
+
+console.log('\nmarket stories:');
+{
+  const E = (title, importance = 0.7, source = 'economictimes.indiatimes.com', sourceCount = 1) => ({ title, importance, source, sourceCount, firstSeen: '2026-10-07T05:00:00Z', tier: 'market' });
+  const rbi = [
+    E('RBI MPC meeting October 2026: Repo rate hiked by 25 bps to 5.50%', 0.8),
+    E('RBI hikes interest rates by 25 bps: What next for the markets?'),
+    E('Bond yields rise to 7.27%, rupee declines as RBI hikes rates by 25 bps'),
+    E('Rate hike not to significantly impact earnings or growth: Ambareesh Baliga'),
+  ];
+  const fed = E('Fed hikes rates by 25 bps as inflation stays hot', 0.8, 'Reuters');
+  const ipo = E('FirstCry-backed Swara Baby Products gets Sebi nod for IPO');
+
+  check('story tokens drop filler and numbers, keep the subject', () => {
+    const t = storyTokens('RBI hikes interest rates by 25 bps: What next for the markets?');
+    assert.ok(t.has('rbi') && t.has('rat') && t.has('hik'));          // stems: rate(s) → rat, hike(s/d) → hik
+    assert.deepStrictEqual([...storyTokens('hike hikes hiked hiking')], ['hik']);
+    assert.ok(!t.has('market') && !t.has('what') && !t.has('bps') && !t.has('25'));
+  });
+  check('region: RBI/Indian source → IN, Fed → US, neither → GLOBAL', () => {
+    assert.strictEqual(regionOf(rbi[0].title, rbi[0].source), 'IN');
+    assert.strictEqual(regionOf(fed.title, fed.source), 'US');
+    assert.strictEqual(regionOf('Oil jumps as OPEC surprises with a cut', 'Reuters'), 'GLOBAL');
+  });
+  check('four RBI headlines are ONE story led by the most important', () => {
+    const stories = groupStories([...rbi].reverse());
+    assert.strictEqual(stories.length, 1);
+    assert.strictEqual(stories[0].lead.title, rbi[0].title);
+    assert.strictEqual(stories[0].coverage, 4);
+  });
+  check('a Fed hike the same day is a different story (other market)', () => {
+    assert.strictEqual(groupStories([...rbi, fed]).length, 2);
+  });
+  check('an unrelated headline stays its own story', () => {
+    assert.strictEqual(groupStories([...rbi, ipo]).length, 2);
+  });
+
+  const story = groupStories(rbi)[0];
+  check('confirmed story + real exposure to that market → may push', () => {
+    assert.strictEqual(scoreStory(story, 40).realtimeEligible, true);
+  });
+  check('same story, no money in that market → recorded, never pushed', () => {
+    assert.strictEqual(scoreStory(story, 0).realtimeEligible, false);
+  });
+  check('single unconfirmed headline → recorded, never pushed', () => {
+    assert.strictEqual(scoreStory(groupStories([ipo])[0], 100).realtimeEligible, false);
+  });
+  check('weak story → no alert at all', () => {
+    assert.strictEqual(scoreStory(groupStories([E('Monetary policy shifts gear', 0.42)])[0], 100), null);
+  });
+  check('exposure raises priority', () => assert.ok(scoreStory(story, 80).priority > scoreStory(story, 10).priority));
+  check('a GLOBAL story concerns everyone', () => {
+    const oil = groupStories([E('Oil jumps as OPEC surprises with a cut', 0.8, 'Reuters', 4)])[0];
+    assert.strictEqual(scoreStory(oil, 0).realtimeEligible, true);
+  });
+  check('region exposure: NSE → IN, US → US, crypto/commodity → GLOBAL', () => {
+    const r = regionExposure([
+      { ticker: 'RELIANCE', exchange: 'NSE', asset_class: 'equity', exposure_pct: 30 },
+      { ticker: 'AAPL', exchange: 'US', asset_class: 'equity', exposure_pct: 50 },
+      { ticker: 'BTC', asset_class: 'crypto', exposure_pct: 15 },
+      { ticker: 'XAU', asset_class: 'commodity', exposure_pct: 5 },
+    ]);
+    assert.deepStrictEqual(r, { IN: 30, US: 50, GLOBAL: 20 });
+  });
+  check('a follow-up headline matches a story the user was already told about', () => {
+    const told = { tokens: storyTokens(rbi[0].title), region: 'IN' };
+    const later = { tokens: storyTokens('RBI rate hike impact: Bank, NBFC shares rebound'), region: 'IN' };
+    assert.strictEqual(sameStory(told, later), true);
+  });
+}
 
 console.log(`\n${passed} checks passed${process.exitCode ? ' (with failures)' : ''}`);

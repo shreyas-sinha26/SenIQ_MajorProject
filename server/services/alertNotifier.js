@@ -11,6 +11,12 @@
  *   Plus → standard alert email
  *   Pro  → enhanced email with a short Claude narrative (services/alertNarrative.js)
  *
+ * Who is emailed (checked per alert, each refusal recorded in email_log as 'skipped'):
+ *   - the address must be VERIFIED — an alert describes someone's holdings, and a
+ *     mistyped signup address would deliver that to a stranger
+ *   - the user must not have unsubscribed (users.email_alerts)
+ * Every alert email carries an unsubscribe link and the List-Unsubscribe headers.
+ *
  * Guarantees:
  *   - only 'realtime' alerts email (digest stays in-app) — config.ALERT_EMAIL.REALTIME_ONLY
  *   - one email per (user, event): dedup reuses the alert engine's key, no second store
@@ -19,7 +25,7 @@
  */
 
 const { ALERT_EMAIL, APP_URL } = require('../config');
-const { sendEmail, emailEnabled } = require('./emailService');
+const { sendEmail, emailEnabled, logEmail, unsubscribeUrl } = require('./emailService');
 const { getUserTier } = require('../middleware/tier');
 const { buildFacts, generateProNarrative } = require('./alertNarrative');
 
@@ -31,6 +37,15 @@ function shouldEmail(tier, delivery) {
   if (tier !== 'plus' && tier !== 'pro') return false;
   if (ALERT_EMAIL.REALTIME_ONLY && delivery && delivery !== 'realtime') return false;
   return true;
+}
+
+// ── Pure: may this recipient be emailed alerts at all? ──
+// → null when yes, else the reason recorded in the send log.
+function recipientBlock(recipient) {
+  if (!recipient || !recipient.email) return 'no_address';
+  if (recipient.email_verified !== true) return 'unverified';
+  if (recipient.email_alerts === false) return 'unsubscribed';
+  return null;
 }
 
 // ── Pure: dedupe by the same key the alert engine uses (user, event) ──
@@ -66,7 +81,7 @@ function whyFired(f) {
  * Pure: build the { subject, text, html } for an alert email from normalized facts.
  * `narrative` (Pro only) is appended when present. No I/O — unit-testable.
  */
-function buildAlertEmail(facts, { narrative = null } = {}) {
+function buildAlertEmail(facts, { narrative = null, unsubscribeUrl: unsubUrl = null } = {}) {
   const headline = (facts.headline || 'Portfolio event').slice(0, 140);
   const holdings = facts.isMarket ? 'Your portfolio (market-wide)' : facts.ticker;
   const exposure = facts.exposurePct != null ? `${Math.round(facts.exposurePct)}%` : '—';
@@ -91,6 +106,7 @@ function buildAlertEmail(facts, { narrative = null } = {}) {
     textLines.push('', 'Analyst take:', narrative);
   }
   textLines.push('', `Open your dashboard: ${url}`, '', 'SenIQ is informational, not investment advice.');
+  if (unsubUrl) textLines.push('', `You get this because alert emails are on for your SenIQ account. Stop them: ${unsubUrl}`);
   const text = textLines.join('\n');
 
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -109,6 +125,7 @@ function buildAlertEmail(facts, { narrative = null } = {}) {
   ${narrativeHtml}
   <p style="margin:18px 0"><a href="${esc(url)}" style="background:#111;color:#fff;text-decoration:none;padding:10px 16px;border-radius:6px;display:inline-block;font-size:14px">Open your dashboard</a></p>
   <p style="margin:14px 0 0;color:#999;font-size:12px">SenIQ is informational, not investment advice.</p>
+  ${unsubUrl ? `<p style="margin:6px 0 0;color:#999;font-size:12px">You get this because alert emails are on for your SenIQ account. <a href="${esc(unsubUrl)}" style="color:#999">Stop alert emails</a></p>` : ''}
 </div>`;
 
   return { subject, text, html };
@@ -122,7 +139,8 @@ function buildAlertEmail(facts, { narrative = null } = {}) {
  *   deps.sendEmailFn     → the transport (emailService.sendEmail)
  *   deps.tierFn          → (userId) => { tier }
  *   deps.narrativeFn     → (userId, alert) => { narrative } for Pro
- *   deps.getEmailFn      → (userId) => { email, name } (recipient lookup)
+ *   deps.getEmailFn      → (userId) => { email, name, email_verified, email_alerts }
+ *   deps.logFn           → records a skipped send (emailService.logEmail)
  *
  * Returns a small summary { sent, skipped, failed } (handy for logs/tests).
  */
@@ -133,6 +151,7 @@ async function deliverAlertEmails(alerts, deps = {}) {
     tierFn = getUserTier,
     narrativeFn = generateProNarrative,
     getEmailFn = defaultGetEmail,
+    logFn = logEmail,
   } = deps;
 
   const summary = { sent: 0, skipped: 0, failed: 0 };
@@ -147,7 +166,14 @@ async function deliverAlertEmails(alerts, deps = {}) {
         if (!shouldEmail(tier, alert.delivery)) { summary.skipped++; continue; }
 
         const recipient = await getEmailFn(alert.user_id);
-        if (!recipient || !recipient.email) { summary.skipped++; continue; }
+        const blocked = recipientBlock(recipient);
+        if (blocked) {
+          summary.skipped++;
+          if (recipient && recipient.email) {
+            await logFn({ userId: alert.user_id, to: recipient.email, kind: 'alert', subject: alert.title || null, status: 'skipped', reason: blocked });
+          }
+          continue;
+        }
 
         const facts = buildFacts(alert);
 
@@ -163,8 +189,13 @@ async function deliverAlertEmails(alerts, deps = {}) {
           }
         }
 
-        const { subject, text, html } = buildAlertEmail(facts, { narrative });
-        const res = await sendEmailFn({ to: recipient.email, subject, text, html });
+        const unsub = unsubscribeUrl(alert.user_id);
+        const { subject, text, html } = buildAlertEmail(facts, { narrative, unsubscribeUrl: unsub });
+        const res = await sendEmailFn({
+          to: recipient.email, subject, text, html, kind: 'alert', userId: alert.user_id,
+          // Lets Gmail/Outlook show their own Unsubscribe button and do it in one click.
+          headers: { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+        });
         if (res && res.delivered) summary.sent++;
         else { summary.failed++; console.error(`Alert email not delivered to user ${alert.user_id}: ${res && res.reason}`); }
       } catch (err) {
@@ -183,11 +214,12 @@ async function deliverAlertEmails(alerts, deps = {}) {
 // Default recipient lookup (lazy db require so pure helpers import without a DB).
 async function defaultGetEmail(userId) {
   const { queryOne } = require('../db');
-  return queryOne('SELECT email, name FROM users WHERE id = $1', [userId]);
+  return queryOne('SELECT email, name, email_verified, email_alerts FROM users WHERE id = $1', [userId]);
 }
 
 module.exports = {
   shouldEmail,
+  recipientBlock,
   dedupeEmailable,
   buildAlertEmail,
   deliverAlertEmails,
