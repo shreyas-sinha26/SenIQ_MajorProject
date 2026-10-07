@@ -1,5 +1,5 @@
 /**
- * Phase 8 — MCP server: the strategy tool surface for AI agents.
+ * Phase 8 — MCP server: the strategy + SenIQ data tool surface for AI agents.
  *
  * Mounted at /mcp (Streamable HTTP, stateless — a fresh McpServer + transport
  * per POST, no session state to leak between users). Auth is a per-user API
@@ -7,10 +7,16 @@
  * is read from the DB per request, so a downgrade or key revocation takes
  * effect immediately, matching middleware/tier.js semantics.
  *
- * Read + run only by design: agents can browse the catalog, validate specs,
- * run backtests/signals, and inspect saved strategies + paper deployments —
- * but nothing here mutates state. Write tools (deploy/pause/save) are a later,
- * separately-guarded decision.
+ * Read + run by default: agents can browse the catalog, validate specs, run
+ * backtests / walk-forward checks / signals, inspect saved strategies + paper
+ * deployments, and read SenIQ's own data (portfolio, impact feed, news,
+ * sentiment, smart money — the Ask agent's tools, see services/dataTools.js).
+ *
+ * Three WRITE tools — save_strategy, start_paper_deployment,
+ * stop_paper_deployment — exist only for keys created with can_write
+ * (migration 0018). A read-only key is not shown them at all. They touch
+ * saved strategies and virtual-money deployments only; nothing here can
+ * delete, and nothing anywhere places a real order.
  */
 const express = require('express');
 const { z } = require('zod');
@@ -24,6 +30,9 @@ const { DISCLAIMER, STRATEGY_SERVICE } = require('../config');
 const { resolveApiKey, heavyLimiter, lightLimiter } = require('../services/apiKeyGate');
 const { callService, flattenDetail, cleanSymbols, iso, MAX_WATCH_SYMBOLS, WARMUP_DAYS } = require('../services/strategyClient');
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
+const { DATA_TOOLS, runDataTool } = require('../services/dataTools');
+const { saveStrategy, deployPaper, stopPaper } = require('../services/strategyStore');
+const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../services/strategySignals');
 
 // Normalize a service reply into an MCP tool result. 422 = pydantic field
 // errors (array detail) → flattened; transport failure → friendly offline text.
@@ -65,9 +74,15 @@ function buildMcpServer(ctx) {
     { name: 'seniq-strategy-tools', version: '1.0.0' },
     {
       instructions:
-        'SenIQ strategy tools: browse the strategy catalog, validate Builder specs, run backtests, ' +
+        'SenIQ tools. Data: the user\'s portfolio and its impact-ranked news feed, plus news, ' +
+        'sentiment and smart-money (congress + 13F) data for any ticker they hold or that SenIQ ' +
+        'tracks — smart-money disclosures lag by weeks, so always state their dates. ' +
+        'Strategies: browse the catalog, validate Builder specs, run backtests, ' +
         'evaluate live signals, and inspect the user\'s saved strategies and paper deployments. ' +
-        'Read + run only — no tool mutates state. Custom specs may use SenIQ signal factors ' +
+        (ctx.canWrite
+          ? 'This key may also save strategies and start/stop PAPER deployments (virtual money, no real orders) — do so only when the user asks. '
+          : 'Read + run only — no tool mutates state. ') +
+        'Custom specs may use SenIQ signal factors ' +
         '(source:"seniq"); their history only reaches back as far as SenIQ has been recording, ' +
         'so check seniq_coverage in backtest responses. ' + DISCLAIMER,
     },
@@ -112,6 +127,62 @@ function buildMcpServer(ctx) {
         end_date: args.end_date,
         initial_cash: String(args.initial_cash || '100000'),
         seniq_data: seniqData,
+      },
+    }));
+  });
+
+  server.registerTool('list_seniq_presets', {
+    description: 'Ready-made strategy templates that combine price rules with SenIQ signals (news sentiment, congress disclosures, tracked funds\' 13F filings). Each has a data_depth note saying how much history its signal really has. Templates to backtest, not recommendations.',
+  }, async () => rateLimited(lightLimiter, ctx.keyId) || ok({ presets: listPresets() }));
+
+  server.registerTool('get_seniq_preset', {
+    description: 'The Builder spec for one SenIQ preset, with its inputs filled in (e.g. politician for follow-a-politician). Pass the result as `custom` to run_backtest or compare_without_seniq. Saves nothing.',
+    inputSchema: {
+      id: z.string().describe('Preset id from list_seniq_presets'),
+      inputs: z.record(z.string(), z.string()).optional().describe('Preset inputs, e.g. {"politician": "Jane Doe"}'),
+    },
+  }, async ({ id, inputs }) => {
+    const limited = rateLimited(lightLimiter, ctx.keyId);
+    if (limited) return limited;
+    const out = instantiatePreset(id, inputs || {});
+    return out.ok ? ok({ spec: out.spec, preset: out.preset }) : fail(out.error);
+  });
+
+  server.registerTool('compare_without_seniq', {
+    description: 'Did the SenIQ signal help? Backtests one Builder spec twice on the same symbol and dates — as written, and with every SenIQ condition removed — and returns both results, the difference, buy-and-hold, and how much of the period the SenIQ signals actually had data for. Read the notes: low coverage or few trades make the difference meaningless. Costs 2 backtests.',
+    inputSchema: {
+      custom: z.record(z.string(), z.any()).describe('Builder spec that uses at least one SenIQ factor and keeps at least one price-based entry and exit.'),
+      symbol: backtestArgs.symbol, exchange: backtestArgs.exchange,
+      start_date: backtestArgs.start_date, end_date: backtestArgs.end_date, initial_cash: backtestArgs.initial_cash,
+    },
+  }, async (args) => {
+    const limited = rateLimited(heavyLimiter, ctx.keyId);
+    if (limited) return limited;
+    const out = await compareWithoutSeniq(args);
+    return out.ok ? ok(out.data) : fail(out.error);
+  });
+
+  server.registerTool('run_walk_forward', {
+    description: 'Out-of-sample robustness check for one strategy on one symbol: the date range is cut into folds, and the same fixed rules are run on each in-sample window and on the unseen window after it. Returns per-fold metrics and a verdict (robust / moderate / fragile / insufficient_data). Use after run_backtest to see whether a good result survives on data it was not judged on. Costs 2 × n_splits backtests — rate-limited.',
+    inputSchema: {
+      ...backtestArgs,
+      n_splits: z.number().int().min(2).max(12).optional().describe('Number of folds (default 4)'),
+      scheme: z.enum(['anchored', 'rolling']).optional().describe('anchored = in-sample grows from the start (default); rolling = fixed-size in-sample'),
+    },
+  }, async (args) => {
+    const limited = rateLimited(heavyLimiter, ctx.keyId);
+    if (limited) return limited;
+    if ((!args.strategy && !args.custom) || !args.symbol || !args.start_date || !args.end_date) {
+      return fail('strategy (or custom), symbol, start_date and end_date are required');
+    }
+    return serviceResult(await callService('/api/walk-forward', {
+      method: 'POST',
+      body: {
+        strategy: args.strategy || null, custom: args.custom || null, params: args.params || {},
+        symbol: args.symbol, exchange: args.exchange || 'US',
+        start_date: args.start_date, end_date: args.end_date,
+        n_splits: args.n_splits || 4, scheme: args.scheme || 'anchored',
+        seniq_data: args.custom ? await seniqDataIfNeeded(args.custom, args.symbol) : null,
       },
     }));
   });
@@ -209,6 +280,64 @@ function buildMcpServer(ctx) {
     });
     return serviceResult(out);
   });
+
+  // ── SenIQ data tools (shared catalog with /v1) ──
+  for (const tool of DATA_TOOLS) {
+    const inputSchema = {};
+    for (const [arg, spec] of Object.entries(tool.args)) {
+      const base = (spec.type === 'integer' ? z.number().int() : z.string()).describe(spec.description);
+      inputSchema[arg] = spec.required ? base : base.optional();
+    }
+    server.registerTool(tool.name, { description: tool.description, inputSchema }, async (args) => {
+      const limited = rateLimited(lightLimiter, ctx.keyId);
+      if (limited) return limited;
+      const out = await runDataTool(ctx.userId, tool.name, args || {});
+      return out.ok ? ok(out.data) : fail(out.error);
+    });
+  }
+
+  // ── Write tools — only for keys created with the write permission ──
+  if (ctx.canWrite) {
+    const storeResult = (out) => (out.ok ? ok(out.data) : fail(out.error));
+
+    server.registerTool('save_strategy', {
+      description: 'Save a strategy to the user\'s account (max 20). Provide custom (a Builder spec — validate it first) or strategy (a registry name) with params. Optionally attach a watchlist of up to 5 symbols for live signals. Only call when the user asks to save.',
+      inputSchema: {
+        name: z.string().describe('Unique name for the saved strategy'),
+        custom: z.record(z.string(), z.any()).optional().describe('Builder spec. Provide this OR strategy.'),
+        strategy: z.string().optional().describe('Registry strategy name from list_strategies.'),
+        params: z.record(z.string(), z.any()).optional(),
+        symbols: z.array(z.object({ symbol: z.string(), exchange: z.string().optional() })).max(MAX_WATCH_SYMBOLS).optional(),
+      },
+    }, async (args) => {
+      const limited = rateLimited(lightLimiter, ctx.keyId);
+      if (limited) return limited;
+      return storeResult(await saveStrategy(ctx.userId, args));
+    });
+
+    server.registerTool('start_paper_deployment', {
+      description: 'Deploy one of the user\'s SAVED strategies on one symbol with virtual money (max 10 active). No real orders are placed — the deployment is replayed from today on each get_paper_state. Only call when the user asks to deploy.',
+      inputSchema: {
+        strategy_id: z.number().int().describe('id from list_saved_strategies or save_strategy'),
+        symbol: z.string(),
+        exchange: z.string().optional().describe('US | NSE | BSE | CRYPTO | COMMODITY (default US)'),
+        initial_cash: z.number().optional().describe('Virtual starting cash (default 100000)'),
+      },
+    }, async (args) => {
+      const limited = rateLimited(lightLimiter, ctx.keyId);
+      if (limited) return limited;
+      return storeResult(await deployPaper(ctx.userId, args));
+    });
+
+    server.registerTool('stop_paper_deployment', {
+      description: 'Stop an active paper deployment. Its record and trade history are kept, frozen at today. Only call when the user asks to stop it.',
+      inputSchema: { deployment_id: z.number().int().describe('id from list_paper_deployments') },
+    }, async (args) => {
+      const limited = rateLimited(lightLimiter, ctx.keyId);
+      if (limited) return limited;
+      return storeResult(await stopPaper(ctx.userId, args.deployment_id));
+    });
+  }
 
   return server;
 }

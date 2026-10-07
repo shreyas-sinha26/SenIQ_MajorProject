@@ -4,7 +4,8 @@
  * Emulates a webhook: a poller (cron, every SMART_MONEY.POLL_CRON) watches EDGAR 13F
  * submissions + the congress feed and, on a NEW filing/disclosure, emits an internal
  * event → instant alert to following / holding users, and POSTs registered outbound
- * webhooks. These events are rare + discrete, so they bypass the news materiality score.
+ * webhooks. These events are rare + discrete, so they bypass the news materiality score —
+ * but not the user's daily real-time limit: past it they are recorded as digest.
  *
  * Backfill guard: the FIRST time we see a fund/congress, we ingest silently (no alert
  * blast for historical filings); only records discovered AFTER a baseline exists alert.
@@ -14,7 +15,9 @@ const { query, queryOne, execute } = require('../../db');
 const { FEATURES, SMART_MONEY } = require('../../config');
 const { fetchRecent13F, fetchHoldings } = require('./edgar');
 const { fetchCongressTrades } = require('./congress');
+const { CUSIP_TO_TICKER } = require('./cusipMap');
 const { dispatchToUser } = require('../webhookService');
+const { deliveryForDiscreteAlert } = require('../materiality');
 
 // Normalize a politician name to a stable follow key.
 const polKey = (name) => String(name).toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '');
@@ -35,8 +38,8 @@ async function emitEvent({ event, entityType, entityRef, tickers = [], alertTick
   const recipients = [...new Set([...followers, ...holders].map((r) => Number(r.user_id)))];
   for (const userId of recipients) {
     await execute(
-      `INSERT INTO alerts (user_id, ticker, alert_type, message) VALUES ($1, $2, $3, $4)`,
-      [userId, alertTicker, 'smart_money', message]
+      `INSERT INTO alerts (user_id, ticker, alert_type, message, delivery) VALUES ($1, $2, $3, $4, $5)`,
+      [userId, alertTicker, 'smart_money', message, await deliveryForDiscreteAlert(userId)]
     );
     try {
       await dispatchToUser(userId, event);
@@ -264,11 +267,30 @@ async function pollCongress() {
 
 // ─── Combined poll (called by scheduler + manual trigger) ─────────────────────
 let isPolling = false;
+/**
+ * Fill in the ticker on stored 13F rows whose CUSIP is now in the map (rows are stored with
+ * whatever the map knew when their filing was ingested). Idempotent: touches only rows with
+ * no ticker, never changes one that is set. Returns the number of rows filled.
+ */
+async function backfillHoldingTickers() {
+  const pairs = Object.entries(CUSIP_TO_TICKER);
+  const r = await execute(
+    `UPDATE institution_holdings h SET ticker = m.ticker
+       FROM unnest($1::text[], $2::text[]) AS m(cusip, ticker)
+      WHERE h.ticker IS NULL AND upper(h.cusip) = m.cusip`,
+    [pairs.map(([c]) => c), pairs.map(([, t]) => t)]
+  );
+  return r.rowCount;
+}
+
 async function pollSmartMoney() {
   if (!FEATURES.SMART_MONEY) return { skipped: true };
   if (isPolling) return { skipped: 'in-progress' };
   isPolling = true;
   try {
+    // The CUSIP map grows over time; rows ingested earlier pick up their ticker here.
+    const filled = await backfillHoldingTickers().catch((err) => { console.warn('   ⚠️  13F ticker backfill failed:', err.message); return 0; });
+    if (filled) console.log(`   🏦 smart-money: filled the ticker on ${filled} stored 13F holding row(s)`);
     const inst = await pollInstitutions();
     const cong = await pollCongress();
     console.log(`   🏦 smart-money: ${inst.newFilings} new 13F filing(s), ${cong.inserted} congress trade(s) [${cong.source}], ${inst.alerts + cong.alerts} alert(s)`);
@@ -278,4 +300,4 @@ async function pollSmartMoney() {
   }
 }
 
-module.exports = { pollSmartMoney, pollInstitutions, pollCongress, emitEvent, polKey };
+module.exports = { pollSmartMoney, pollInstitutions, pollCongress, backfillHoldingTickers, emitEvent, polKey };
