@@ -105,6 +105,26 @@
       <tr><td>initial_cash</td><td>no</td><td>default 100000</td></tr>
     </table>
 
+    <h3><span class="method post">POST</span>/v1/walk-forward</h3>
+    <p>Robustness check. Same body as <code>/v1/backtest</code> plus <code>n_splits</code> (2–12, default 4)
+    and <code>scheme</code> (<code>anchored</code> | <code>rolling</code>). The range is cut into folds; the
+    same fixed rules run on each in-sample window and on the unseen window after it. Returns per-fold metrics
+    and a verdict: <code>robust</code>, <code>moderate</code>, <code>fragile</code> or
+    <code>insufficient_data</code>. Heavy limit (it runs 2 × n_splits backtests).</p>
+
+    <h3><span class="method get">GET</span>/v1/strategies/seniq-presets</h3>
+    <p>Ready-made strategy templates built on SenIQ signals: news sentiment, congress disclosures and tracked
+    funds' 13F filings. Each carries a <code>data_depth</code> note saying how much history its signal has.
+    <code>POST /v1/strategies/seniq-presets/:id</code> returns the Builder spec, with inputs such as
+    <code>{"politician": "…"}</code> filled in.</p>
+
+    <h3><span class="method post">POST</span>/v1/strategies/compare</h3>
+    <p>Did the SenIQ signal help? Same body as <code>/v1/backtest</code> with a <code>custom</code> spec. The
+    strategy is backtested twice over the same symbol and dates, as written and with every SenIQ condition
+    removed, and both results come back with the difference, buy-and-hold, and <code>seniq_coverage</code>.
+    Read <code>notes</code>: low coverage or a handful of trades make the difference meaningless. Heavy limit
+    (2 backtests).</p>
+
     <h3><span class="method post">POST</span>/v1/signals</h3>
     <p>Current rule state (long/flat, last signal, fired-on-latest-bar) across up to 5 symbols.</p>
     <pre><code>curl -X POST https://YOUR-HOST/v1/signals \
@@ -125,11 +145,58 @@
     <p>Replay a deployment from its deploy date to now (or to when it was stopped): current
     equity, open position, trade log, metrics. Read-only — deploying and stopping stay in the app.</p>
 
+    <h2>Writing (keys with write access only)</h2>
+    <p>Keys are read-only unless created with the write option in Profile → API Access. A write key can save
+    strategies and start or stop paper deployments — virtual money only, no real orders, and nothing can be
+    deleted through the API. A read-only key gets <code>403</code>.</p>
+    <h3><span class="method post">POST</span>/v1/strategies/saved</h3>
+    <p>Body: <code>{name, custom | strategy, params?, symbols?}</code>. Max 20 saved strategies.</p>
+    <h3><span class="method post">POST</span>/v1/paper</h3>
+    <p>Body: <code>{strategy_id, symbol, exchange?, initial_cash?}</code>. Max 10 active deployments.</p>
+    <h3><span class="method post">POST</span>/v1/paper/:id/stop</h3>
+    <p>Freezes a deployment; its record and trades are kept.</p>
+
+    <h2>SenIQ data</h2>
+    <p>Your portfolio and SenIQ's news, sentiment and smart-money data. All <code>GET</code>, all on the
+    light limit. A <code>ticker</code> may be anything you hold or any asset SenIQ tracks; endpoints
+    without a ticker cover your own holdings. Smart-money disclosures lag the trades by weeks — every
+    row carries its dates.</p>
+    <h3><span class="method get">GET</span>/v1/portfolio</h3>
+    <p>Holdings with exposure %, weight %, live price, day change % and current sentiment.</p>
+    <h3><span class="method get">GET</span>/v1/portfolio/attribution</h3>
+    <p>Why the portfolio is up or down today: each holding's contribution in percentage points.</p>
+    <h3><span class="method get">GET</span>/v1/events</h3>
+    <p>Your impact-ranked news feed. Query: <code>limit</code> (1–10, default 5).</p>
+    <h3><span class="method get">GET</span>/v1/tickers/:ticker/news</h3>
+    <p>Recent events for one ticker with type, source count and sentiment. Query: <code>days</code>.</p>
+    <h3><span class="method get">GET</span>/v1/tickers/:ticker/sentiment</h3>
+    <p>Acute score, momentum and the z-score against the ticker's own 90-day baseline.</p>
+    <h3><span class="method get">GET</span>/v1/tickers/:ticker/sentiment/drivers</h3>
+    <p>The stories behind the score: each one's exact contribution to the z-score, with weight, source and date. Query: <code>limit</code> (1–8, default 5).</p>
+    <h3><span class="method get">GET</span>/v1/smart-money</h3>
+    <p>Congress trades and 13F position changes. Query: <code>ticker</code> (optional — defaults to your holdings).</p>
+    <h3><span class="method get">GET</span>/v1/news/market</h3>
+    <p>Market-wide and macro events. Query: <code>days</code>.</p>
+    <h3><span class="method get">GET</span>/v1/news/search</h3>
+    <p>Search news by topic. Returns stories ranked by match and by impact on your portfolio. Query: <code>query</code> (required), <code>ticker</code>, <code>days</code>.</p>
+    <h3><span class="method get">GET</span>/v1/disclosures</h3>
+    <p>SEC 8-K filings (primary sources) for your US-listed holdings, with filing dates and a text excerpt.
+    Query: <code>ticker</code>, <code>query</code> (search filing text), <code>days</code> (1–180),
+    <code>id</code> (open one filing). Not available for Indian stocks, crypto or commodities.</p>
+    <h3><span class="method get">GET</span>/v1/news/stories/:id</h3>
+    <p>The articles behind one story from a search. Query: <code>ticker</code> (only if you searched a ticker you don't hold).</p>
+    <pre><code>curl -H "Authorization: Bearer seniq_…" \
+  "https://YOUR-HOST/v1/tickers/NVDA/sentiment"</code></pre>
+
     <h2>MCP server (AI agents)</h2>
     <p>The same surface is available to MCP-capable agents (Claude Desktop, Claude Code, etc.) at
     <code>POST /mcp</code> (Streamable HTTP) using the same key — tools:
-    <code>list_strategies · validate_strategy · run_backtest · get_signals ·
-    list_saved_strategies · list_paper_deployments · get_paper_state</code>.</p>
+    <code>list_strategies · validate_strategy · run_backtest · run_walk_forward · get_signals ·
+    list_seniq_presets · get_seniq_preset · compare_without_seniq ·
+    list_saved_strategies · list_paper_deployments · get_paper_state</code>, plus the data tools
+    <code>get_portfolio_overview · get_attribution · get_top_events · get_ticker_news ·
+    get_sentiment · explain_sentiment · get_smart_money · get_market_news · search_news · get_story_detail · get_disclosures</code>. Keys with write access also get
+    <code>save_strategy · start_paper_deployment · stop_paper_deployment</code>.</p>
     <pre><code>{
   "mcpServers": {
     "seniq": {

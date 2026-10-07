@@ -22,6 +22,7 @@ const { generateAlerts } = require('./services/materiality');
 const { recomputeImpacts } = require('./services/impactScoring');
 const { logEventFeatures, resolveOutcomes } = require('./services/outcomes');
 const { pollSmartMoney } = require('./services/smartMoney');
+const { syncDisclosures } = require('./services/disclosures');
 const { generateDailyBriefs } = require('./services/reports');
 const { embedPendingArticles } = require('./services/newsSearch');
 const { purgeOldThreads } = require('./services/askThreads');
@@ -166,6 +167,16 @@ async function runSmartMoneyPoll() {
     await pollSmartMoney();
   } catch (err) {
     console.error('Smart-money poll error:', err);
+    captureException(err);
+  }
+  // Company filings (SEC 8-K) for held US stocks ride the same cadence — same source, same
+  // rate limit — but a failure here must not look like a smart-money failure.
+  try {
+    const d = await syncDisclosures();
+    if (d.inserted) console.log(`   📄 filings: ${d.inserted} new 8-K(s) across ${d.checked} ticker(s)`);
+    if (d.error) console.warn(`   ⚠️  filings: ${d.error}`);
+  } catch (err) {
+    console.error('Disclosure sync error:', err);
     captureException(err);
   }
 }

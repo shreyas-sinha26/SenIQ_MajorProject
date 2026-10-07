@@ -21,7 +21,8 @@ const HOUR = 3600 * 1000;
 const heavyLimiter = makeLimiter({ limit: 30, windowMs: HOUR });  // backtest / signals / paper replay
 const lightLimiter = makeLimiter({ limit: 240, windowMs: HOUR }); // catalog / validate / listings
 
-// Authorization header → { ok:true, ctx:{userId, keyId} } | { ok:false, status, message }.
+// Authorization header → { ok:true, ctx:{userId, keyId, canWrite} } | { ok:false, status, message }.
+// canWrite = the key may save strategies and start/stop paper deployments (0018).
 async function resolveApiKey(authorizationHeader) {
   const key = (authorizationHeader || '').replace(/^Bearer\s+/i, '');
   if (!looksLikeKey(key)) {
@@ -31,7 +32,7 @@ async function resolveApiKey(authorizationHeader) {
     };
   }
   const row = await queryOne(
-    `SELECT k.id AS key_id, k.user_id, u.subscription_tier, u.is_admin
+    `SELECT k.id AS key_id, k.user_id, k.can_write, u.subscription_tier, u.is_admin
        FROM api_keys k JOIN users u ON u.id = k.user_id
       WHERE k.key_hash = $1 AND k.revoked_at IS NULL`,
     [hashKey(key)]);
@@ -43,7 +44,7 @@ async function resolveApiKey(authorizationHeader) {
   }
 
   execute('UPDATE api_keys SET last_used_at = now() WHERE id = $1', [row.key_id]).catch(() => {});
-  return { ok: true, ctx: { userId: row.user_id, keyId: row.key_id } };
+  return { ok: true, ctx: { userId: row.user_id, keyId: row.key_id, canWrite: !!row.can_write } };
 }
 
 module.exports = { resolveApiKey, heavyLimiter, lightLimiter };

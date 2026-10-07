@@ -1,6 +1,7 @@
 /**
- * Public REST API (/v1) — the same read+run surface the MCP server exposes,
- * as plain JSON endpoints for scripts, notebooks, and integrations.
+ * Public REST API (/v1) — the same read+run surface the MCP server exposes
+ * (strategy engine + SenIQ data tools), as plain JSON endpoints for scripts,
+ * notebooks, and integrations.
  *
  * Auth: per-user API key ("Authorization: Bearer seniq_…", managed in
  * Profile → API Access), Pro-gated. Rate limits are SHARED with /mcp — one
@@ -15,6 +16,9 @@ const { DISCLAIMER, STRATEGY_SERVICE } = require('../config');
 const { resolveApiKey, heavyLimiter, lightLimiter } = require('../services/apiKeyGate');
 const { callService, flattenDetail, cleanSymbols, iso, MAX_WATCH_SYMBOLS, WARMUP_DAYS } = require('../services/strategyClient');
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
+const { DATA_TOOLS, runDataTool } = require('../services/dataTools');
+const { saveStrategy, deployPaper, stopPaper } = require('../services/strategyStore');
+const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../services/strategySignals');
 
 const router = express.Router();
 
@@ -59,12 +63,21 @@ router.get('/', gate(lightLimiter), (req, res) => {
     endpoints: [
       'GET  /v1/strategies',
       'POST /v1/strategies/validate',
+      'GET  /v1/strategies/seniq-presets',
+      'POST /v1/strategies/seniq-presets/:id',
       'POST /v1/backtest',
+      'POST /v1/strategies/compare',
+      'POST /v1/walk-forward',
       'POST /v1/signals',
       'GET  /v1/strategies/saved',
       'GET  /v1/paper',
       'GET  /v1/paper/:id/state',
+      ...DATA_TOOLS.map((t) => `GET  ${t.rest}`),
+      'POST /v1/strategies/saved        (write key)',
+      'POST /v1/paper                   (write key)',
+      'POST /v1/paper/:id/stop          (write key)',
     ],
+    key: { can_write: req.apiCtx.canWrite },
     rate_limits: {
       heavy: `${heavyLimiter.limit}/hour (backtest, signals, paper state)`,
       light: `${lightLimiter.limit}/hour (everything else)`,
@@ -110,6 +123,22 @@ router.post('/backtest', gate(heavyLimiter), async (req, res) => {
       seniq_data: seniqData,
     },
   }));
+});
+
+// ─── SenIQ presets + the with/without-SenIQ comparison ───────
+// GET  /v1/strategies/seniq-presets          ready-made specs that use SenIQ signals
+// POST /v1/strategies/seniq-presets/:id      that spec with inputs filled in ({politician})
+// POST /v1/strategies/compare                {custom, symbol, start_date, end_date, …} → both runs
+router.get('/strategies/seniq-presets', gate(lightLimiter), (req, res) => res.json({ presets: listPresets() }));
+router.post('/strategies/seniq-presets/:id', gate(lightLimiter), (req, res) => {
+  const out = instantiatePreset(req.params.id, req.body || {});
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  res.json({ spec: out.spec, preset: out.preset });
+});
+router.post('/strategies/compare', gate(heavyLimiter), async (req, res) => {
+  const out = await compareWithoutSeniq(req.body || {});
+  if (out.ok) return res.json(out.data);
+  res.status(out.status).json({ error: out.error });
 });
 
 // ─── POST /v1/signals — current rule state across ≤5 symbols ─
@@ -188,6 +217,61 @@ router.get('/paper/:id/state', gate(heavyLimiter), async (req, res) => {
     },
   }));
 });
+
+// ─── POST /v1/walk-forward — out-of-sample robustness check ──
+// Body: the /v1/backtest body plus n_splits? (2–12, default 4) and scheme? (anchored | rolling).
+router.post('/walk-forward', gate(heavyLimiter), async (req, res) => {
+  const b = req.body || {};
+  if ((!b.strategy && !b.custom) || !b.symbol || !b.start_date || !b.end_date) {
+    return res.status(400).json({ error: 'strategy (or custom), symbol, start_date and end_date are required' });
+  }
+  passthrough(res, await callService('/api/walk-forward', {
+    method: 'POST',
+    body: {
+      strategy: b.strategy || null, custom: b.custom || null, params: b.params || {},
+      symbol: b.symbol, exchange: b.exchange || 'US', start_date: b.start_date, end_date: b.end_date,
+      n_splits: Number(b.n_splits) || 4, scheme: b.scheme || 'anchored',
+      seniq_data: b.custom ? await seniqDataIfNeeded(b.custom, b.symbol) : null,
+    },
+  }));
+});
+
+// ─── Writes — only for keys created with the write permission ──
+// Saved strategies and virtual-money deployments only; nothing here deletes.
+function requireWrite(req, res, next) {
+  if (req.apiCtx.canWrite) return next();
+  res.status(403).json({ error: 'This API key is read-only — create a key with write access in Profile → API Access.' });
+}
+const sendStore = (res, out, okStatus = 200) =>
+  (out.ok ? res.status(okStatus).json(out.data) : res.status(out.status).json({ error: out.error }));
+
+router.post('/strategies/saved', gate(lightLimiter), requireWrite, async (req, res) => {
+  sendStore(res, await saveStrategy(req.apiCtx.userId, req.body || {}), 201);
+});
+router.post('/paper', gate(lightLimiter), requireWrite, async (req, res) => {
+  sendStore(res, await deployPaper(req.apiCtx.userId, req.body || {}), 201);
+});
+router.post('/paper/:id/stop', gate(lightLimiter), requireWrite, async (req, res) => {
+  sendStore(res, await stopPaper(req.apiCtx.userId, req.params.id));
+});
+
+// ─── SenIQ data (same tools as /mcp; see services/dataTools.js) ──
+// GET /v1/portfolio · /v1/portfolio/attribution · /v1/events?limit= ·
+// /v1/tickers/:ticker/news?days= · /v1/tickers/:ticker/sentiment ·
+// /v1/smart-money?ticker= · /v1/news/market?days= · /v1/news/search?query=&ticker=&days=
+for (const tool of DATA_TOOLS) {
+  router.get(tool.rest.replace(/^\/v1/, ''), gate(lightLimiter), async (req, res) => { // router is mounted at /v1
+    const args = {};
+    for (const [arg, spec] of Object.entries(tool.args)) {
+      const raw = req.params[arg] ?? req.query[arg];
+      if (raw == null || raw === '') continue;
+      args[arg] = spec.type === 'integer' ? Number(raw) : String(raw);
+    }
+    const out = await runDataTool(req.apiCtx.userId, tool.name, args);
+    if (out.ok) return res.json(out.data);
+    res.status(out.status).json({ error: out.error });
+  });
+}
 
 // Unknown /v1 path → JSON 404 (not the SPA fallback).
 router.use((req, res) => {

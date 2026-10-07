@@ -15,7 +15,7 @@ const { attachTier, requireTier } = require('../middleware/tier');
 const { STRATEGY_SERVICE } = require('../config');
 const { seniqDataIfNeeded } = require('../services/signalHistory');
 
-const MAX_ACTIVE_DEPLOYMENTS = 10;
+const { deployPaper, stopPaper, MAX_ACTIVE_DEPLOYMENTS } = require('../services/strategyStore');
 const WARMUP_DAYS = 400; // history handed to the engine for indicator warmup
 
 const router = express.Router();
@@ -70,33 +70,9 @@ router.get('/', async (req, res) => {
 
 // POST /api/paper — deploy a SAVED strategy on one symbol with paper cash.
 router.post('/', async (req, res) => {
-  const { strategy_id, symbol, exchange, initial_cash } = req.body || {};
-  const sym = String(symbol || '').trim().toUpperCase().slice(0, 20);
-  if (!strategy_id || !sym) return res.status(400).json({ error: 'strategy_id and symbol are required' });
-  const cash = Number(initial_cash || 100000);
-  if (!(cash >= 1000 && cash <= 100000000)) return res.status(400).json({ error: 'initial_cash must be between 1,000 and 100,000,000' });
-
-  const active = await queryOne(
-    `SELECT COUNT(*)::int AS n FROM paper_deployments WHERE user_id = $1 AND status = 'active'`, [req.user.id]);
-  if (active.n >= MAX_ACTIVE_DEPLOYMENTS) {
-    return res.status(400).json({ error: `Limit reached (${MAX_ACTIVE_DEPLOYMENTS} active deployments) — stop one first.` });
-  }
-
-  const strat = await queryOne(
-    'SELECT * FROM user_strategies WHERE id = $1 AND user_id = $2', [strategy_id, req.user.id]);
-  if (!strat) return res.status(404).json({ error: 'saved strategy not found' });
-
-  // Snapshot the definition so later edits/deletes of the saved strategy
-  // can't rewrite this deployment's track record.
-  const row = await queryOne(
-    `INSERT INTO paper_deployments
-       (user_id, name, kind, spec, strategy_name, params, symbol, exchange, initial_cash)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-    [req.user.id, strat.name, strat.kind,
-     strat.spec ? JSON.stringify(strat.spec) : null,
-     strat.strategy_name, strat.params ? JSON.stringify(strat.params) : null,
-     sym, String(exchange || 'US').trim().toUpperCase().slice(0, 12), cash]);
-  res.status(201).json(rowToJson(row));
+  const out = await deployPaper(req.user.id, req.body || {});
+  if (!out.ok) return res.status(out.status).json({ error: out.error });
+  res.status(201).json(out.data);
 });
 
 // POST /api/paper/:id/state — replay deploy→now (or →stopped_at) and return
@@ -141,12 +117,9 @@ router.post('/:id/state', async (req, res) => {
 
 // POST /api/paper/:id/stop — freeze the deployment (state replays →stopped_at).
 router.post('/:id/stop', async (req, res) => {
-  const row = await queryOne(
-    `UPDATE paper_deployments SET status = 'stopped', stopped_at = CURRENT_DATE
-     WHERE id = $1 AND user_id = $2 AND status = 'active' RETURNING *`,
-    [req.params.id, req.user.id]);
-  if (!row) return res.status(404).json({ error: 'active deployment not found' });
-  res.json(rowToJson(row));
+  const out = await stopPaper(req.user.id, req.params.id);
+  if (!out.ok) return res.status(out.status).json({ error: out.error });
+  res.json(out.data);
 });
 
 // DELETE /api/paper/:id

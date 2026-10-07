@@ -9,7 +9,8 @@ const { isUrl, scrapeArticle } = require('../services/articleScraper');
 const { explainForPortfolio } = require('../services/ollamaExplainer');
 const { scoreTicker } = require('../services/sentimentScoring');
 const { getImpactFeed } = require('../services/impactScoring');
-const { attachTier } = require('../middleware/tier');
+const { attachTier, requireTier } = require('../middleware/tier');
+const { EXECUTORS: ASK_TOOLS, ScopeError } = require('../services/qaTools');
 
 const router = express.Router();
 router.use(authMiddleware, attachTier);
@@ -135,6 +136,22 @@ router.get('/sentiment/:ticker', async (req, res) => {
   } catch (err) {
     console.error('Sentiment error:', err);
     res.status(500).json({ error: 'Failed to analyze sentiment' });
+  }
+});
+
+// ─── GET /api/news/sentiment/:ticker/drivers ─────────────────
+// "Why is the score what it is?" — the stories behind a held ticker's sentiment, each with
+// its exact share of the z-score. Same code path as Ask's explain_sentiment tool, including
+// its holdings check. Plus and above (the z-score baseline is a Plus feature).
+router.get('/sentiment/:ticker/drivers', requireTier('plus'), async (req, res) => {
+  try {
+    const held = await query('SELECT ticker FROM portfolio WHERE user_id = $1', [req.user.id]);
+    const ctx = { userId: req.user.id, heldSet: new Set(held.map((h) => h.ticker)) };
+    res.json(await ASK_TOOLS.explain_sentiment({ ticker: req.params.ticker, limit: 5 }, ctx));
+  } catch (err) {
+    if (err instanceof ScopeError) return res.status(404).json({ error: 'That ticker is not in your portfolio.' });
+    console.error('Sentiment drivers error:', err);
+    res.status(500).json({ error: 'Failed to load sentiment drivers' });
   }
 });
 

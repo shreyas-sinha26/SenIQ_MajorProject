@@ -16,13 +16,22 @@
  *                  5th bad article on a chronically-negative name is not (kills spam)
  *   - volume     : how many distinct sources covered the event (confirmation)
  *
+ *   - event type : an earnings miss, lawsuit or takeover outranks an opinion piece
+ *                  (config.EVENT_TYPES.SEVERITY)
+ *
  * Dedupe is by (user_id, cluster_key): the cluster groups duplicates, so the same
  * event never alerts twice.
+ *
+ * Market/world news is handled as STORIES, not events. One rate decision arrives as a
+ * dozen differently-worded headlines that the duplicate clustering cannot merge; each
+ * used to alert on its own. Related headlines from the same market are now grouped, a
+ * user gets ONE alert per story per day, and it pushes in real time only when the story
+ * is confirmed by several reports and the user actually has money in that market.
  */
 
 // db + portfolioService lazy-required inside the async functions so the pure
 // planDeliveries / scoring helpers are importable/testable without a database.
-const { MATERIALITY, ALERT_BUDGET } = require('../config');
+const { MATERIALITY, ALERT_BUDGET, EVENT_TYPES } = require('../config');
 const { scoreTicker } = require('./sentimentScoring');
 
 const round = (n, d = 3) => Math.round(n * 10 ** d) / 10 ** d;
@@ -48,14 +57,14 @@ async function loadRecentClusters() {
   const { query } = require('../db');
   const rows = await query(
     `SELECT e.id AS event_id, e.title, e.relevance_tier AS tier, e.importance, e.source_count,
-            e.first_seen,
+            e.first_seen, e.event_type, e.source,
             s.ticker, avg(s.sentiment_score) AS score, max(s.confidence) AS confidence
        FROM events e
        JOIN articles a ON a.event_id = e.id
        JOIN article_sentiments s ON s.article_id = a.id
       WHERE e.relevance_tier <> 'none'
         AND e.last_seen > now() - ($1 || ' hours')::interval
-      GROUP BY e.id, e.title, e.relevance_tier, e.importance, e.source_count, e.first_seen, s.ticker`,
+      GROUP BY e.id, e.title, e.relevance_tier, e.importance, e.source_count, e.first_seen, e.event_type, e.source, s.ticker`,
     [String(MATERIALITY.LOOKBACK_HOURS)]
   );
 
@@ -70,6 +79,8 @@ async function loadRecentClusters() {
         importance: Number(r.importance) || 0,
         sourceCount: Number(r.source_count) || 1,
         firstSeen: r.first_seen,
+        eventType: r.event_type || 'unknown',
+        source: r.source || '',
         tickers: {},
       };
       events.set(r.event_id, c);
@@ -87,6 +98,7 @@ function holdingMateriality(cluster, exposureByTicker, zByTicker) {
   let signed = 0;
   let topTicker = null;
   let topContribution = 0;
+  let topConfidence = 0;
   for (const [ticker, s] of Object.entries(cluster.tickers)) {
     const exp = exposureByTicker[ticker];
     if (exp == null) continue; // user doesn't hold it
@@ -99,9 +111,125 @@ function holdingMateriality(cluster, exposureByTicker, zByTicker) {
     if (contribution > topContribution) {
       topContribution = contribution;
       topTicker = ticker;
+      topConfidence = s.confidence || 0;
     }
   }
-  return { score: round(m * volumeBoost(cluster.sourceCount)), direction: dirLabel(signed), topTicker };
+  return {
+    score: round(m * volumeBoost(cluster.sourceCount) * typeFactor(cluster.eventType)),
+    direction: dirLabel(signed), topTicker, topConfidence,
+  };
+}
+
+// Earnings, legal action, M&A or a CEO change matter more than commentary.
+function typeFactor(eventType) {
+  const sev = EVENT_TYPES.SEVERITY[eventType] ?? EVENT_TYPES.SEVERITY.unknown;
+  return MATERIALITY.TYPE_BASE + sev;
+}
+
+// ─── Market/world stories ────────────────────────────────────────────────────
+// Words too common in market headlines to say what a story is about.
+const STORY_STOP = new Set([
+  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'has', 'have', 'had', 'will',
+  'not', 'but', 'its', 'into', 'over', 'amid', 'after', 'before', 'more', 'than', 'what', 'why', 'how',
+  'who', 'when', 'where', 'next', 'new', 'now', 'says', 'said', 'say', 'see', 'seen', 'sees', 'expert',
+  'market', 'stock', 'share', 'investor', 'trade', 'trading', 'today', 'live', 'update', 'news', 'report',
+  'outcome', 'impact', 'meeting', 'meet', 'week', 'month', 'year', 'day', 'top', 'key', 'big', 'can',
+  'could', 'may', 'should', 'would', 'here', 'check', 'list', 'means', 'mean', 'another', 'all', 'out',
+  'nifty', 'sensex', 'index', 'indice', 'point', 'pts', 'bps', 'cent', 'percent', 'crore', 'lakh',
+  'rise', 'fall', 'gain', 'drop', 'slip', 'jump', 'surge', 'high', 'low', 'higher', 'lower', 'end', 'open', 'close',
+]);
+// Crude stemmer: "hike" / "hikes" / "hiked" / "hiking" must all collide ("hik").
+function stemWord(w) {
+  if (w.length > 4 && w.endsWith('ing')) w = w.slice(0, -3);
+  else if (w.length > 4 && w.endsWith('ed')) w = w.slice(0, -2);
+  else if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) w = w.slice(0, -1);
+  if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1);
+  return w;
+}
+
+// Key words of a headline: lowercase, stemmed, no numbers, no market filler.
+function storyTokens(title = '') {
+  const out = new Set();
+  for (const raw of String(title).toLowerCase().replace(/['’]s\b/g, '').replace(/[^a-z\s]/g, ' ').split(/\s+/)) {
+    if (raw.length < 3) continue;
+    const t = stemWord(raw);
+    if (t.length >= 3 && !STORY_STOP.has(t) && !STORY_STOP.has(raw)) out.add(t);
+  }
+  return out;
+}
+
+// Which market a broad headline is about. Coarse on purpose: it decides whose
+// portfolio the story concerns and stops a Fed story merging with an RBI one.
+const IN_SOURCE = /economictimes|livemint|moneycontrol|business-standard|financialexpress|cnbctv18|ndtv|thehindu|zeebiz|businesstoday/i;
+const IN_WORDS = /\b(rbi|sebi|rupee|sensex|nifty|gst|india|indian|dalal street|mpc)\b/i;
+const US_WORDS = /\b(fed|fomc|federal reserve|wall street|nasdaq|dow|s&p 500|treasury|us market|u\.s\.)\b/i;
+function regionOf(title = '', source = '') {
+  if (US_WORDS.test(title)) return 'US';
+  if (IN_WORDS.test(title) || IN_SOURCE.test(source)) return 'IN';
+  return 'GLOBAL';
+}
+
+function sameStory(a, b) {
+  if (a.region !== b.region) return false;
+  let shared = 0;
+  for (const t of a.tokens) if (b.tokens.has(t) && ++shared >= MATERIALITY.STORY_SHARED_TOKENS) return true;
+  return false;
+}
+
+/**
+ * Group broad events into stories. Greedy: the most important headline leads; a
+ * later one joins the first story it shares enough key words with (any member), so a
+ * story can chain "RBI hikes rates" → "rate hike impact on banks". Pure.
+ * story = { lead, events, region, importance, coverage, members:[{tokens, region}] }
+ */
+function groupStories(events) {
+  const sorted = events.slice().sort((a, b) =>
+    (b.importance - a.importance) || (b.sourceCount - a.sourceCount) ||
+    (new Date(a.firstSeen || 0) - new Date(b.firstSeen || 0)));
+  const stories = [];
+  for (const ev of sorted) {
+    const member = { tokens: storyTokens(ev.title), region: regionOf(ev.title, ev.source) };
+    const home = stories.find((st) => st.members.some((m) => sameStory(m, member)));
+    if (home) {
+      home.events.push(ev);
+      home.members.push(member);
+      home.coverage += ev.sourceCount || 1;
+    } else {
+      stories.push({ lead: ev, events: [ev], region: member.region, importance: ev.importance, coverage: ev.sourceCount || 1, members: [member] });
+    }
+  }
+  return stories;
+}
+
+// % of a portfolio (by exposure) sitting in each market. Crypto and commodities are
+// GLOBAL: they belong to no single country's market story.
+function regionExposure(holdings, countryByTicker = {}) {
+  const out = { IN: 0, US: 0, GLOBAL: 0 };
+  for (const h of holdings) {
+    const ex = String(h.exchange || '').toUpperCase();
+    const region = h.asset_class && h.asset_class !== 'equity' ? 'GLOBAL'
+      : countryByTicker[h.ticker] === 'IN' || ex === 'NSE' || ex === 'BSE' ? 'IN'
+      : countryByTicker[h.ticker] === 'US' || ['US', 'NASDAQ', 'NYSE', ''].includes(ex) ? 'US'
+      : 'GLOBAL';
+    out[region] += h.exposure_pct ?? 0;
+  }
+  return out;
+}
+
+/**
+ * Score one story for one user. `share` = % of their portfolio in the story's market
+ * (a GLOBAL story concerns everyone). Returns null when the story is not alert-worthy
+ * at all; otherwise its priority and whether it may push in real time. Pure.
+ */
+function scoreStory(story, share) {
+  const strength = story.importance * volumeBoost(story.coverage);
+  if (strength < MATERIALITY.BROAD_THRESHOLD) return null;
+  const concerns = story.region === 'GLOBAL' ? 100 : share;
+  return {
+    priority: round(strength * (0.5 + Math.min(concerns, 100) / 200)),
+    realtimeEligible: story.coverage >= MATERIALITY.BROAD_REALTIME_MIN_COVERAGE
+      && concerns >= MATERIALITY.BROAD_MIN_REGION_EXPOSURE,
+  };
 }
 
 /**
@@ -128,10 +256,14 @@ function inQuietWindow(hour, b) {
  * `.delivery` set. Highest-priority candidates claim the scarce realtime slots first;
  * everything else is recorded as 'digest' (nothing is dropped).
  *
- * state = { sentTodayByUser:{uid:n}, cooldownByUser:{uid:Set<ticker>}, nowHour, budget }
+ * state = { sentTodayByUser:{uid:n}, sentBroadTodayByUser:{uid:n},
+ *           cooldownByUser:{uid:Set<ticker>}, nowHour, budget }
+ * A candidate with realtimeEligible === false is always digest (recorded, never pushed).
+ * Market/world alerts (ticker 'MARKET') also have their own smaller daily cap, so a
+ * busy macro day cannot use up the slots meant for the user's own holdings.
  */
 function planDeliveries(candidates, state) {
-  const { sentTodayByUser = {}, cooldownByUser = {}, nowHour = 0, budget } = state;
+  const { sentTodayByUser = {}, sentBroadTodayByUser = {}, cooldownByUser = {}, nowHour = 0, budget } = state;
   const quiet = inQuietWindow(nowHour, budget);
   const byUser = new Map();
   for (const c of candidates) {
@@ -141,15 +273,21 @@ function planDeliveries(candidates, state) {
   for (const [uid, list] of byUser) {
     list.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
     let realtimeCount = sentTodayByUser[uid] || 0;
+    let broadCount = sentBroadTodayByUser[uid] || 0;
+    const broadCap = budget.MAX_BROAD_REALTIME_PER_DAY ?? Infinity;
     const cooldown = new Set(cooldownByUser[uid] || []);
     for (const c of list) {
       const isTicker = c.ticker && c.ticker !== 'MARKET';
+      const isBroad = c.ticker === 'MARKET';
       if (quiet) c.delivery = 'digest';
+      else if (c.realtimeEligible === false) c.delivery = 'digest';
       else if (isTicker && cooldown.has(c.ticker)) c.delivery = 'digest';
       else if (realtimeCount >= budget.MAX_REALTIME_PER_DAY) c.delivery = 'digest';
+      else if (isBroad && broadCount >= broadCap) c.delivery = 'digest';
       else {
         c.delivery = 'realtime';
         realtimeCount++;
+        if (isBroad) broadCount++;
         if (isTicker) cooldown.add(c.ticker);
       }
     }
@@ -159,9 +297,13 @@ function planDeliveries(candidates, state) {
 
 /**
  * Generate event-level alerts for the current ingest pass.
- * Returns the number of alert rows written.
+ * Returns { total, realtime } for the rows written.
+ *
+ * opts.dryRun          — plan and return the candidates (with .delivery) without writing
+ *                        or emailing; used to replay a day when tuning thresholds.
+ * opts.ignoreExisting  — with dryRun: pretend no alerts exist yet (a fresh day).
  */
-async function generateAlerts() {
+async function generateAlerts(opts = {}) {
   const { query, execute } = require('../db');
   const { getWeightedHoldings } = require('./portfolioService');
   const clusters = await loadRecentClusters();
@@ -184,11 +326,15 @@ async function generateAlerts() {
 
   // Exposure map per user (once).
   const exposureByUser = {};
+  const regionByUser = {};
+  const countryByTicker = Object.fromEntries(
+    (await query('SELECT ticker, country FROM companies')).map((r) => [r.ticker, r.country]));
   for (const uid of userIds) {
     const holdings = await getWeightedHoldings(uid);
     const map = {};
     for (const h of holdings) map[h.ticker] = h.exposure_pct ?? 0;
     exposureByUser[uid] = map;
+    regionByUser[uid] = regionExposure(holdings, countryByTicker);
   }
 
   // Monitoring-since watermarks (E4): an event alerts a holding only if it post-dates
@@ -206,11 +352,22 @@ async function generateAlerts() {
 
   // Pre-load existing (user, event) alerts so we never double-fire an event.
   const eventIds = clusters.map((c) => c.event_id);
-  const existing = await query(
+  const existing = opts.ignoreExisting ? [] : await query(
     'SELECT user_id, event_id FROM alerts WHERE event_id = ANY($1)',
     [eventIds]
   );
   const alreadyAlerted = new Set(existing.map((e) => `${e.user_id}|${e.event_id}`));
+
+  // Market/world stories each user was already told about in the last day — a new
+  // headline on the same story must not alert again.
+  const toldByUser = {};
+  if (!opts.ignoreExisting) {
+    for (const r of await query(
+      `SELECT a.user_id, e.title, e.source FROM alerts a JOIN events e ON e.id = a.event_id
+        WHERE a.alert_type IN ('market_event', 'world_event') AND a.created_at > now() - interval '24 hours'`)) {
+      (toldByUser[r.user_id] ||= []).push({ tokens: storyTokens(r.title), region: regionOf(r.title, r.source) });
+    }
+  }
 
   const toInsert = [];
   for (const ev of clusters) {
@@ -221,7 +378,7 @@ async function generateAlerts() {
       for (const uid of userIds) {
         const key = `${uid}|${ev.event_id}`;
         if (alreadyAlerted.has(key)) continue;
-        const { score, direction, topTicker } = holdingMateriality(ev, exposureByUser[uid], zByTicker);
+        const { score, direction, topTicker, topConfidence } = holdingMateriality(ev, exposureByUser[uid], zByTicker);
         if (score < MATERIALITY.HOLDING_THRESHOLD || !topTicker) continue;
         // E4: skip old news for a freshly-added holding (still visible in the feed).
         if (!isPostWatermark(ev.firstSeen, watermarkByUserTicker[uid]?.[topTicker])) continue;
@@ -235,6 +392,7 @@ async function generateAlerts() {
           score: ev.tickers[topTicker]?.score ?? 0.5,
           message: `${icon} ${topTicker} — ${ev.title}${srcNote}`,
           priority: score,
+          realtimeEligible: topConfidence >= MATERIALITY.REALTIME_MIN_CONFIDENCE,
           // Phase 9 email context (ignored by the alerts insert; used by the notifier).
           title: ev.title,
           direction,
@@ -243,34 +401,41 @@ async function generateAlerts() {
         });
         alreadyAlerted.add(key);
       }
-    } else {
-      // market / world: importance × volume, fired to everyone but gated harder.
-      const broad = ev.importance * volumeBoost(ev.sourceCount);
-      if (broad < MATERIALITY.BROAD_THRESHOLD) continue;
-      const icon = ev.tier === 'world' ? '🌍' : '📊';
-      const label = ev.tier === 'world' ? 'World' : 'Markets';
-      for (const uid of userIds) {
-        const key = `${uid}|${ev.event_id}`;
-        if (alreadyAlerted.has(key)) continue;
-        // E4: don't blast a brand-new user with market/world events that predate them.
-        if (!isPostWatermark(ev.firstSeen, minWatermarkByUser[uid] != null ? new Date(minWatermarkByUser[uid]) : null)) continue;
-        toInsert.push({
-          user_id: uid,
-          ticker: 'MARKET',
-          event_id: ev.event_id,
-          alert_type: ev.tier === 'world' ? 'world_event' : 'market_event',
-          label: 'neutral',
-          score: 0.5,
-          message: `${icon} ${label}: ${ev.title}${srcNote}`,
-          priority: broad,
-          // Phase 9 email context (ignored by the alerts insert; used by the notifier).
-          title: ev.title,
-          direction: 'neutral',
-          exposure_pct: null,
-          source_count: ev.sourceCount,
-        });
-        alreadyAlerted.add(key);
-      }
+    }
+  }
+
+  // Market / world: one alert per STORY per user, scored for that user.
+  const stories = groupStories(clusters.filter((c) => c.tier !== 'holding'));
+  for (const story of stories) {
+    const ev = story.lead;
+    const icon = ev.tier === 'world' ? '🌍' : '📊';
+    const label = ev.tier === 'world' ? 'World' : 'Markets';
+    const srcNote = story.coverage > 1 ? ` (${story.coverage} reports)` : '';
+    for (const uid of userIds) {
+      if (story.events.some((e) => alreadyAlerted.has(`${uid}|${e.event_id}`))) continue;
+      if ((toldByUser[uid] || []).some((told) => story.members.some((m) => sameStory(told, m)))) continue;
+      const scored = scoreStory(story, regionByUser[uid]?.[story.region] ?? 0);
+      if (!scored) continue;
+      // E4: don't blast a brand-new user with market/world events that predate them.
+      if (!isPostWatermark(ev.firstSeen, minWatermarkByUser[uid] != null ? new Date(minWatermarkByUser[uid]) : null)) continue;
+      toInsert.push({
+        user_id: uid,
+        ticker: 'MARKET',
+        event_id: ev.event_id,
+        alert_type: ev.tier === 'world' ? 'world_event' : 'market_event',
+        label: 'neutral',
+        score: 0.5,
+        message: `${icon} ${label}: ${ev.title}${srcNote}`,
+        priority: scored.priority,
+        realtimeEligible: scored.realtimeEligible,
+        // Phase 9 email context (ignored by the alerts insert; used by the notifier).
+        title: ev.title,
+        direction: 'neutral',
+        exposure_pct: null,
+        source_count: story.coverage,
+      });
+      alreadyAlerted.add(`${uid}|${ev.event_id}`);
+      (toldByUser[uid] ||= []).push(...story.members);
     }
   }
 
@@ -278,12 +443,13 @@ async function generateAlerts() {
 
   // Apply per-user budgets: only the top few push in realtime, rest are digest.
   const cd = String(ALERT_BUDGET.PER_TICKER_COOLDOWN_HOURS);
-  const sentRows = await query(
-    `SELECT user_id, count(*) c FROM alerts
+  const sentRows = opts.ignoreExisting ? [] : await query(
+    `SELECT user_id, count(*) c, count(*) FILTER (WHERE ticker = 'MARKET') broad FROM alerts
       WHERE delivery = 'realtime' AND created_at >= date_trunc('day', now()) GROUP BY user_id`
   );
   const sentTodayByUser = Object.fromEntries(sentRows.map((r) => [r.user_id, Number(r.c)]));
-  const cdRows = await query(
+  const sentBroadTodayByUser = Object.fromEntries(sentRows.map((r) => [r.user_id, Number(r.broad)]));
+  const cdRows = opts.ignoreExisting ? [] : await query(
     `SELECT DISTINCT user_id, ticker FROM alerts
       WHERE delivery = 'realtime' AND ticker <> 'MARKET'
         AND created_at > now() - ($1 || ' hours')::interval`,
@@ -293,7 +459,8 @@ async function generateAlerts() {
   for (const r of cdRows) (cooldownByUser[r.user_id] ||= new Set()).add(r.ticker);
 
   const nowHour = (new Date().getUTCHours() + ALERT_BUDGET.QUIET_TZ_OFFSET + 24) % 24;
-  planDeliveries(toInsert, { sentTodayByUser, cooldownByUser, nowHour, budget: ALERT_BUDGET });
+  planDeliveries(toInsert, { sentTodayByUser, sentBroadTodayByUser, cooldownByUser, nowHour, budget: ALERT_BUDGET });
+  if (opts.dryRun) return { total: toInsert.length, realtime: toInsert.filter((a) => a.delivery === 'realtime').length, candidates: toInsert };
 
   let realtime = 0;
   const emailable = [];
@@ -317,4 +484,20 @@ async function generateAlerts() {
   return { total: toInsert.length, realtime };
 }
 
-module.exports = { generateAlerts, loadRecentClusters, holdingMateriality, volumeBoost, planDeliveries, inQuietWindow, isPostWatermark };
+/**
+ * Delivery for an alert raised outside the news pipeline (smart money). These are rare
+ * and discrete so they skip the scoring, but they still share the user's daily
+ * real-time limit: once it is spent they are recorded as digest.
+ */
+async function deliveryForDiscreteAlert(userId) {
+  const { queryOne } = require('../db');
+  const row = await queryOne(
+    `SELECT count(*)::int AS n FROM alerts
+      WHERE user_id = $1 AND delivery = 'realtime' AND created_at >= date_trunc('day', now())`, [userId]);
+  return row.n < ALERT_BUDGET.MAX_REALTIME_PER_DAY ? 'realtime' : 'digest';
+}
+
+module.exports = {
+  generateAlerts, loadRecentClusters, holdingMateriality, volumeBoost, planDeliveries, inQuietWindow, isPostWatermark,
+  typeFactor, storyTokens, regionOf, sameStory, groupStories, regionExposure, scoreStory, deliveryForDiscreteAlert,
+};

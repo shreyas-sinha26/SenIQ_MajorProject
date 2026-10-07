@@ -22,6 +22,7 @@ function rowToJson(r) {
     id: r.id,
     name: r.name,
     key_prefix: r.key_prefix,
+    can_write: !!r.can_write,
     created_at: r.created_at,
     last_used_at: r.last_used_at,
     revoked: !!r.revoked_at,
@@ -48,9 +49,9 @@ router.post('/', requireTier('pro'), async (req, res) => {
 
   const { key, hash, prefix } = generateKey();
   const row = await queryOne(
-    `INSERT INTO api_keys (user_id, name, key_hash, key_prefix)
-     VALUES ($1, $2, $3, $4) RETURNING *`,
-    [req.user.id, name, hash, prefix]);
+    `INSERT INTO api_keys (user_id, name, key_hash, key_prefix, can_write)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [req.user.id, name, hash, prefix, (req.body || {}).can_write === true]);
   res.status(201).json({ ...rowToJson(row), key });
 });
 

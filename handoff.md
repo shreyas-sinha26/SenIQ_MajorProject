@@ -1,12 +1,39 @@
-# Handoff — SenIQ (updated 2026-09-26)
+# Handoff — SenIQ (updated 2026-10-08)
 
 **Current state in one paragraph:** v1 (Dashboard → Portfolio → Intelligence → Analytics →
 AI Workspace) and v2 (+ Strategy Builder, Your Strategies, Backtest, Paper Trade, MCP, public
-API) run from **one codebase** on `main`, split by a feature switch. Ask is now a
-tool-calling agent with news retrieval (RAG), saved conversations and cost controls. The
-whole frontend is re-themed to a light brand palette with a sliding nav indicator. Shreyas's
-Google/GitHub sign-in + alert emails (pushed in August) are merged in. **Everything is pushed
-to GitHub** (`main` = `537612d` + handoff commit) with tags `v1.0`–`v2.2`.
+API) run from **one codebase**, split by a feature switch. GitHub `main` is at `a66a164` with
+tags `v1.0`–`v2.2`. **The 2026-10-07/08 work is committed locally on the branch
+`ask-retrieval-signals` (six commits on top of `a66a164`) and is NOT pushed.** It covers the
+company knowledge base, alert quality and email safeguards, the v2/MCP round, and the Ask,
+retrieval and signals work in `RAG_PLAN.md`, plus local-only engine edits in the gitignored
+`strategy-service/`. Every commit passes `npm test` on its own; the dev database is still on
+migration 0019 (0020–0023 apply on the next app start). Push only on Annas's go-ahead.
+
+**What is still switched off or never run for real:** Claude answers (`ANTHROPIC_API_KEY` +
+`CLAUDE_REPORTS`), any real email (`RESEND_API_KEY`), Indian prices (Upstox), news embeddings,
+and hosting — so sentiment history is only ~16 days and SenIQ-factor backtests mean little.
+
+### The 2026-10-07 session at a glance (details in §3; now committed on the branch)
+| Area | What changed | Migration |
+|---|---|---|
+| Company knowledge base | 129 → 186 companies; 17 → 192 executives, all dated; refresh script; tighter news matching | `0017` |
+| v2 strategies + MCP | first end-to-end run; 8 SenIQ data tools on MCP and `/v1`; walk-forward; buy-and-hold benchmark; write-permission keys + 3 write tools; `sentiment_acute` factor | `0018` |
+| Strategy engine (local-only) | dropped-entry fix (changes every preset backtest number), benchmark, walk-forward endpoint, new factor | — |
+| Alert quality | market news grouped into stories and scored per user; holdings threshold 0.35 → 0.10; event-type weight; caps | — |
+| Email safeguards | verified-address check, unsubscribe + preference, send log, resend-verification | `0019` |
+| Ask | scope pre-check no longer refuses "F&O", "PM", "Series C"; ignores commodities; golden case `scope-04` → Paytm | — |
+
+**How it was committed (2026-10-08, branch `ask-retrieval-signals`, local only):** six
+whole-file commits in dependency order, because many files carry changes from more than one
+theme — (1) config, (2) knowledge base and data coverage, (3) alerts and email, (4) Ask,
+retrieval, filings, grounding, strategy tools and eval, (5) v2 API surface, (6) frontend and
+docs. Authored as Annas Shariff, no AI attribution.
+**The engine stays private:** `strategy-service/` is gitignored, so a clone of this repository
+has no strategy engine at all. With it missing, every strategy route answers "engine offline";
+the new SenIQ factors, walk-forward and the benchmark exist only in the local engine copy.
+**`.github/workflows/ci.yml` is deliberately left uncommitted** — a push that contains a
+workflow file is rejected until the token has the `workflow` scope (see §8).
 
 ---
 
@@ -31,7 +58,8 @@ ff9fe88 Add alert notification and narrative services with tests       (Shreyas)
 24148b2 v1/v2 split: STRATEGIES feature switch (off by default)       (v1.0)
 d08fe98 Ask v2 — tool-calling agent, news search (RAG), saved conversations
 ```
-Still local only: `.github/` (CI workflow — see §8) and `strategy-service/` (gitignored).
+Still local only: `.github/` (CI workflow — see §8), `strategy-service/` (gitignored), and the whole
+2026-10-07 session (uncommitted — see the table above).
 `v1.2`/`v2.2` pass `npm test` but have **not been clicked through in the browser** yet.
 
 **Why one branch, not two:** strategy commits are interleaved in history (since `ecb9c83`),
@@ -50,6 +78,12 @@ v2 needs two terminals:
 cd ~/Downloads/SenIQ_MajorProject/strategy-service && ./venv/bin/uvicorn app:app --port 8100
 cd ~/Downloads/SenIQ_MajorProject && FEATURES_STRATEGIES=1 PORT=3030 npm start   # → http://localhost:3030/app
 ```
+- From Claude's preview pane the launch names are `seniq-main` (v1, :3010) and `seniq-v2` (:3030);
+  they live in `~/.claude/launch.json`. The pane **cannot** start the engine (macOS blocks it from
+  reading the venv in Downloads) — start it from a shell with absolute paths:
+  `STRATEGY_SERVICE_SECRET="$(grep '^STRATEGY_SERVICE_SECRET=' .env | cut -d= -f2-)" strategy-service/venv/bin/uvicorn app:app --port 8100 --app-dir strategy-service`
+- Every app boot runs the news pipeline; several restarts in a row hit Finnhub/CoinGecko 429s and
+  prices come back null until it clears.
 - Port busy → `lsof -ti :3010 | xargs kill`. Health → `curl -s localhost:3010/api/health`.
 - Start ~5 min before a demo so the first news-pipeline run has finished.
 - **Demo account:** `demo@xynthis.com` (Pro). The password is a bcrypt hash — it can't be
@@ -85,6 +119,50 @@ cd ~/Downloads/SenIQ_MajorProject && FEATURES_STRATEGIES=1 PORT=3030 npm start  
   chars; automatic prompt caching (Haiku 4.5 only caches prefixes ≥4,096 tokens, so only long
   multi-tool questions benefit); billable cost logged cache-aware; failed runs logged as
   `qa_failed` (counts toward the global $ ceiling, not the user quota).
+- **`explain_sentiment` (2026-10-07, uncommitted):** ninth Ask tool, also on MCP and
+  `/v1/tickers/:ticker/sentiment/drivers`. Returns the stories behind a ticker's acute score with
+  each one's exact share of the z-score. Plan for Ask/retrieval/signals work: `RAG_PLAN.md`.
+- **Story-level hybrid search (2026-10-07, uncommitted):** migration `0020_article_search` adds a
+  full-text column; `search_news` now returns story cards (full-text + vector fused per story,
+  re-ranked by the user's impact) and `get_story_detail` expands one. **0020 has not been applied
+  to the dev database yet — it runs on the next app start.** Vector half still never run.
+- **Grounding check, thread digest, local-model tier (2026-10-07, uncommitted):**
+  `answerCheck.js` audits each model-written answer against its evidence and stores the result
+  (migration `0021_ask_grounding`, also not yet applied; `GET /api/admin/ask-grounding`). Older
+  turns reach the model as a code-built digest. `ASK_OLLAMA=1` adds a local-model tier between
+  Claude and the data summary — never run against a real model.
+- **Strategy tools in Ask (2026-10-07, uncommitted, v2 mode only):** `strategyTools.js` adds four
+  read-only tools (my strategies, paper performance, explain a signal, preset catalog) and a
+  prompt addendum. Tested with a stand-in engine only — not yet against `strategy-service`.
+- **Eval code + three data fixes (2026-10-07, uncommitted):** `eval/ask/lib.js` + `run.js`
+  (`--check` is free and offline; `--run --yes-spend --max-usd N [--judge]` is the paid run,
+  never executed). GDELT now covers all 57 Indian universe names (12 per run, rotating); all 25
+  universe coins have a CoinGecko price ID and resolve as crypto; commodities are matched on the
+  headline only. Stored articles keep their old commodity tags until re-resolved.
+- **Smart-money factors (2026-10-07, uncommitted; engine edits local-only, engine tests 37 → 48):**
+  CUSIP map now covers all 100 US universe names (OpenFIGI-verified) with an automatic ticker
+  backfill on stored 13F rows (runs on next app start); new engine factors `congress_buys`,
+  `congress_sells`, `congress_buyers`, `politician` param, `funds_holding`, `funds_net_adds`,
+  `funds_new_positions`; four SenIQ presets (`server/data/seniqPresets.json`); with/without-SenIQ
+  comparison on `/api/strategies/compare`, `/v1` and MCP. **Fixed: dates sent to the engine were
+  one day early east of GMT (lookahead) — earlier SenIQ-factor backtests from this machine were
+  affected.** The Node code needs the local engine copy for the new factors.
+- **Company filings (2026-10-07, uncommitted):** migration `0022_disclosures` (not yet applied),
+  `services/disclosures.js`, Ask/MCP/`/v1` tool `get_disclosures`. SEC 8-Ks for held US-listed
+  stocks, fetched lazily after the smart-money poll (4 tickers per poll; `DISCLOSURES=0`
+  disables). Live-checked against EDGAR on a scratch DB. India (NSE/BSE) was only spiked — all
+  routes reachable, findings in `RAG_PLAN.md` — nothing built.
+- **Plain English → strategy draft (2026-10-07, uncommitted, v2 only):** Ask tool
+  `draft_strategy` validates a Builder spec the agent writes (`services/strategySpec.js`, plus
+  the engine when reachable) and returns it as `draft` on the ask response; stored on the turn
+  (migration `0023_ask_drafts`, not yet applied). Saves nothing. Tested with a scripted model
+  only.
+- **UI pass (2026-10-08, uncommitted):** "Basic coverage" label and click-a-score sentiment
+  drivers on the Portfolio table; grounding badge and strategy-draft card with "Open in Strategy
+  Builder" in the AI Workspace; new congress/fund factors and SenIQ templates in the Builder;
+  "Compare without SenIQ signals" on Backtest results. Checked in a browser on a scratch DB copy;
+  the two strategy pages only against a stand-in engine. **Fixed: engine returns are fractions —
+  the paper-performance tool and the comparison were reporting them as percentages.**
 - Estimates (not yet measured with a real key): typical question ≈ 7k input / 400 output
   tokens ≈ **$0.009**; worst case ≈ **$0.04**; peak context ~15% of Haiku's 200k window.
 
@@ -110,6 +188,129 @@ mostly a second token set. Nav: sliding underline (horizontal) / left accent bar
   migrations share the `0016` prefix (`ask_threads`, `oauth_accounts`) — fine, the runner
   keys on the full filename and they touch different tables.
 
+### Company knowledge base refresh (2026-10-07, uncommitted)
+- **Universe 129 → 186:** US 54 → 100, India 50 → 57 (added TRENT, BEL, ETERNAL, JIOFIN, INDIGO,
+  MAXHEALTH; TATAMOTORS → TMPV + TMCV, LTIM → LTM — the old tickers are kept in the DB as
+  `is_active = false`), crypto 25, plus XAU/XAG/WTI/NG as commodities.
+- **Executives 17 → 192**, now in `server/data/executives.json` (merged into `universe.js`).
+  Every stock has a current top executive. Each entry can carry `aliases` (headline surnames),
+  `asOf` + `source` (last checked), `until` (former — still resolves). Migration
+  `0017_executive_tenure` adds the matching columns. 100 US CEOs checked against FMP, 80 others
+  against Yahoo Finance's officer list, 12 chairs/founders by web search.
+- **Refresh:** `node scripts/refresh_executives.js` (dry run) / `--write`. US only — FMP's free
+  tier has no NSE symbols, so India is by hand. ~100 of FMP's 250 calls/day.
+- **Resolver:** longest match wins ("Tech Mahindra" no longer tags M&M, "HDFC Life" no longer
+  tags HDFC Bank); executive names match whole-phrase; bare symbols T/C/F/V/PM/CAT/RTX/ACN are
+  ignored; curated tickers skip the loose held-holding match ("Gold" vs "Goldman"). The seed now
+  deletes executives removed from the file and deactivates dropped tickers.
+- Ask's scope pre-check ignores commodities. The company card shows "checked <date>".
+- Existing articles are not re-resolved — only new ones use the new matching, so stored tags from
+  before 2026-10-07 can still be wrong (e.g. "HDFC Securities" tagged as HDFC Bank).
+
+### v2 strategies + MCP round (2026-10-07, uncommitted)
+First real end-to-end run of v2 (engine + app, throwaway Pro user, since deleted): build → backtest
+(US / NSE / crypto / gold) → save → live signal → paper → API key → `/v1` → `/mcp` all work.
+- **MCP / `/v1` data tools:** Ask's 8 read tools are exposed to keys through one catalog
+  (`server/services/dataTools.js`): portfolio overview, attribution, top events, ticker news,
+  sentiment, smart money, market news, news search. With a ticker they accept any holding **or any
+  active universe ticker**; without one they cover the user's holdings. Light limiter.
+- **Benchmark:** every backtest report now carries a buy-and-hold benchmark of the same symbol
+  (the engine's old Nifty default was never computed). Backtest page shows "Buy & hold" and
+  "vs buy & hold" tiles and a dashed line.
+- **Walk-forward:** engine `POST /api/walk-forward`; app `POST /api/strategies/walk-forward` (Plus),
+  `POST /v1/walk-forward`, MCP `run_walk_forward` (heavy). Backtest page: "Robustness check".
+- **Write tools:** `api_keys.can_write` (migration `0018`, default false; checkbox in Profile → API
+  Access). Write keys get MCP `save_strategy`, `start_paper_deployment`, `stop_paper_deployment` and
+  `POST /v1/strategies/saved`, `/v1/paper`, `/v1/paper/:id/stop`. Read-only keys are not shown the
+  tools and get 403 on the routes. No delete over the API. Save/deploy/stop logic now lives in
+  `server/services/strategyStore.js`, used by the web routes too.
+- **`sentiment_acute` factor:** the dashboard's Acute score at daily resolution (72h window, 7-day
+  half-life, source credibility × confidence). `signalHistory.js` sends per-day weight sums;
+  the engine applies the decay. `sentiment_avg` is unchanged.
+- **Engine edits are local-only** (`strategy-service/` is gitignored): `app.py`,
+  `service/backtest_runner.py`, `service/seniq_factors.py`, `engine/strategy/schema_strategy.py`,
+  tests. The Node changes above depend on them.
+- **Fixed:** primary buttons on the strategy pages had lost their styling (missing `btn` class).
+- **Known limits:** sentiment history is ~16 days, so SenIQ-factor backtests show very low
+  coverage; one backtest is capped at 5 years of daily bars; each app boot runs the news pipeline
+  and several restarts in a row hit Finnhub/CoinGecko 429s (prices come back null until it clears);
+  the preview tool can't start the engine (macOS blocks the venv) — start it from a terminal.
+- **Test pass (2026-10-07):** all 19 migrations + seed applied to a brand-new database; isolation,
+  permission, tier, cap and rate-limit checks (39), three end-to-end scripts, v1 mode (v2 routes
+  404). Two regressions from this round found and fixed: Ask's scope pre-check refused questions
+  containing "F&O", "PM", "Series C" (it now shares the resolver's ambiguous lists), and
+  `sentiment_acute` could report tomorrow's date.
+- **Engine fix — dropped entries (local-only, `strategy-service/`):** preset strategies size an
+  entry at all available cash on the signal bar's close but fill at the next open plus slippage
+  and charges; when that cost more than the cash the broker rejected the order silently, so about
+  half of all entries vanished at the default 100k. The broker now buys what the cash covers
+  (`_affordable_long_entry`), protective stop/target legs shrink to the shares actually held, and
+  the backtest response carries `orders: {reduced, unaffordable}` (shown in the results header).
+  EMACrossover NVDA 2023–26 at 100k: 10 trades / −5.2% before, 17 trades / +76.8% after. **Every
+  preset backtest number changes.** `broker.rejected` still holds the by-design drops (a repeat
+  signal while the first order is pending) and is not reported.
+- **Eval case `scope-04`** now asks about Paytm (Zomato is in the universe as ETERNAL); all 30
+  cases route as expected.
+- **Executives:** all 192 dated (100 FMP, 80 Yahoo, 12 web). Reed Hastings left the Netflix board in
+  June 2026 (now "Co-founder"); Deepinder Goyal is Vice Chairman; **Noel Tata retires as Trent
+  chairman in November 2026 — update then.**
+- **Parked with the data work:** daily recording/hosting, sentiment backfill, fund factor (needs
+  CUSIP → ticker: only 1.5% of 13F holdings have one), event-type factor.
+
+### Alert quality (2026-10-07, uncommitted)
+History since the June budget: 477 of 513 alerts were general market/world news, 5 were about a
+user's holdings, one RBI decision produced 7+ alerts, and some days reached 10 real-time alerts
+against a limit of 5. Changes, all in `server/services/materiality.js` + `config.js`:
+- **Holdings threshold 0.35 → 0.10** and the score is multiplied by an event-type factor
+  (`TYPE_BASE` + `EVENT_TYPES.SEVERITY`). 0.35 needed a ~60% position. A holdings alert whose
+  sentiment confidence is under 0.4 is recorded but never pushed.
+- **Market/world news is grouped into stories** (`groupStories`: same market + 2 shared key
+  words). One alert per story per user per day; later headlines on a story the user was already
+  told about create no row. It pushes in real time only with ≥3 reports **and** ≥10% of the
+  user's portfolio in that market (IN / US / GLOBAL, from `regionOf` + `regionExposure`).
+- **Caps:** `MAX_BROAD_REALTIME_PER_DAY: 2` inside the overall 5. Smart-money alerts now share
+  the 5 (`deliveryForDiscreteAlert`) — they were the reason for the 10.
+- **Resolver:** a bank's short name followed by "securities / institutional / AMC…" is its
+  brokerage arm, not the bank ("HDFC Securities bullish on…").
+- **Replay of the last day** (`generateAlerts({dryRun: true, ignoreExisting: true})`, writes
+  nothing): 25 market events → 11 stories; per user 16 market alerts → 0–1 real-time; real-time
+  total avg 1.0, max 2, half of them about holdings.
+- **Not done:** user sensitivity dial / mute / unsubscribe, time zones + quiet hours, price-move
+  confirmation, feedback loop from opens and outcomes, emailing the daily brief. Alert emails
+  still need `RESEND_API_KEY` and have never been sent for real.
+
+### Email — status and what's needed (checked 2026-10-07)
+**Built:** one sender (`server/services/emailService.js`, Resend over HTTPS, no SDK) used by
+verification, password reset and alert emails (`alertNotifier.js`: Free none, Plus standard, Pro
+with a short narrative). Without a key every send returns `delivered:false` and nothing breaks.
+**Never sent for real** — `RESEND_API_KEY` is not set anywhere.
+**Needed from Annas to switch it on:**
+1. A Resend account + API key → `RESEND_API_KEY` in `.env` (and on the host later).
+2. A sending domain verified in Resend (DNS records at the registrar) → `EMAIL_FROM`, e.g.
+   `SenIQ <alerts@yourdomain>`. Without it the default `onboarding@resend.dev` only delivers to the
+   Resend account's own address — fine for a first test, useless for other users.
+3. `APP_URL` set to the real address once hosted; locally links point at `localhost`.
+**Safeguards built 2026-10-07 (uncommitted; migration `0019_email_safeguards`):**
+- **Verified addresses only.** `alertNotifier.recipientBlock` refuses an unverified or unsubscribed
+  recipient. All 10 local users are unverified (they signed up with no provider), so
+  `POST /api/auth/resend-verification` was added, with a "Send verification link" button in Profile.
+- **Unsubscribe.** `users.email_alerts` (default on). Every alert email has a footer link plus
+  `List-Unsubscribe` / `List-Unsubscribe-Post` headers. The link is a signed, stateless token
+  (`emailService.unsubscribeToken`, HMAC over the user id with `JWT_SECRET`): GET shows a
+  confirmation page and changes nothing (mail scanners prefetch links), POST switches it off, and
+  there is a resubscribe. Routes in `server/routes/email.js`; toggle in Profile → Account Details.
+  Changing `JWT_SECRET` invalidates links in emails already sent.
+- **Send log.** `email_log` records every send and failure (with the provider's message id) for
+  alert, verify and reset mail, and every alert skipped as `unverified` / `unsubscribed`. A missing
+  provider is not logged.
+- Tested end to end against the running app with the provider faked in-process (25 checks);
+  **still never sent through real Resend.**
+**Still not built:**
+- The daily brief is not emailed (in-app only); no weekly summary for Free.
+- No time zone per user, so quiet hours are off and "morning" has no meaning yet.
+- Bounces and complaints are not read back from Resend (needs their webhook).
+- Pro narrative needs `ANTHROPIC_API_KEY` + `CLAUDE_REPORTS`; otherwise it falls back to a template.
+
 ### Live prices
 `FINNHUB_API_KEY` (US stocks + company news) and `FMP_API_KEY` (gold/silver) are set in `.env`
 and verified. Crypto via CoinGecko (no key). **Indian stocks: not priced yet** (see §6).
@@ -129,7 +330,8 @@ and verified. Crypto via CoinGecko (no key). **Indian stocks: not priced yet** (
 | `CONGRESS_TRADES_URL` | not set locally | live congress data (set on the deploy host); local uses sample |
 | `REDDIT_CLIENT_ID/SECRET`, `SENTRY_DSN` | not set | Reddit ingest, error monitoring |
 | `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET` | not set | OAuth sign-in buttons (hidden until set) |
-| `RESEND_API_KEY`, `EMAIL_FROM` | not set | reset/verify + alert emails (dev: reset link returned in the response) |
+| `RESEND_API_KEY`, `EMAIL_FROM` | not set | all email. `EMAIL_FROM` needs a domain verified in Resend; the default `onboarding@resend.dev` only reaches the Resend account's own address |
+| `JWT_SECRET` | set | sessions **and** unsubscribe-link signatures — changing it breaks links in emails already sent |
 | `APP_URL` | not set | OAuth callback + email links; falls back to `http://localhost:$PORT` |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | not set | local fallback for alert narratives |
 
@@ -139,33 +341,50 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
 (Postgres/Neon, Render, Sentry, Docker) · v2 (FastAPI + yfinance strategy service, MCP, `/v1`).
 
 ## 5. Tests & evaluation
-- `npm test` — offline, no DB/API calls: 16 + 27 + 23 + **38 (Ask: `test/qa.test.js`)** + 12 + 9 (auth) + 23 (alerts), all passing.
-- **Ask eval set** `eval/ask/cases.json` (committed `5b04cbe`): 30 cases over a fixture portfolio
-  (AAPL, NVDA, BTC, XAU, RELIANCE, TCS) — portfolio moves, holding news, risk, smart money,
-  macro, RAG search, education, out-of-scope, advice, data gaps, follow-ups/injection. Graded
-  against each run's own tool results (not frozen answers). All 30 route correctly through the
-  scope pre-check. **Awaiting your sign-off on the cases**; then: grader (programmatic route /
-  tool / no-leak checks + LLM rubric), runner, and a small paid pilot. 30 cases × 2 reps ≈
-  ±13-point noise floor — fine for catching real failures, too coarse for small prompt tweaks.
+- `npm test` — offline, no DB/API calls, all passing: resolver 49 · engine/alerts logic 50 ·
+  reports 23 · Ask 83 · eval 15 · strategy signals 12 · filings 10 · strategy drafts 14 · MCP/keys/data tools 19 · auth 9 · alert email 30.
+- Engine: `cd strategy-service && ./venv/bin/python -m pytest -q` → 37 passing (local-only).
+- **Clean-database check (2026-10-07):** all 19 migrations + the seed applied twice to a
+  brand-new database, then dropped.
+- **End-to-end (2026-10-07, throwaway users, since deleted):** build → backtest (US / NSE /
+  crypto / gold) → save → signal → paper → key → `/v1` → `/mcp` (25); data tools (22); benchmark,
+  walk-forward, write keys and tools (30); isolation, permissions, tiers, caps, rate limits (39);
+  email safeguards with the provider faked in-process (25); v1 mode returns 404 on every v2 route.
+  The scripts lived in the session scratchpad and are **not** in the repo.
+- **Ask eval set** `eval/ask/cases.json`: 30 cases over a fixture portfolio (AAPL, NVDA, BTC,
+  XAU, RELIANCE, TCS). All 30 route as expected through the scope pre-check (`scope-04` now asks
+  about Paytm — uncommitted). **Still awaiting sign-off on the cases**; then grader + runner +
+  a small paid pilot (ask before any paid run).
 
 ## 6. Open items (priority order)
-1. **Turn on real AI answers:** add `ANTHROPIC_API_KEY` **and** flip `CLAUDE_REPORTS` — it is
+1. **Push the branch `ask-retrieval-signals`** (six local commits) when Annas says so, then
+   open a pull request to `main`. Fetch first; Shreyas may have pushed. Pushing to `main`
+   runs CI and, if a Render service is connected, deploys and applies migrations 0017–0023.
+2. **First real email.** Needs `RESEND_API_KEY` (Annas adds it to `.env` himself) and a verified
+   sending domain for `EMAIL_FROM` — which domain is undecided (keniclean.com is the laundry
+   business). With the key alone: verify his own account, send one test alert.
+3. **Turn on real AI answers:** `ANTHROPIC_API_KEY` **and** flip `CLAUDE_REPORTS` — it is
    hard-coded `false` in `server/config.js`, so a key alone does nothing.
-2. **Indian prices via Upstox:** paste the Analytics Token (free, read-only, 1-year expiry;
-   Upstox Developer Apps → Analytics → Generate Token), then build the lookup: NSE ticker →
-   Upstox instrument key, fetch price + day change, test on RELIANCE/TCS. Treat the token as a
-   secret (it can also read account data).
-3. **RAG embeddings:** `HF_API_TOKEN` + `NEWS_EMBEDDINGS=1` + pgvector
-   (`brew install pgvector` locally; Neon has it). The semantic SQL path has **not run yet**.
-4. **Eval:** sign off the 30 cases → build grader + runner → pilot (ask before any paid run).
-5. **Visual check of v2 with the engine running** (Builder/Backtest with real content) — the
-   preview tool can't start the engine (macOS blocks its venv), so run it in your terminal.
-6. **Dark-mode toggle** (tokens are ready).
-7. **Realistic demo portfolio quantities** (and add gold so commodities show).
-8. **Browser check of v1.2/v2.2** — sign-in page with the OAuth buttons on the light theme
-   (set Google keys to see them), reset-password flow.
-9. Pre-existing quirk: `reports.js` counts **all** of a user's `claude_calls` for the daily-brief
-   quota, including Ask questions.
+4. **Reports by email** (agreed direction, not built): Free weekly summary, Plus daily brief
+   before the user's market opens, Pro daily + optional end-of-day wrap. No hourly/6h/12h
+   reports — anything that can't wait is an alert. Needs per-user time zone + home market, which
+   also unlocks quiet hours. The brief today is in-app only, generated 05:30 server time.
+5. **Alerts, remaining:** sensitivity dial (critical / balanced / everything) and per-stock mute;
+   price-move confirmation before emailing; feedback loop from opens/dismissals and outcomes
+   (0 of 72 tracked alerts were followed by a 3% move); read bounces/complaints from Resend's
+   webhook. Thresholds were calibrated on one day of data and ten test portfolios — revisit.
+   Analyst notes are mostly typed "other", so the type weight doesn't demote them enough.
+6. **Data foundation (parked by Annas):** hosting / daily recording, sentiment backfill, CUSIP →
+   ticker for 13F holdings (only 1.5% have a ticker) → fund factor, event-type factor.
+7. **Indian prices via Upstox:** paste the Analytics Token (free, read-only, 1-year expiry), then
+   build NSE ticker → instrument key lookup. Treat the token as a secret.
+8. **RAG embeddings:** `HF_API_TOKEN` + `NEWS_EMBEDDINGS=1` + pgvector. Never run.
+9. **Eval:** sign off the 30 cases → grader + runner → pilot.
+10. **Knowledge base upkeep:** Noel Tata retires as Trent chairman in November 2026; re-run
+    `node scripts/refresh_executives.js` now and then (US only, ~100 FMP calls).
+11. Smaller: dark-mode toggle; realistic demo portfolio quantities; browser check of the
+    OAuth sign-in page; price service has no cache or backoff; `reports.js` counts Ask questions
+    toward the daily-brief quota; the company card shows "US · US" (exchange and country).
 
 ## 7. Where things live
 | Area | Files |
@@ -178,7 +397,12 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
 | v1/v2 route gating | `server/index.js` |
 | Frontend | `public/index.html`, `public/js/app.js`, `public/css/style.css`; landing: `public/landing.html`, `public/css/landing.css`, `public/js/landing.js`; `public/docs.html` (v2) |
 | Sign-in / email / alerts (Shreyas) | `server/routes/oauth.js`, `auth.js`, `server/services/authTokens.js`, `emailService.js`, `alertNotifier.js`, `alertNarrative.js` |
-| Tests / eval | `test/qa.test.js`, `test/auth.test.js`, `test/alerts.test.js`, `eval/ask/cases.json` |
+| Company knowledge base | `server/data/universe.js`, `server/data/executives.json`, `server/services/entityResolver.js`, `scripts/refresh_executives.js` |
+| Alert scoring, stories, budgets | `server/services/materiality.js`, `server/config.js` (`MATERIALITY`, `ALERT_BUDGET`); smart-money alerts in `server/services/smartMoney/index.js` |
+| Email: sender, log, unsubscribe | `server/services/emailService.js`, `server/routes/email.js`, `alertNotifier.js`; resend-verification in `server/routes/auth.js` |
+| MCP + public API | `server/routes/mcp.js`, `v1.js`, `server/services/dataTools.js` (data tools), `strategyStore.js` (save / deploy / stop), `apiKeyGate.js`, `signalHistory.js` |
+| Strategy engine (local-only) | `strategy-service/app.py`, `service/backtest_runner.py`, `service/seniq_factors.py`, `engine/brokers/simulated.py`, `tests/` |
+| Tests / eval | `test/*.test.js` (7 files, run by `npm test`), `eval/ask/cases.json` |
 
 ## 8. Pushing to GitHub
 - Repo `shreyas-sinha26/SenIQ_MajorProject` is **private**: only the `Annas-Shariff` gh account
@@ -186,6 +410,7 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
 - **Done 2026-09-26:** fetched Shreyas's 2 August commits, merged them (no rebase, so the
   tagged commits keep their hashes), pushed `main` + tags `v1.0`, `v1.1`, `v2.1`, `v1.2`, `v2.2`.
   Commits are authored as Annas Shariff with no AI attribution.
+- **The 2026-10-07/08 work is committed on the local branch `ask-retrieval-signals` and not pushed.** Do not push without Annas's go-ahead.
 - Next time: **fetch first**, merge (not rebase) if teammates pushed, run `npm test`, then
   push `main` and any new tags (`git push origin main <tag>`).
 - `.github/workflows/ci.yml` still can't be pushed until the token has the `workflow` scope

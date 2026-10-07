@@ -44,15 +44,33 @@ const NON_EQUITY_ALIASES = Object.fromEntries(
   Object.entries(NON_EQUITY_ASSETS).map(([ticker, a]) => [ticker, a.aliases])
 );
 
+// The curated universe also lists crypto and commodities (data/universe.js) — more coins than
+// the hand-written table above. It supplies CLASS, NAME and PRICE KEY for those, so adding
+// "BNB" is filed as crypto and gets a price. It deliberately does NOT feed NON_EQUITY_ALIASES:
+// the legacy matcher lowercases every ticker into an alias, and "etc", "near", "ton", "uni"
+// would match ordinary words. News for these resolves through entityResolver instead.
+const { UNIVERSE } = require('../data/universe');
+const UNIVERSE_NON_EQUITY = Object.fromEntries(
+  UNIVERSE.filter((c) => c.assetClass === 'crypto' || c.assetClass === 'commodity')
+    .map((c) => [c.ticker, { assetClass: c.assetClass, name: c.name, coingeckoId: c.coingeckoId || null }])
+);
+
+/** CoinGecko price key for a crypto ticker, or null. */
+function coingeckoIdFor(symbol) {
+  const ticker = String(symbol || '').toUpperCase().trim();
+  return (NON_EQUITY_ASSETS[ticker] && NON_EQUITY_ASSETS[ticker].coingeckoId) ||
+    (UNIVERSE_NON_EQUITY[ticker] && UNIVERSE_NON_EQUITY[ticker].coingeckoId) || null;
+}
+
 /**
  * Resolve a symbol to its canonical asset metadata.
  * A caller-declared class wins for equities (the registry only knows non-equities);
- * otherwise we classify from the registry and fall back to 'equity'.
+ * otherwise we classify from the registry, then the universe, and fall back to 'equity'.
  * @returns {{ ticker, assetClass, name, coingeckoId: string|null }}
  */
 function resolveAsset(symbol, declaredClass) {
   const ticker = String(symbol || '').toUpperCase().trim();
-  const known = NON_EQUITY_ASSETS[ticker];
+  const known = NON_EQUITY_ASSETS[ticker] || UNIVERSE_NON_EQUITY[ticker];
 
   if (known) {
     return {
@@ -78,5 +96,6 @@ module.exports = {
   NON_EQUITY_ASSETS,
   NON_EQUITY_ALIASES,
   resolveAsset,
+  coingeckoIdFor,
   isLaunchAssetClass,
 };
