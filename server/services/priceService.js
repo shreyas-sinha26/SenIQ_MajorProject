@@ -15,7 +15,7 @@
  * a null price (shown as N/A) — listing a portfolio never depends on a third party.
  */
 
-const { NON_EQUITY_ASSETS } = require('./assetRegistry');
+const { NON_EQUITY_ASSETS, coingeckoIdFor } = require('./assetRegistry');
 
 const PRICE_TTL_FAST = 60_000;      // CoinGecko / Finnhub — generous limits
 const PRICE_TTL_FMP = 5 * 60_000;   // FMP — protect the shared daily quota
@@ -104,7 +104,7 @@ async function getQuotes(holdings) {
     if (cached) { out[ticker] = { price: cached.price, currency: cached.currency, changePct: cached.changePct ?? null }; continue; }
 
     if (h.assetClass === 'crypto') {
-      const id = NON_EQUITY_ASSETS[ticker]?.coingeckoId;
+      const id = coingeckoIdFor(ticker);
       if (id) cryptoToFetch.push({ ticker, coingeckoId: id });
       else out[ticker] = null;
     } else if (h.assetClass === 'commodity') {

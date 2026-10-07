@@ -29,7 +29,11 @@ function parseOptionalNumber(v) {
 router.get('/', async (req, res) => {
   try {
     const holdings = await getWeightedHoldings(req.user.id);
-    res.json({ holdings });
+    // coverage: 'full' for a ticker in the curated universe (aliases, executives, sector news),
+    // 'basic' for anything else (matched on name and symbol only) — so thin news on such a
+    // holding reads as a known limit, not a fault.
+    const universe = new Set((await query('SELECT ticker FROM companies WHERE is_active')).map((r) => r.ticker));
+    res.json({ holdings: holdings.map((h) => ({ ...h, coverage: universe.has(h.ticker) ? 'full' : 'basic' })) });
   } catch (err) {
     console.error('List portfolio error:', err);
     res.status(500).json({ error: 'Failed to load portfolio' });
