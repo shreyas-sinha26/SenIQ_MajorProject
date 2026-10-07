@@ -2,19 +2,20 @@
 
 **Current state in one paragraph:** v1 (Dashboard → Portfolio → Intelligence → Analytics →
 AI Workspace) and v2 (+ Strategy Builder, Your Strategies, Backtest, Paper Trade, MCP, public
-API) run from **one codebase**, split by a feature switch. GitHub `main` is at `a66a164` with
-tags `v1.0`–`v2.2`. **The 2026-10-07/08 work is committed locally on the branch
-`ask-retrieval-signals` (six commits on top of `a66a164`) and is NOT pushed.** It covers the
-company knowledge base, alert quality and email safeguards, the v2/MCP round, and the Ask,
-retrieval and signals work in `RAG_PLAN.md`, plus local-only engine edits in the gitignored
-`strategy-service/`. Every commit passes `npm test` on its own; the dev database is still on
-migration 0019 (0020–0023 apply on the next app start). Push only on Annas's go-ahead.
+API) run from **one codebase** on `main`, split by a feature switch. Tags `v1.0`–`v2.2` mark
+the state up to `a66a164`. **The 2026-10-07/08 work is merged into `main`** (pull request #1,
+merge commit `ac88e2a`, six commits, not yet tagged). It covers the company knowledge base,
+alert quality and email safeguards, the v2/MCP round, and the Ask, retrieval and signals work
+in `RAG_PLAN.md`; the matching engine edits live only in the gitignored `strategy-service/`.
+Every commit passes `npm test` on its own. The local dev database is still on migration 0019
+(0020–0023 apply on the next app start), and nothing in the merge has run with a real model
+key, real embeddings, or the real strategy engine behind the app.
 
 **What is still switched off or never run for real:** Claude answers (`ANTHROPIC_API_KEY` +
 `CLAUDE_REPORTS`), any real email (`RESEND_API_KEY`), Indian prices (Upstox), news embeddings,
 and hosting — so sentiment history is only ~16 days and SenIQ-factor backtests mean little.
 
-### The 2026-10-07 session at a glance (details in §3; now committed on the branch)
+### The 2026-10-07 session at a glance (details in §3; merged in pull request #1)
 | Area | What changed | Migration |
 |---|---|---|
 | Company knowledge base | 129 → 186 companies; 17 → 192 executives, all dated; refresh script; tighter news matching | `0017` |
@@ -24,7 +25,7 @@ and hosting — so sentiment history is only ~16 days and SenIQ-factor backtests
 | Email safeguards | verified-address check, unsubscribe + preference, send log, resend-verification | `0019` |
 | Ask | scope pre-check no longer refuses "F&O", "PM", "Series C"; ignores commodities; golden case `scope-04` → Paytm | — |
 
-**How it was committed (2026-10-08, branch `ask-retrieval-signals`, local only):** six
+**How it was committed (2026-10-08, pull request #1, merged with a merge commit):** six
 whole-file commits in dependency order, because many files carry changes from more than one
 theme — (1) config, (2) knowledge base and data coverage, (3) alerts and email, (4) Ask,
 retrieval, filings, grounding, strategy tools and eval, (5) v2 API surface, (6) frontend and
@@ -357,9 +358,11 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
   a small paid pilot (ask before any paid run).
 
 ## 6. Open items (priority order)
-1. **Push the branch `ask-retrieval-signals`** (six local commits) when Annas says so, then
-   open a pull request to `main`. Fetch first; Shreyas may have pushed. Pushing to `main`
-   runs CI and, if a Render service is connected, deploys and applies migrations 0017–0023.
+1. **After the merge of pull request #1:** start the app once on the dev database (applies
+   migrations 0020–0023, fills 13F tickers, begins fetching SEC filings); start the strategy
+   engine and check the strategy pages and Ask's strategy tools against it; then tag
+   (`v1.3` / `v2.3`). If a Render service is connected to `main`, the merge already deployed
+   there and applied 0017–0023 — check its dashboard. The CI workflow is still uncommitted (§8).
 2. **First real email.** Needs `RESEND_API_KEY` (Annas adds it to `.env` himself) and a verified
    sending domain for `EMAIL_FROM` — which domain is undecided (keniclean.com is the laundry
    business). With the key alone: verify his own account, send one test alert.
@@ -410,7 +413,7 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
 - **Done 2026-09-26:** fetched Shreyas's 2 August commits, merged them (no rebase, so the
   tagged commits keep their hashes), pushed `main` + tags `v1.0`, `v1.1`, `v2.1`, `v1.2`, `v2.2`.
   Commits are authored as Annas Shariff with no AI attribution.
-- **The 2026-10-07/08 work is committed on the local branch `ask-retrieval-signals` and not pushed.** Do not push without Annas's go-ahead.
+- **Done 2026-10-08:** pushed the branch `ask-retrieval-signals`, opened pull request #1 and merged it into `main` with a merge commit (`ac88e2a`); the branch was then deleted. No tag yet.
 - Next time: **fetch first**, merge (not rebase) if teammates pushed, run `npm test`, then
   push `main` and any new tags (`git push origin main <tag>`).
 - `.github/workflows/ci.yml` still can't be pushed until the token has the `workflow` scope
