@@ -9,8 +9,9 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://offline:offli
 
 const assert = require('node:assert');
 const {
-  shouldEmail, dedupeEmailable, buildAlertEmail, deliverAlertEmails,
+  shouldEmail, dedupeEmailable, buildAlertEmail, deliverAlertEmails, recipientBlock,
 } = require('../server/services/alertNotifier');
+const { unsubscribeUrl, unsubscribeToken, verifyUnsubscribeToken } = require('../server/services/emailService');
 const {
   buildFacts, deterministicNarrative, writeAlertNarrative, confidenceLabel, wordCount,
 } = require('../server/services/alertNarrative');
@@ -42,7 +43,8 @@ function mkSend() {
 const baseDeps = (over = {}) => ({
   emailEnabledFn: () => true,
   tierFn: async () => ({ tier: 'plus' }),
-  getEmailFn: async () => ({ email: 'user@example.com', name: 'User' }),
+  getEmailFn: async () => ({ email: 'user@example.com', name: 'User', email_verified: true, email_alerts: true }),
+  logFn: async () => {},
   narrativeFn: async () => ({ narrative: 'PRO_NARRATIVE_TEXT', writer: 'template' }),
   ...over,
 });
@@ -156,6 +158,57 @@ const baseDeps = (over = {}) => ({
   });
 
   // ── Narrative fallback hierarchy (Claude → Ollama → template) ──
+  // ── Who may be emailed ──
+  console.log('\nrecipient safeguards (verified address, unsubscribe, send log):');
+  check('recipientBlock: verified + subscribed → allowed', () =>
+    assert.strictEqual(recipientBlock({ email: 'a@b.c', email_verified: true, email_alerts: true }), null));
+  check('recipientBlock: unverified / missing flag → blocked', () => {
+    assert.strictEqual(recipientBlock({ email: 'a@b.c', email_verified: false, email_alerts: true }), 'unverified');
+    assert.strictEqual(recipientBlock({ email: 'a@b.c' }), 'unverified'); // absent is never treated as verified
+  });
+  check('recipientBlock: unsubscribed → blocked', () =>
+    assert.strictEqual(recipientBlock({ email: 'a@b.c', email_verified: true, email_alerts: false }), 'unsubscribed'));
+
+  await checkAsync('unverified address → no email, skip is logged with the reason', async () => {
+    const sink = mkSend(); const logged = [];
+    const r = await deliverAlertEmails([ALERT], baseDeps({
+      sendEmailFn: sink.send, logFn: async (row) => logged.push(row),
+      getEmailFn: async () => ({ email: 'typo@example.com', name: 'U', email_verified: false, email_alerts: true }),
+    }));
+    assert.strictEqual(sink.sent.length, 0);
+    assert.strictEqual(r.skipped, 1);
+    assert.deepStrictEqual(logged.map((l) => [l.status, l.reason, l.kind, l.to]), [['skipped', 'unverified', 'alert', 'typo@example.com']]);
+  });
+  await checkAsync('unsubscribed user → no email, no narrative spend, skip logged', async () => {
+    const sink = mkSend(); const logged = []; let narrativeCalls = 0;
+    await deliverAlertEmails([ALERT], baseDeps({
+      sendEmailFn: sink.send, logFn: async (row) => logged.push(row), tierFn: async () => ({ tier: 'pro' }),
+      narrativeFn: async () => { narrativeCalls++; return { narrative: 'x' }; },
+      getEmailFn: async () => ({ email: 'user@example.com', name: 'U', email_verified: true, email_alerts: false }),
+    }));
+    assert.strictEqual(sink.sent.length, 0);
+    assert.strictEqual(narrativeCalls, 0);
+    assert.strictEqual(logged[0].reason, 'unsubscribed');
+  });
+  await checkAsync('every alert email carries an unsubscribe link + one-click headers', async () => {
+    const sink = mkSend();
+    await deliverAlertEmails([ALERT], baseDeps({ sendEmailFn: sink.send }));
+    const m = sink.sent[0];
+    const link = unsubscribeUrl(ALERT.user_id);
+    assert.ok(m.text.includes(link) && m.html.includes(link.replace(/&/g, '&amp;')));
+    assert.strictEqual(m.headers['List-Unsubscribe'], `<${link}>`);
+    assert.strictEqual(m.headers['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click');
+    assert.strictEqual(m.kind, 'alert');
+    assert.strictEqual(m.userId, ALERT.user_id);
+  });
+  check('unsubscribe token: round-trips, and only for its own user', () => {
+    const t = unsubscribeToken(42);
+    assert.strictEqual(verifyUnsubscribeToken(t), '42');
+    assert.strictEqual(verifyUnsubscribeToken(t.replace(/^42\./, '43.')), null);   // someone else's id
+    assert.strictEqual(verifyUnsubscribeToken(t.slice(0, -1) + (t.endsWith('A') ? 'B' : 'A')), null); // tampered
+    for (const bad of ['', 'abc', '42', '42.', null, undefined, '42.' + 'x'.repeat(31)]) assert.strictEqual(verifyUnsubscribeToken(bad), null);
+  });
+
   console.log('\nwriteAlertNarrative (fallback hierarchy):');
   const claudeOk = async () => ({ writer: 'claude', model: 'claude-haiku-4-5', narrative: 'C', usage: { input: 5, output: 5 } });
   const ollamaOk = async () => ({ writer: 'ollama', model: 'llama', narrative: 'O', usage: { input: 0, output: 0 } });
