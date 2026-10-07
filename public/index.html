@@ -691,6 +691,19 @@
           <div id="sb-status" class="hidden"></div>
 
           <div id="sb-editor" class="sb-editor hidden">
+            <div class="sb-presets" id="sb-presets">
+              <label class="bt-field">
+                <span>Start from a SenIQ template</span>
+                <select id="sb-preset"><option value="">Choose a template…</option></select>
+              </label>
+              <label class="bt-field hidden" id="sb-preset-input-wrap">
+                <span id="sb-preset-input-label">Member of Congress</span>
+                <input id="sb-preset-input" type="text" maxlength="80" placeholder="Full name" />
+              </label>
+              <button type="button" class="btn btn-ghost btn-sm" id="sb-preset-load">Load template</button>
+              <p class="sb-preset-note hidden" id="sb-preset-note"></p>
+            </div>
+
             <label class="bt-field sb-name-field">
               <span>Strategy name</span>
               <input id="sb-name" type="text" placeholder="My strategy" maxlength="80" />
@@ -745,7 +758,7 @@
             <div id="sb-errors" class="sb-errors hidden"></div>
 
             <div class="sb-actions">
-              <button type="button" id="sb-backtest" class="btn-primary">
+              <button type="button" id="sb-backtest" class="btn btn-primary">
                 <span class="material-symbols-outlined">query_stats</span> Backtest this strategy
               </button>
               <button type="button" id="sb-save" class="sb-reset">
@@ -786,7 +799,7 @@
               <input id="ss-symbols" type="text" placeholder="NVDA, AAPL, BTC:CRYPTO" />
             </label>
             <div id="ss-error" class="sb-errors hidden"></div>
-            <button type="button" id="ss-save" class="btn-primary">
+            <button type="button" id="ss-save" class="btn btn-primary">
               <span class="material-symbols-outlined">bookmark_add</span> Save
             </button>
           </div>
@@ -839,7 +852,7 @@
               </label>
             </div>
             <div class="bt-actions">
-              <button type="submit" id="bt-run" class="btn-primary">
+              <button type="submit" id="bt-run" class="btn btn-primary">
                 <span class="material-symbols-outlined">play_arrow</span> Run backtest
               </button>
               <button type="button" id="bt-save" class="sb-reset">
@@ -856,8 +869,20 @@
           </div>
           <div id="bt-coverage" class="bt-coverage hidden"></div>
           <div id="bt-metrics" class="bt-metrics"></div>
+          <div id="bt-compare" class="bt-compare hidden"></div>
           <div class="chart-container bt-chart-container">
             <canvas id="bt-equity-chart"></canvas>
+          </div>
+          <div class="bt-wf">
+            <div class="bt-wf-head">
+              <h3>Robustness check</h3>
+              <button type="button" id="bt-wf-run" class="btn btn-ghost btn-sm">
+                <span class="material-symbols-outlined">fact_check</span> Run check
+              </button>
+            </div>
+            <p class="bt-wf-hint">Cuts this date range into 4 stretches and re-runs the same rules on each one it
+              wasn't judged on. A strategy that only works on the history it was tuned to shows up here.</p>
+            <div id="bt-wf-body"></div>
           </div>
           <div class="bt-trades">
             <h3>Trades <span id="bt-trade-count" class="badge"></span></h3>
@@ -908,7 +933,7 @@
                 <input id="pt-cash" type="number" value="100000" min="1000" step="1000" />
               </label>
             </div>
-            <button type="submit" id="pt-deploy" class="btn-primary">
+            <button type="submit" id="pt-deploy" class="btn btn-primary">
               <span class="material-symbols-outlined">rocket_launch</span> Deploy
             </button>
           </form>
@@ -978,7 +1003,17 @@
                 <label>Email Address</label>
                 <input type="email" id="profile-email-display" disabled class="input-readonly">
                 <p class="form-hint" style="margin-top:6px">Email cannot be changed.</p>
+                <div id="email-verify-row" class="email-verify-row hidden">
+                  <span id="email-verify-status" class="email-verify-status"></span>
+                  <button type="button" class="btn btn-ghost btn-xs" id="email-verify-btn">Send verification link</button>
+                </div>
               </div>
+              <label class="email-pref">
+                <input type="checkbox" id="email-alerts-toggle">
+                <span>Email me real-time alerts
+                  <small id="email-alerts-hint">Plus and Pro plans. Alerts always appear in the app.</small></span>
+              </label>
+              <div id="email-pref-msg" class="profile-msg hidden"></div>
               <div id="profile-name-msg" class="profile-msg hidden"></div>
               <button class="btn btn-primary btn-sm" id="profile-save-btn">Save Changes</button>
             </div>
@@ -1033,8 +1068,9 @@
           <div class="profile-card-body">
             <p class="form-hint">
               Keys work on both the REST API at <code id="v1-endpoint-url">/v1</code> and the
-              MCP server at <code id="mcp-endpoint-url">/mcp</code> — read + run strategy tools:
-              catalog, validate, backtest, signals, saved strategies and paper deployments.
+              MCP server at <code id="mcp-endpoint-url">/mcp</code> — strategy tools (catalog, validate,
+              backtest, robustness check, signals, saved strategies, paper deployments) and your SenIQ
+              data (portfolio, news, sentiment, smart money). Keys are read-only unless you tick write access.
               Send the key as <code>Authorization: Bearer &lt;key&gt;</code> ·
               <a href="/docs" target="_blank" rel="noopener">Full API docs ↗</a>
             </p>
@@ -1046,6 +1082,10 @@
               <input type="text" id="api-key-name" placeholder="Key name (e.g. Claude Desktop)" maxlength="60" autocomplete="off">
               <button class="btn btn-primary btn-sm" id="api-key-create-btn">Create Key</button>
             </div>
+            <label class="api-key-write">
+              <input type="checkbox" id="api-key-write">
+              <span>Allow this key to save strategies and start or stop paper deployments (virtual money only)</span>
+            </label>
             <div id="api-key-msg" class="profile-msg hidden"></div>
           </div>
         </section>

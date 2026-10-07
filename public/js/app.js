@@ -351,12 +351,12 @@ function renderHoldings() {
     return `
     <tr class="${rowClass}" data-ticker="${h.ticker}" onclick="toggleFilter('${h.ticker}')">
       <td>
-        <div class="ht-ticker">${h.ticker} <span class="asset-class-badge ${cls}">${clsLabel}</span> ${priceInline}</div>
+        <div class="ht-ticker">${h.ticker} <span class="asset-class-badge ${cls}">${clsLabel}</span>${h.coverage === 'basic' ? ' <span class="coverage-badge" title="Outside SenIQ\'s curated list of companies. News is matched on the name and symbol only, so expect fewer stories and a thinner sentiment score.">Basic coverage</span>' : ''} ${priceInline}</div>
         <div class="ht-name">${h.company_name || h.ticker}</div>
       </td>
       <td class="ht-exposure">${exposure}</td>
       <td><span class="ht-senti-label neutral" id="senti-label-${h.ticker}">—</span></td>
-      <td><span class="ht-score neutral" id="score-${h.ticker}">—</span></td>
+      <td><button class="ht-score-why" type="button" title="See the stories behind this score" onclick="event.stopPropagation(); toggleSentimentDrivers('${h.ticker}')"><span class="ht-score neutral" id="score-${h.ticker}">—</span><span class="ht-score-caret" aria-hidden="true">▾</span></button></td>
       <td><span class="ht-headline" id="headline-${h.ticker}">—</span></td>
       <td class="ht-actions">
         <button class="ht-info" onclick="event.stopPropagation(); openBriefFor('${h.ticker}')" title="Company brief">ℹ</button>
@@ -784,6 +784,49 @@ async function loadPortfolioSentiment() {
   }
 }
 
+// ─── Explain the number: the stories behind a holding's sentiment score ──────
+// Clicking a score opens a row under the holding listing each story's exact share of the
+// score (GET /api/news/sentiment/:ticker/drivers — the same data Ask's explain tool uses).
+function renderSentimentDrivers(d) {
+  const z = d.baseline && d.baseline.z != null;
+  const head = `<div class="drv-head"><strong>${escapeHtml(d.ticker)}</strong> sentiment ${Math.round((d.acute.score ?? 0.5) * 100)} from ${d.acute.count} article${d.acute.count === 1 ? '' : 's'} in the last ${d.window_hours}h` +
+    (z ? ` · ${d.baseline.z > 0 ? '+' : ''}${d.baseline.z}σ vs its own 90-day norm` : ' · too little history for a comparison with its norm') + '</div>';
+  if (!d.drivers.length) return head + `<div class="drv-empty">${escapeHtml(d.note || 'No recent articles are driving this score.')}</div>`;
+  const unit = z ? 'σ' : ' pts';
+  const rows = d.drivers.map((x) => {
+    const title = x.url && x.url !== '#' ? `<a href="${escapeHtml(x.url)}" target="_blank" rel="noopener">${escapeHtml(x.title)}</a>` : escapeHtml(x.title);
+    return `<li class="drv-item ${x.direction}">
+        <span class="drv-arrow">${x.direction === 'up' ? '▲' : x.direction === 'down' ? '▼' : '■'}</span>
+        <span class="drv-title">${title}</span>
+        <span class="drv-meta">${escapeHtml(x.source || '')} · ${escapeHtml(x.date || '')}${x.articles > 1 ? ` · ${x.articles} articles` : ''}</span>
+        <span class="drv-contrib">${x.contribution > 0 ? '+' : ''}${x.contribution}${unit}</span>
+      </li>`;
+  }).join('');
+  const rest = d.other_stories && d.other_stories.stories
+    ? `<div class="drv-rest">${d.other_stories.stories} other ${d.other_stories.stories === 1 ? 'story' : 'stories'}: ${d.other_stories.contribution > 0 ? '+' : ''}${d.other_stories.contribution}${unit} combined</div>` : '';
+  return head + `<ul class="drv-list">${rows}</ul>${rest}<div class="drv-foot">${z ? 'The parts add up to the score\'s distance from its norm.' : 'The parts add up to the score\'s distance from neutral (50).'} Weighted by recency, source and confidence.</div>`;
+}
+
+async function toggleSentimentDrivers(ticker) {
+  const row = document.querySelector(`#holdings-grid tr[data-ticker="${CSS.escape(ticker)}"]`);
+  if (!row) return;
+  const next = row.nextElementSibling;
+  if (next && next.classList.contains('ht-drivers-row')) { next.remove(); return; }
+  document.querySelectorAll('#holdings-grid .ht-drivers-row').forEach((r) => r.remove());
+  const tr = document.createElement('tr');
+  tr.className = 'ht-drivers-row';
+  tr.innerHTML = '<td colspan="6"><div class="drv-box">Loading…</div></td>';
+  row.after(tr);
+  const box = tr.querySelector('.drv-box');
+  try {
+    box.innerHTML = renderSentimentDrivers(await api(`/api/news/sentiment/${encodeURIComponent(ticker)}/drivers`));
+  } catch (err) {
+    box.innerHTML = err.status === 402
+      ? upgradeNote('See which stories are driving each score on Plus.')
+      : `<div class="drv-empty">${escapeHtml(err.message || 'Could not load the stories behind this score.')}</div>`;
+  }
+}
+
 // ─── Portfolio Impact (North Star) ───────────────────────────
 const DIR_ICON = { positive: '▲', negative: '▼', neutral: '■' };
 
@@ -1204,6 +1247,48 @@ function populateProfilePage(user) {
   }
 }
 
+// ─── Email preferences (verified address + alert emails) ─────
+let emailPrefsBound = false;
+function emailPrefMsg(text, kind = 'success') {
+  const el = document.getElementById('email-pref-msg');
+  el.textContent = text;
+  el.className = `profile-msg ${kind}`;
+}
+async function loadEmailPrefs() {
+  const toggle = document.getElementById('email-alerts-toggle');
+  const status = document.getElementById('email-verify-status');
+  const btn = document.getElementById('email-verify-btn');
+  if (!emailPrefsBound) {
+    emailPrefsBound = true;
+    toggle.addEventListener('change', async () => {
+      try {
+        const r = await api('/api/email/preferences', { method: 'PUT', body: JSON.stringify({ email_alerts: toggle.checked }) });
+        emailPrefMsg(r.email_alerts ? 'Alert emails are on.' : 'Alert emails are off — alerts still appear in the app.');
+      } catch (err) {
+        toggle.checked = !toggle.checked;
+        emailPrefMsg(err.message || 'Could not save that', 'error');
+      }
+    });
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const r = await api('/api/auth/resend-verification', { method: 'POST' });
+        emailPrefMsg(r.message);
+      } catch (err) {
+        emailPrefMsg(err.message || 'Could not send the link', 'error');
+      } finally { btn.disabled = false; }
+    });
+  }
+  try {
+    const p = await api('/api/email/preferences');
+    toggle.checked = !!p.email_alerts;
+    document.getElementById('email-verify-row').classList.remove('hidden');
+    status.textContent = p.email_verified ? 'Verified' : 'Not verified — alert emails are only sent to a verified address';
+    status.className = `email-verify-status ${p.email_verified ? 'ok' : 'warn'}`;
+    btn.classList.toggle('hidden', !!p.email_verified);
+  } catch { /* leave the controls as they are */ }
+}
+
 // ─── Smart Money (Phase 3) ───────────────────────────────────
 let congressScope = 'mine';
 let cachedInstitutions = [];
@@ -1474,7 +1559,7 @@ function switchToPage(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('hidden', p.id !== `page-${page}`));
   if (page === 'analytics') updateSentimentChart(activeFilter && cachedSentiments[activeFilter] ? { [activeFilter]: cachedSentiments[activeFilter] } : cachedSentiments);
   if (page === 'ai') { loadDailyBrief(); loadAskThreads(); }
-  if (page === 'profile') { populateProfilePage(currentUser); loadPlans(); loadApiKeys(); }
+  if (page === 'profile') { populateProfilePage(currentUser); loadPlans(); loadApiKeys(); loadEmailPrefs(); }
   if (page === 'backtest') initBacktestPage();
   if (page === 'strategy-builder') initBuilderPage();
   if (page === 'strategies') initStrategiesPage();
@@ -1524,11 +1609,13 @@ function moveNavIndicator() {
 let btCatalog = null;       // strategy list from the engine, loaded once per session
 let btChart = null;         // Chart.js instance for the equity curve
 let btInitDone = false;
+let btLastBody = null;      // body of the last successful backtest (re-used by the robustness check)
 
 async function initBacktestPage() {
   if (!btInitDone) {
     btInitDone = true;
     document.getElementById('bt-form').addEventListener('submit', runBacktest);
+    document.getElementById('bt-wf-run').addEventListener('click', runWalkForward);
     document.getElementById('bt-strategy').addEventListener('change', renderBtParams);
     document.getElementById('bt-save').addEventListener('click', () => {
       const sel = document.getElementById('bt-strategy');
@@ -1651,7 +1738,10 @@ async function runBacktest(e) {
   btStatus('');
   try {
     const data = await api('/api/strategies/backtest', { method: 'POST', body: JSON.stringify(body) });
+    btLastBody = body;
+    document.getElementById('bt-wf-body').innerHTML = '';
     renderBtResults(data);
+    renderBtCompareOffer();
   } catch (err) {
     document.getElementById('bt-results').classList.add('hidden');
     if (err.status === 402) {
@@ -1668,6 +1758,52 @@ async function runBacktest(e) {
   }
 }
 
+// "Did the SenIQ signal help?" — offered after a backtest of a Builder strategy that uses
+// SenIQ signals. Runs the same strategy again with those conditions removed
+// (POST /api/strategies/compare) and shows both side by side, caveats included.
+function renderBtCompareOffer() {
+  const el = document.getElementById('bt-compare');
+  if (!el) return;
+  const spec = btLastBody && btLastBody.custom;
+  const usesSeniq = spec && (spec.factors || []).some((f) => f.source === 'seniq');
+  el.classList.toggle('hidden', !usesSeniq);
+  if (!usesSeniq) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="bt-compare-head">
+      <div><strong>Did the SenIQ signals help?</strong><span class="bt-compare-sub">Runs this strategy again with its SenIQ conditions removed, over the same symbol and dates.</span></div>
+      <button type="button" class="btn btn-ghost btn-sm" id="bt-compare-run"><span class="material-symbols-outlined">compare_arrows</span> Compare without SenIQ signals</button>
+    </div><div id="bt-compare-body"></div>`;
+  document.getElementById('bt-compare-run').addEventListener('click', runBtCompare);
+}
+
+async function runBtCompare() {
+  const btn = document.getElementById('bt-compare-run');
+  const body = document.getElementById('bt-compare-body');
+  btn.disabled = true;
+  body.innerHTML = '<div class="bt-compare-note">Running two backtests…</div>';
+  try {
+    const d = await api('/api/strategies/compare', { method: 'POST', body: JSON.stringify(btLastBody) });
+    const p = (v) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v}%`);
+    const cls = (v) => (v == null || v === 0 ? '' : v > 0 ? 'pos' : 'neg');
+    const row = (label, a, b, diff, fmt = p) => `<tr><td>${label}</td><td>${fmt(a)}</td><td>${fmt(b)}</td><td class="${cls(diff)}">${diff == null ? '—' : fmt(diff)}</td></tr>`;
+    const n = (v) => (v == null ? '—' : String(v));
+    const signed = (v) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v}`);
+    body.innerHTML = `<table class="bt-compare-table">
+        <thead><tr><th></th><th>With SenIQ signals</th><th>Price rules only</th><th>Difference</th></tr></thead>
+        <tbody>
+          ${row('Total return', d.with_seniq.return_pct, d.without_seniq.return_pct, d.difference.return_pct)}
+          ${row('Max drawdown', d.with_seniq.max_drawdown_pct, d.without_seniq.max_drawdown_pct, d.difference.max_drawdown_pct)}
+          <tr><td>Trades</td><td>${n(d.with_seniq.trades)}</td><td>${n(d.without_seniq.trades)}</td><td>${signed(d.difference.trades)}</td></tr>
+        </tbody>
+      </table>
+      <div class="bt-compare-note">Buy and hold over the same period: <strong>${p(d.buy_hold_return_pct)}</strong> · ${d.seniq_conditions_removed} SenIQ ${d.seniq_conditions_removed === 1 ? 'condition' : 'conditions'} removed for the price-only run.</div>
+      <ul class="bt-compare-caveats">${(d.notes || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
+  } catch (err) {
+    body.innerHTML = `<div class="bt-compare-note warn">${escapeHtml(err.status === 503 ? 'The strategy engine is offline. Start it and try again.' : (err.message || 'The comparison could not be run.'))}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 const btPct = v => v == null ? '—' : `${(Number(v) * 100).toFixed(1)}%`;
 const btNum = (v, d = 2) => v == null ? '—' : Number(v).toFixed(d);
 
@@ -1678,7 +1814,11 @@ function renderBtResults(data) {
 
   document.getElementById('bt-results-title').textContent = `${req.symbol} · ${req.strategy}`;
   document.getElementById('bt-results-sub').textContent =
-    `${req.start_date} → ${req.end_date} · ${data.n_bars} bars · ${data.provider.name}`;
+    `${req.start_date} → ${req.end_date} · ${data.n_bars} bars · ${data.provider.name}` +
+    // Cash-limited entries the trade list can't show: buys cut down to the cash available
+    // at the fill price, and buys skipped because cash didn't cover one share.
+    (data.orders && data.orders.reduced ? ` · ${data.orders.reduced} ${data.orders.reduced === 1 ? 'entry' : 'entries'} sized down to available cash` : '') +
+    (data.orders && data.orders.unaffordable ? ` · ${data.orders.unaffordable} ${data.orders.unaffordable === 1 ? 'entry' : 'entries'} skipped (not enough cash for one share)` : '');
 
   // Backtest-depth honesty: SenIQ signal history only reaches back as far as
   // SenIQ has been recording — show how much of this run the factors covered.
@@ -1706,6 +1846,14 @@ function renderBtResults(data) {
     { label: 'Trades', value: m.n_trades },
     { label: 'Exposure', value: btPct(m.exposure_pct) },
   ];
+  // The question a single-symbol backtest has to answer: did the rules beat just holding it?
+  const bench = data.report.benchmark;
+  if (bench && bench.points && bench.points.length) {
+    const alpha = Number(bench.alpha_total_pct);
+    cards.splice(1, 0,
+      { label: 'Buy & hold', value: btPct(bench.benchmark_total_return_pct) },
+      { label: 'vs buy & hold', value: `${alpha >= 0 ? '+' : ''}${btPct(alpha)}`, cls: alpha >= 0 ? 'pos' : 'neg' });
+  }
   document.getElementById('bt-metrics').innerHTML = cards.map(c =>
     `<div class="bt-metric ${c.cls || ''}"><span class="bt-metric-value">${c.value}</span><span class="bt-metric-label">${c.label}</span></div>`
   ).join('');
@@ -1725,11 +1873,16 @@ function renderBtResults(data) {
         borderColor: positive ? '#14B86A' : '#EF4444',
         backgroundColor: positive ? 'rgba(20,184,106,0.08)' : 'rgba(239,68,68,0.08)',
         fill: true, pointRadius: 0, borderWidth: 2, tension: 0.1,
-      }],
+      }, ...(bench && bench.points && bench.points.length ? [{
+        label: 'Buy & hold',
+        data: bench.points.map(p => Number(p.benchmark_equity)),
+        borderColor: '#64748B', borderDash: [5, 4],
+        fill: false, pointRadius: 0, borderWidth: 1.5, tension: 0.1,
+      }] : [])],
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: !!(bench && bench.points && bench.points.length), labels: { color: '#64748B', boxWidth: 18 } } },
       interaction: { mode: 'index', intersect: false },
       scales: {
         x: { ticks: { maxTicksLimit: 8, color: '#64748B' }, grid: { display: false } },
@@ -1762,6 +1915,47 @@ function renderBtResults(data) {
   document.getElementById('bt-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// Robustness check: the same rules on each in-sample stretch and the unseen stretch after it.
+async function runWalkForward() {
+  if (!btLastBody) return;
+  const btn = document.getElementById('bt-wf-run');
+  const out = document.getElementById('bt-wf-body');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="material-symbols-outlined spin">progress_activity</span> Checking…';
+  try {
+    const data = await api('/api/strategies/walk-forward', { method: 'POST', body: JSON.stringify({ ...btLastBody, n_splits: 4 }) });
+    const wf = data.walk_forward, s = wf.summary;
+    const VERDICT_TEXT = {
+      robust: 'Held up on data it wasn\'t judged on.',
+      moderate: 'Profitable out of sample, but not consistently.',
+      fragile: 'Results did not carry over to unseen data.',
+      insufficient_data: 'Not enough data in these windows to judge — try a longer date range.',
+    };
+    const cell = (v) => v == null ? '<td>—</td>' : `<td class="${Number(v) >= 0 ? 'pos' : 'neg'}">${btPct(v)}</td>`;
+    out.innerHTML = `
+      <div class="bt-wf-verdict">
+        <span class="bt-wf-pill ${escapeHtml(s.verdict)}">${escapeHtml(s.verdict.replace('_', ' '))}</span>
+        <span>${VERDICT_TEXT[s.verdict] || ''}</span>
+        <span class="brief-muted">${s.n_valid_folds} of ${s.n_folds} folds usable${s.oos_consistency != null ? ` · profitable in ${btPct(s.oos_consistency)} of unseen windows` : ''}</span>
+      </div>
+      <div class="bt-trades-scroll"><table class="bt-wf-table">
+        <thead><tr><th>Fold</th><th>Judged on</th><th>Return</th><th>Then tested on</th><th>Return</th><th>Max drawdown</th><th>Trades</th></tr></thead>
+        <tbody>${wf.folds.map(f => `<tr>
+          <td>${f.index}</td>
+          <td>${f.is_start} → ${f.is_end}</td>${cell(f.is_metrics && f.is_metrics.total_return_pct)}
+          <td>${f.oos_start} → ${f.oos_end}</td>${cell(f.oos_metrics && f.oos_metrics.total_return_pct)}
+          <td>${f.oos_metrics ? btPct(f.oos_metrics.max_drawdown_pct) : '—'}</td>
+          <td>${f.oos_metrics ? f.oos_metrics.n_trades : '—'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+  } catch (err) {
+    out.innerHTML = `<p class="bt-wf-hint">${escapeHtml(err.status === 503 ? 'The strategy engine is offline.' : (err.message || 'Robustness check failed'))}</p>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="material-symbols-outlined">fact_check</span> Run check';
+  }
+}
+
 // ─── Strategy Builder (Phase 7) ──────────────────────────────
 // Rule-row editor that emits the engine's strategy spec (factors + entry/exit
 // trees). The UI model lives in localStorage; the emitted spec is handed to the
@@ -1778,15 +1972,29 @@ const SB_PARAMS = {
   sma: { period: 20 }, ema: { period: 20 }, rsi: { period: 14 },
   highest: { period: 20 }, lowest: { period: 20 }, roc: { period: 20 },
   macd: { fast: 12, slow: 26 }, macd_signal: { fast: 12, slow: 26, signal: 9 },
-  'seniq:sentiment_avg': {}, 'seniq:sentiment_zscore': {}, 'seniq:news_volume': {},
-  'seniq:congress_net_buys': { window_days: 30 },
+  'seniq:sentiment_acute': {}, 'seniq:sentiment_avg': {}, 'seniq:sentiment_zscore': {}, 'seniq:news_volume': {},
+  // Congress disclosures in a trailing window; politician (optional) follows one member.
+  'seniq:congress_net_buys': { window_days: 30, politician: '' },
+  'seniq:congress_buys': { window_days: 30, politician: '' },
+  'seniq:congress_sells': { window_days: 30, politician: '' },
+  'seniq:congress_buyers': { window_days: 45 },
+  // Tracked funds' 13F filings (quarterly, US stocks).
+  'seniq:funds_holding': {}, 'seniq:funds_net_adds': {}, 'seniq:funds_new_positions': {},
 };
 const SB_SENIQ_LABELS = {
+  'seniq:sentiment_acute': 'Sentiment (dashboard score)',
   'seniq:sentiment_avg': 'Sentiment (daily avg)',
   'seniq:sentiment_zscore': 'Sentiment z-score',
   'seniq:news_volume': 'News volume',
   'seniq:congress_net_buys': 'Congress net buys',
+  'seniq:congress_buys': 'Congress buys',
+  'seniq:congress_sells': 'Congress sells',
+  'seniq:congress_buyers': 'Congress members buying',
+  'seniq:funds_holding': 'Tracked funds holding',
+  'seniq:funds_net_adds': 'Tracked funds: adds minus cuts',
+  'seniq:funds_new_positions': 'Tracked funds: new positions',
 };
+const SB_PARAM_LABELS = { window_days: 'days', politician: 'member (optional)' };
 const sbIsSeniq = (fn) => fn.startsWith('seniq:');
 const sbFnLabel = (fn) => SB_SENIQ_LABELS[fn] || fn.toUpperCase();
 const SB_OPS = [
@@ -1814,7 +2022,7 @@ function sbLoadUi() {
 function sbSaveUi(ui) { localStorage.setItem(SB_UI_KEY, JSON.stringify(ui)); }
 
 function sbFactorLabel(f, i) {
-  const ps = Object.values(f.params).join(',');
+  const ps = Object.values(f.params).filter((v) => v !== '').join(',');
   const base = sbIsSeniq(f.fn) ? sbFnLabel(f.fn) : f.fn.toUpperCase();
   return `${base}${ps ? `(${ps})` : ''}  ·  f${i + 1}`;
 }
@@ -1825,7 +2033,9 @@ function sbReadUi() {
   document.querySelectorAll('#sb-factors .sb-row').forEach(row => {
     const fn = row.querySelector('.sb-fn').value;
     const params = {};
-    row.querySelectorAll('.sb-param').forEach(inp => { params[inp.dataset.p] = Number(inp.value) || 1; });
+    row.querySelectorAll('.sb-param').forEach(inp => {
+      params[inp.dataset.p] = inp.dataset.kind === 'text' ? inp.value.replace(/\s+/g, ' ').trim().slice(0, 80) : (Number(inp.value) || 1);
+    });
     ui.factors.push({ fn, params });
   });
   ['entry', 'exit'].forEach(kind => {
@@ -1847,8 +2057,10 @@ function sbReadUi() {
 
 // Builds the engine spec from the UI model.
 function sbEmitSpec(ui) {
+  // Optional text params left blank (e.g. no politician chosen) are not sent.
+  const filled = (params) => Object.fromEntries(Object.entries(params).filter(([, v]) => v !== ''));
   const factors = ui.factors.map((f, i) => sbIsSeniq(f.fn)
-    ? { id: `f${i + 1}`, source: 'seniq', metric: f.fn.slice(6), params: f.params }
+    ? { id: `f${i + 1}`, source: 'seniq', metric: f.fn.slice(6), params: filled(f.params) }
     : { id: `f${i + 1}`, fn: f.fn, params: f.params });
   const cond = (r) => ({ [r.op]: [r.left, r.right === '__num__' ? Number(r.num) : r.right] });
   const exitList = ui.exit.map(cond);
@@ -1861,6 +2073,58 @@ function sbEmitSpec(ui) {
     exit: exitList.length ? { any: exitList } : undefined,
     sizing: { type: ui.sizingType, value: ui.sizingValue },
   };
+}
+
+// The reverse of sbEmitSpec: a Builder spec (a SenIQ template, or a draft written by Ask) →
+// the UI model. The page shows ONE list of entry conditions that must all hold and ONE list
+// of exit conditions where any fires, so a spec with nested groups can't be displayed.
+// Returns { ok: true, ui } or { ok: false, reason }.
+function sbSpecToUi(spec) {
+  if (!spec || !Array.isArray(spec.factors)) return { ok: false, reason: 'it has no indicators' };
+  const idMap = {};
+  const factors = [];
+  for (const f of spec.factors) {
+    const fn = f.source === 'seniq' ? `seniq:${f.metric}` : f.fn;
+    if (!SB_PARAMS[fn]) return { ok: false, reason: `it uses "${f.source === 'seniq' ? f.metric : f.fn}", which this page doesn't list` };
+    idMap[f.id] = `f${factors.length + 1}`;
+    factors.push({ fn, params: { ...SB_PARAMS[fn], ...(f.params || {}) } });
+  }
+  const operand = (x) => (typeof x === 'number' ? '__num__' : x === 'close' ? 'price' : idMap[x] || (['price', 'volume'].includes(x) ? x : null));
+  const flat = (node, joiner) => {
+    if (!node) return [];
+    const key = Object.keys(node)[0];
+    if (key === 'all' || key === 'any') {
+      if (key !== joiner && node[key].length > 1) return null; // "any of" in entry / "all of" in exit
+      const out = [];
+      for (const child of node[key]) {
+        const k = Object.keys(child)[0];
+        if (k === 'all' || k === 'any') {
+          if (child[k].length > 1) return null; // a nested group
+          out.push(child[k][0]);
+        } else out.push(child);
+      }
+      return out;
+    }
+    return [node];
+  };
+  const ui = { name: String(spec.name || 'My strategy').slice(0, 80), factors, entry: [], exit: [], stop: '', target: '',
+    sizingType: (spec.sizing && spec.sizing.type) || 'percent_equity', sizingValue: (spec.sizing && spec.sizing.value) || 25 };
+  for (const [kind, joiner] of [['entry', 'all'], ['exit', 'any']]) {
+    const conds = flat(spec[kind], joiner);
+    if (!conds) return { ok: false, reason: 'it uses nested rule groups, and this page shows one flat list for entry and one for exit' };
+    for (const c of conds) {
+      const op = Object.keys(c)[0];
+      if (op === 'stop_loss_pct') { ui.stop = String(c[op]); continue; }
+      if (op === 'take_profit_pct') { ui.target = String(c[op]); continue; }
+      if (!SB_OPS.some((o) => o.v === op) || !Array.isArray(c[op])) return { ok: false, reason: `it uses the rule "${op}", which this page doesn't list` };
+      const left = operand(c[op][0]);
+      const right = operand(c[op][1]);
+      if (!left || left === '__num__' || !right) return { ok: false, reason: 'one of its rules compares something this page cannot show' };
+      ui[kind].push({ left, op, right, num: right === '__num__' ? String(c[op][1]) : '' });
+    }
+  }
+  if (!ui.entry.length) return { ok: false, reason: 'it has no entry rule' };
+  return { ok: true, ui };
 }
 
 function sbOperandOptions(ui, selected) {
@@ -1883,7 +2147,9 @@ function sbRender() {
     <div class="sb-row" data-i="${i}">
       <span class="sb-fid">f${i + 1}</span>
       <select class="sb-fn">${fnSelect(f.fn)}</select>
-      ${Object.entries(f.params).map(([k, v]) => `<label class="sb-plabel">${k}<input class="sb-param" data-p="${k}" type="number" value="${v}" min="1" max="500" /></label>`).join('')}
+      ${Object.entries(f.params).map(([k, v]) => (typeof SB_PARAMS[f.fn]?.[k] === 'string'
+        ? `<label class="sb-plabel">${SB_PARAM_LABELS[k] || k}<input class="sb-param sb-param-text" data-p="${k}" data-kind="text" type="text" value="${escapeHtml(String(v ?? ''))}" maxlength="80" placeholder="full name" /></label>`
+        : `<label class="sb-plabel">${SB_PARAM_LABELS[k] || k}<input class="sb-param" data-p="${k}" type="number" value="${v}" min="1" max="500" /></label>`)).join('')}
       ${sbIsSeniq(f.fn) ? '<span class="sb-seniq-tag">SenIQ</span>' : ''}
       <button type="button" class="sb-del" data-kind="factors" data-i="${i}">×</button>
     </div>`).join('');
@@ -1931,6 +2197,7 @@ async function initBuilderPage() {
   }
 
   sbRender();
+  sbInitPresets();
 
   // One delegated listener per section keeps rows simple.
   const editor = document.getElementById('sb-editor');
@@ -2011,6 +2278,44 @@ async function initBuilderPage() {
       return;
     }
     openSaveModal({ custom: spec }, spec.name);
+  });
+}
+
+// SenIQ templates: ready-made specs that use SenIQ signals (GET /api/strategies/seniq-presets).
+// Loading one REPLACES what is in the editor; nothing is saved until the user saves.
+let sbPresets = [];
+async function sbInitPresets() {
+  const wrap = document.getElementById('sb-presets');
+  const sel = document.getElementById('sb-preset');
+  if (!wrap || !sel) return;
+  try { sbPresets = (await api('/api/strategies/seniq-presets')).presets || []; }
+  catch { wrap.classList.add('hidden'); return; }
+  if (!sbPresets.length) { wrap.classList.add('hidden'); return; }
+  sel.innerHTML = '<option value="">Choose a template…</option>' + sbPresets.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('');
+  const note = document.getElementById('sb-preset-note');
+  const inputWrap = document.getElementById('sb-preset-input-wrap');
+  sel.addEventListener('change', () => {
+    const p = sbPresets.find((x) => x.id === sel.value);
+    const inp = p && p.inputs && p.inputs[0];
+    inputWrap.classList.toggle('hidden', !inp);
+    if (inp) document.getElementById('sb-preset-input-label').textContent = inp.label;
+    note.classList.toggle('hidden', !p);
+    note.innerHTML = p ? `${escapeHtml(p.description)}<br><strong>History:</strong> ${escapeHtml(p.data_depth)}` : '';
+  });
+  document.getElementById('sb-preset-load').addEventListener('click', async () => {
+    const p = sbPresets.find((x) => x.id === sel.value);
+    if (!p) return showToast('Choose a template first', 'error');
+    const body = {};
+    if (p.inputs && p.inputs[0]) body[p.inputs[0].name] = document.getElementById('sb-preset-input').value;
+    try {
+      const { spec } = await api(`/api/strategies/seniq-presets/${encodeURIComponent(p.id)}`, { method: 'POST', body: JSON.stringify(body) });
+      const out = sbSpecToUi(spec);
+      if (!out.ok) return showToast(`This template can't be shown here: ${out.reason}`, 'error');
+      sbSaveUi(out.ui); sbRender();
+      showToast(`“${out.ui.name}” loaded. Review it, then backtest.`, 'success');
+    } catch (err) {
+      showToast(err.message || 'Could not load the template', 'error');
+    }
   });
 }
 
@@ -2542,7 +2847,13 @@ function briefScoreClass(score) {
 function renderBrief(b) {
   const c = b.company || {};
   const meta = [c.sector, c.exchange, c.country].filter(Boolean).join(' · ');
-  const execs = (c.executives || []).map(e => `${escapeHtml(e.name)}${e.role ? ` (${escapeHtml(e.role)})` : ''}`).join(', ');
+  const execs = (c.executives || []).map(e => {
+    const role = [e.former ? 'former' : '', e.role || ''].filter(Boolean).join(' ');
+    return `${escapeHtml(e.name)}${role ? ` (${escapeHtml(role)})` : ''}`;
+  }).join(', ');
+  // Oldest check among the people shown — the card is only as fresh as its stalest name.
+  const execDates = (c.executives || []).filter(e => !e.former).map(e => e.as_of);
+  const execAsOf = execDates.length && execDates.every(Boolean) ? execDates.slice().sort()[0] : null;
 
   const s = b.sentiment;
   const TT = {
@@ -2588,7 +2899,7 @@ function renderBrief(b) {
       <div class="brief-name">${escapeHtml(c.name || b.ticker)} <span class="brief-ticker">${escapeHtml(b.ticker)}</span></div>
       ${meta ? `<div class="brief-meta">${escapeHtml(meta)}</div>` : ''}
       ${!b.in_universe ? `<div class="brief-meta brief-muted">Outside the curated universe — basic coverage only.</div>` : ''}
-      ${execs ? `<div class="brief-execs">Key people: ${execs}</div>` : ''}
+      ${execs ? `<div class="brief-execs">Key people: ${execs}${execAsOf ? ` <span class="brief-muted">· checked ${escapeHtml(execAsOf)}</span>` : ''}</div>` : ''}
     </div>
     ${sentimentBlock}
     ${impactBlock}
@@ -2688,16 +2999,53 @@ async function refreshDailyBrief() {
 let askThreadId = null;
 let askThread = []; // [{ question, answer, writer }]
 
-const ASK_WRITER_TAG = { claude: 'AI answer', deterministic: 'Auto-generated from your data', scope: 'Not in your portfolio' };
+const ASK_WRITER_TAG = { claude: 'AI answer', ollama: 'Local model answer', deterministic: 'Auto-generated from your data', scope: 'Not in your portfolio' };
+
+// The automatic check of an AI answer against the data it was given (server: answerCheck.js).
+// It flags, it does not block — and it can be wrong about figures the model added up itself,
+// which is why the wording is "could not be matched", not "wrong".
+function askGroundingBadge(g) {
+  if (!g || !g.checked) return '';
+  const missed = (g.unsupported || []).length;
+  if (!missed) return `<span class="ask-check ok" title="Every figure, date and company name in this answer was found in the data SenIQ gave the model.">✓ ${g.checked} ${g.checked === 1 ? 'fact' : 'facts'} matched to your data</span>`;
+  const list = g.unsupported.map((u) => u.text).join(', ');
+  return `<span class="ask-check warn" title="Not found in the data given to the model: ${escapeHtml(list)}. It may be a total the model worked out itself. Treat it with care.">⚠ ${missed} of ${g.checked} could not be matched: ${escapeHtml(list.length > 60 ? list.slice(0, 59) + '…' : list)}</span>`;
+}
+
+// A strategy draft the agent wrote from the user's description (v2). Nothing is saved until
+// the user opens it in the Builder and chooses to.
+function askDraftCard(d, i) {
+  if (!d || !d.spec) return '';
+  const li = (items) => items.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  return `<div class="ask-draft">
+      <div class="ask-draft-head"><span class="material-symbols-outlined">architecture</span><strong>${escapeHtml(d.name || 'Strategy draft')}</strong><span class="ask-draft-tag">Draft · not saved · not tested</span></div>
+      <div class="ask-draft-rules">${escapeHtml(d.rules || '')}</div>
+      ${(d.assumptions || []).length ? `<div class="ask-draft-sub">Assumed</div><ul class="ask-draft-list">${li(d.assumptions)}</ul>` : ''}
+      ${(d.data_depth_notes || []).length ? `<div class="ask-draft-sub">How much history these signals have</div><ul class="ask-draft-list warn">${li(d.data_depth_notes)}</ul>` : ''}
+      <button type="button" class="btn btn-primary btn-sm ask-draft-open" data-turn="${i}">Open in Strategy Builder</button>
+    </div>`;
+}
+
+function openDraftInBuilder(i) {
+  const d = askThread[i] && askThread[i].draft;
+  if (!d || !d.spec) return;
+  const out = sbSpecToUi(d.spec);
+  if (!out.ok) return showToast(`The Builder can't show this draft yet: ${out.reason}`, 'error');
+  sbSaveUi(out.ui);
+  if (sbInitDone) sbRender();
+  switchToPage('strategy-builder');
+  showToast(`“${out.ui.name}” loaded into the Builder. Review it, then backtest.`, 'success');
+}
 
 function renderAskThread(pending) {
   const answerEl = document.getElementById('ask-answer');
   const resetBtn = document.getElementById('ask-reset');
-  const turns = askThread.map((t) => `
+  const turns = askThread.map((t, i) => `
       <div class="ask-turn">
         <div class="ask-q">${escapeHtml(t.question)}</div>
         <div class="ask-answer-text">${escapeHtml(t.answer)}</div>
-        ${t.writer ? `<div class="ask-answer-meta"><span class="ask-writer">${ASK_WRITER_TAG[t.writer] || t.writer}</span><span class="ask-disclaimer">Informational only — not advice.</span></div>` : ''}
+        ${askDraftCard(t.draft, i)}
+        ${t.writer ? `<div class="ask-answer-meta"><span class="ask-writer">${ASK_WRITER_TAG[t.writer] || t.writer}</span>${askGroundingBadge(t.grounding)}<span class="ask-disclaimer">Informational only — not advice.</span></div>` : ''}
       </div>`).join('');
   const pendingHtml = pending ? `<div class="ask-turn"><div class="ask-q">${escapeHtml(pending)}</div><div class="ask-thinking">Thinking…</div></div>` : '';
   answerEl.innerHTML = turns + pendingHtml;
@@ -2728,7 +3076,11 @@ async function openAskThread(id) {
     askThreadId = thread.id;
     askThread = [];
     for (let i = 0; i + 1 < messages.length; i += 2) {
-      askThread.push({ question: messages[i].content, answer: messages[i + 1].content, writer: messages[i + 1].writer });
+      const a = messages[i + 1];
+      askThread.push({
+        question: messages[i].content, answer: a.content, writer: a.writer, draft: a.draft || null,
+        grounding: a.claims_checked == null ? null : { checked: a.claims_checked, unsupported: a.unsupported || [] },
+      });
     }
     renderAskThread();
     loadAskThreads();
@@ -2760,7 +3112,7 @@ async function askPortfolio(question) {
   try {
     const data = await api('/api/reports/ask', { method: 'POST', body: JSON.stringify({ question: q, thread_id: askThreadId }) });
     askThreadId = data.thread_id;
-    askThread.push({ question: data.question || q, answer: data.answer, writer: data.writer });
+    askThread.push({ question: data.question || q, answer: data.answer, writer: data.writer, draft: data.draft || null, grounding: data.grounding || null });
     renderAskThread();
     renderAskQuota(data.quota);
     loadAskThreads();
@@ -2784,6 +3136,10 @@ function renderAskQuota(quota) {
 }
 
 function initAsk() {
+  document.getElementById('ask-answer')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.ask-draft-open');
+    if (btn) openDraftInBuilder(Number(btn.dataset.turn));
+  });
   document.getElementById('ask-btn')?.addEventListener('click', () => askPortfolio());
   document.getElementById('ask-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') askPortfolio(); });
   document.querySelectorAll('.ask-chip').forEach((c) => c.addEventListener('click', () => askPortfolio(c.dataset.q)));
@@ -2920,6 +3276,7 @@ async function loadApiKeys() {
       <div class="api-key-row ${k.revoked ? 'revoked' : ''}">
         <span class="ak-prefix">${escapeHtml(k.key_prefix)}…</span>
         <span class="ak-name">${escapeHtml(k.name)}</span>
+        ${k.can_write ? '<span class="ak-write">write</span>' : ''}
         <span class="ak-meta">${k.revoked
           ? 'revoked'
           : (k.last_used_at ? `last used ${new Date(k.last_used_at).toLocaleDateString()}` : 'never used')}</span>
@@ -2938,9 +3295,10 @@ async function createApiKey() {
     btn.disabled = true;
     const created = await api('/api/keys', {
       method: 'POST',
-      body: JSON.stringify({ name: nameInput.value.trim() }),
+      body: JSON.stringify({ name: nameInput.value.trim(), can_write: document.getElementById('api-key-write').checked }),
     });
     nameInput.value = '';
+    document.getElementById('api-key-write').checked = false;
     // The full key exists only in this response — show it once with a copy button.
     const box = document.getElementById('api-key-new');
     box.innerHTML = `
