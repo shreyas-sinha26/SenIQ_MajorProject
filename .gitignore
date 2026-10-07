@@ -56,3 +56,6 @@ venv/
 
 # local dev workspace
 strategy-service/
+
+# ─── Eval run outputs (answers, tool results, judge verdicts) ─
+eval/ask/runs/
