@@ -89,6 +89,13 @@ const FEATURES = {
   // server, public REST API (/v1), API keys and /docs. Off = v1 (portfolio → AI Workspace).
   STRATEGIES: process.env.FEATURES_STRATEGIES === '1',
   NEWS_EMBEDDINGS: process.env.NEWS_EMBEDDINGS === '1', // embed articles for Ask's news search (needs HF_API_TOKEN + pgvector)
+  // Company filings (SEC 8-K) for held US stocks, fetched lazily by the smart-money poller.
+  // On by default; DISCLOSURES=0 turns the fetching off (stored filings stay searchable).
+  DISCLOSURES: process.env.DISCLOSURES !== '0',
+  // Ask's local-model tier (Claude → Ollama → deterministic). Opt-in: it loads a model into
+  // memory on the machine running Ollama and answers take seconds, so it is for demos and
+  // offline use, not the default.
+  ASK_OLLAMA: process.env.ASK_OLLAMA === '1',
   BILLING: false,
 };
 
@@ -202,7 +209,8 @@ const NEWS_RELEVANCE = {
 // A ticker can't push more than once per PER_TICKER_COOLDOWN_HOURS. Quiet hours
 // hold pushes to digest (off until we capture each user's timezone).
 const ALERT_BUDGET = {
-  MAX_REALTIME_PER_DAY: 5,
+  MAX_REALTIME_PER_DAY: 5,      // every alert type draws on this, smart money included
+  MAX_BROAD_REALTIME_PER_DAY: 2, // of which market/world stories — holdings news keeps the rest
   PER_TICKER_COOLDOWN_HOURS: 12,
   QUIET_HOURS_ENABLED: false,   // needs per-user TZ; global window until then
   QUIET_START: 22,              // local hour pushes pause (inclusive)
@@ -230,8 +238,19 @@ const EVENTS = {
 // This is what kills both kinds of spam — duplicate articles and one-more-bad-article
 // on an already-negative name (no z-surprise) no longer page anyone.
 const MATERIALITY = {
-  HOLDING_THRESHOLD: 0.35,    // per-user materiality needed to fire a holding alert
-  BROAD_THRESHOLD: 0.6,       // importance needed for a market/world alert to all users
+  // Per-user materiality needed to fire a holding alert. Calibrated on real portfolios:
+  // 0.35 needed a ~60% position, so holdings alerts never fired (5 in three months).
+  // 0.10 ≈ a 10% position hit by strong, confident, earnings-grade news; a 5% position
+  // only clears it when the news is also a surprise for that stock and widely covered.
+  HOLDING_THRESHOLD: 0.10,
+  TYPE_BASE: 0.5,             // event-type factor = TYPE_BASE + severity (other 0.8 … M&A 1.5)
+  REALTIME_MIN_CONFIDENCE: 0.4, // a holding alert below this still records, but never pushes/emails
+  BROAD_THRESHOLD: 0.6,       // story importance × coverage needed for a market/world alert
+  // A market/world STORY (related headlines grouped) pushes in real time only when it is
+  // confirmed and concerns the user; otherwise it is recorded once, as digest.
+  BROAD_REALTIME_MIN_COVERAGE: 3,   // reports across the story's headlines
+  BROAD_MIN_REGION_EXPOSURE: 10,    // % of the user's portfolio in the story's market
+  STORY_SHARED_TOKENS: 2,           // headlines sharing this many key words (same market) = one story
   Z_BOOST: 0.25,             // surprise vs the asset's 90-day baseline amplifies materiality
   VOLUME_BOOST: 0.15,        // each extra source covering the event adds this (log-scaled)
   MIN_CONFIDENCE: 0.2,       // ignore near-zero-confidence classifications
@@ -295,6 +314,27 @@ const QA = {
   MAX_TOOL_RESULT_CHARS: 4000,   // clamp each tool result before it re-enters the prompt
   HISTORY_TURNS: 3,              // follow-ups: last N question/answer pairs sent back
   MAX_HISTORY_CHARS: 1200,       // clamp each (client-supplied, untrusted) history message
+  // Rolling digest of turns OLDER than those: built in code (no model call) from the earlier
+  // questions and the tickers discussed, so a long thread keeps its thread without growing.
+  DIGEST_LOOKBACK_MESSAGES: 16,  // older messages read to build it
+  DIGEST_QUESTIONS: 6,           // most recent earlier questions kept
+  DIGEST_QUESTION_CHARS: 100,
+  DIGEST_MAX_CHARS: 700,         // ≈150 tokens
+  // Local-model tier (FEATURES.ASK_OLLAMA): one prompt holding the user's data packet.
+  OLLAMA_CONTEXT_CHARS: 6000,
+  OLLAMA_MAX_TOKENS: 350,
+  OLLAMA_TIMEOUT_MS: 25000,
+  // Strategy tools (v2 only, services/strategyTools.js) — read-only, bounded engine use.
+  STRATEGY_COMPARE_MAX: 10,          // paper deployments replayed for "which did best?"
+  STRATEGY_ENGINE_CONCURRENCY: 3,    // replays in flight at once (the engine is one process)
+  STRATEGY_ENGINE_TIMEOUT_MS: 20000, // per engine call — a chat answer can't wait for a 2-minute run
+  STRATEGY_CACHE_MS: 5 * 60 * 1000,  // replay results reused within a conversation
+  STRATEGY_CATALOG_CACHE_MS: 10 * 60 * 1000,
+  STRATEGY_LIST_DEPLOYMENTS: 8,      // with 20 saved strategies the list must still fit MAX_TOOL_RESULT_CHARS
+  STRATEGY_RULES_INLINE: 6,          // spell out rules only when the saved list is this short
+  STRATEGY_EVIDENCE_SYMBOLS: 2,      // held symbols that get SenIQ evidence in explain_strategy_signal
+  STRATEGY_PRESETS_MAX: 15,
+  STRATEGY_VALIDATE_TIMEOUT_MS: 5000, // engine check of a drafted spec; on timeout the app's own check stands
   // Saved threads: the server stores conversations and supplies follow-up history itself.
   THREAD_RETENTION_DAYS: 30,     // threads untouched this long are purged by the daily job
   THREAD_PURGE_CRON: '15 4 * * *',
@@ -316,6 +356,23 @@ const NEWS_SEARCH = {
   MAX_TEXT_CHARS: 600,           // title + summary clamp before embedding
   TOP_K: 6,
   MIN_SIMILARITY: 0.3,           // below this cosine a match is noise, not relevance (MiniLM scale)
+  // Hybrid, story-level search: full-text and vector each rank up to CANDIDATES articles,
+  // the two rankings are fused per STORY (reciprocal rank fusion), then re-ranked for this user.
+  CANDIDATES: 40,
+  RRF_K: 60,                     // standard RRF constant; larger = flatter rank weighting
+  // score = match × strength × (1 + IMPACT·impact + IMPORTANCE·importance) × recency.
+  // The boosts reorder stories that matched the query; they never add ones that didn't.
+  RANK: {
+    STRENGTH: 0.5,               // share of the score tied to how fully the story matched (terms hit / cosine)
+    IMPACT: 0.6,                 // this user's portfolio impact for the story (0–1)
+    IMPORTANCE: 0.3,             // the story's own importance (0–1)
+    RECENCY: 0.3,                // share of the score that decays with age
+    RECENCY_HALF_LIFE_DAYS: 14,
+  },
+  CARD_TITLE_CHARS: 120,
+  CARD_SUMMARY_CHARS: 140,       // story card snippet; six cards must fit QA.MAX_TOOL_RESULT_CHARS
+  DETAIL_ARTICLES: 6,            // articles returned by get_story_detail
+  DETAIL_SUMMARY_CHARS: 300,
 };
 
 // ─── Instant alert email + Pro narrative (Phase 9) ───────────
@@ -339,10 +396,34 @@ const ALERT_NARRATIVE = {
   MAX_WORDS: 250,
 };
 
+// ─── Company filings (primary sources) ───────────────────────
+// SEC 8-Ks for held US-listed stocks. Lazy and bounded: only tickers someone holds, a few per
+// poll, a few filings each, and each request spaced by SMART_MONEY.SEC_RATE_DELAY_MS.
+const DISCLOSURES = {
+  FORMS: ['8-K', '8-K/A'],
+  LOOKBACK_DAYS: 180,            // how far back to go the first time a ticker is seen
+  MAX_TICKERS_PER_RUN: 4,        // tickers checked per poll
+  MAX_FILINGS_PER_TICKER: 5,     // newest filings fetched per ticker per poll
+  RECHECK_HOURS: 12,             // a ticker is not asked about again sooner than this
+  UNLISTED_RECHECK_DAYS: 30,     // a ticker the SEC does not list is retried this rarely
+  MAIN_TEXT_CHARS: 2500,         // excerpt taken from the filing's main document
+  EXHIBIT_TEXT_CHARS: 3500,      // excerpt taken from its press release (EX-99)
+  MAX_DOC_BYTES: 1_500_000,      // larger documents are skipped, not truncated mid-parse
+  // Exchanges whose listings file with the SEC. A holding with no exchange is treated as US
+  // unless the curated universe says otherwise.
+  US_EXCHANGES: ['US', 'NASDAQ', 'NYSE', 'AMEX', 'NYSEARCA'],
+  CARD_EXCERPT_CHARS: 280,       // per filing in a listing
+  DETAIL_EXCERPT_CHARS: 3000,    // when one filing is opened
+  LIST_LIMIT: 6,
+};
+
 // ─── Ingestion sources (Phase 2b) ────────────────────────────
 const INGEST = {
   GDELT_MAX_RECORDS: 30,
   GDELT_TIMESPAN: '1d',
+  // Company queries per run for held Indian names. GDELT rate-limits hard (429), so a large
+  // set of holdings is covered a slice at a time, rotating each run.
+  GDELT_INDIA_MAX_PER_RUN: 12,
   // Macro/global queries mapped to the __MARKET__ tag (war/budget/rates).
   GDELT_MACRO_QUERIES: [
     'federal reserve interest rate', 'inflation economy', 'stock market',
@@ -430,4 +511,4 @@ const AUTH_LIMITS = {
   TOKEN_TTL_MIN: { RESET: 30, VERIFY: 60 * 24 },    // emailed link lifetimes
 };
 
-module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS };
+module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES };

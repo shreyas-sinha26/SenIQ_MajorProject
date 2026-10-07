@@ -70,7 +70,7 @@ router.post('/signup', rateLimit(loginLimiter), async (req, res) => {
     if (emailEnabled()) {
       createToken(created.id, 'verify', AUTH_LIMITS.TOKEN_TTL_MIN.VERIFY)
         .then((tok) => sendEmail({
-          to: email,
+          to: email, kind: 'verify', userId: created.id,
           subject: 'Verify your SenIQ email',
           text: `Welcome to SenIQ, ${name}!\n\nConfirm this email address:\n${APP_URL}/api/auth/verify-email?token=${tok}\n\nThe link is valid for 24 hours. If you didn't create this account, ignore this email.`,
         }))
@@ -192,7 +192,7 @@ router.post('/forgot-password', rateLimit(resetLimiter), async (req, res) => {
     const tok = await createToken(user.id, 'reset', AUTH_LIMITS.TOKEN_TTL_MIN.RESET);
     const link = `${APP_URL}/app?reset=${tok}`;
     const sent = await sendEmail({
-      to: email,
+      to: email, kind: 'reset', userId: user.id,
       subject: 'Reset your SenIQ password',
       text: `Hi ${user.name},\n\nReset your SenIQ password here:\n${link}\n\nThe link is valid for ${AUTH_LIMITS.TOKEN_TTL_MIN.RESET} minutes and works once. If you didn't request this, ignore this email — your password is unchanged.`,
     });
@@ -220,6 +220,31 @@ router.post('/reset-password', rateLimit(loginLimiter), async (req, res) => {
     res.json({ message: 'Password updated — you can sign in now.' });
   } catch (err) {
     console.error('Reset password error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── POST /api/auth/resend-verification ──────────────────────
+// Alert emails only go to verified addresses, and anyone who signed up while no email
+// provider was configured never got a link — this lets them ask for one. Signed-in only,
+// sends to the account's own address, and shares the reset limiter.
+router.post('/resend-verification', authMiddleware, rateLimit(resetLimiter), async (req, res) => {
+  try {
+    const user = await queryOne('SELECT id, email, name, email_verified FROM users WHERE id = $1', [req.user.id]);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.email_verified) return res.json({ message: 'Your email is already verified.', email_verified: true });
+    if (!emailEnabled()) return res.status(503).json({ error: 'Email is not set up on this server yet.' });
+
+    const tok = await createToken(user.id, 'verify', AUTH_LIMITS.TOKEN_TTL_MIN.VERIFY);
+    const sent = await sendEmail({
+      to: user.email, kind: 'verify', userId: user.id,
+      subject: 'Verify your SenIQ email',
+      text: `Hi ${user.name},\n\nConfirm this email address:\n${APP_URL}/api/auth/verify-email?token=${tok}\n\nThe link is valid for 24 hours. If you didn't ask for this, ignore this email.`,
+    });
+    if (!sent.delivered) return res.status(502).json({ error: 'The verification email could not be sent — try again shortly.' });
+    res.json({ message: `Verification link sent to ${user.email}.`, email_verified: false });
+  } catch (err) {
+    console.error('Resend verification error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

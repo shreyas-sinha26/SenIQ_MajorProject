@@ -27,6 +27,16 @@ router.get('/users', async (req, res) => {
   }
 });
 
+// GET /api/admin/ask-grounding?days= — grounded answer rate for Ask, per writer.
+router.get('/ask-grounding', async (req, res) => {
+  try {
+    res.json({ by_writer: await require('../services/askThreads').groundingStats(req.query.days) });
+  } catch (err) {
+    console.error('Admin ask-grounding error:', err);
+    res.status(500).json({ error: 'Failed to load grounding stats' });
+  }
+});
+
 // PUT /api/admin/tier — set a tier. Defaults to the admin's own account (the tier-preview
 // switcher); pass userId to change someone else.
 router.put('/tier', async (req, res) => {

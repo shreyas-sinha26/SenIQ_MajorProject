@@ -17,7 +17,8 @@ const { attachTier, requireTier } = require('../middleware/tier');
 const { STRATEGY_SERVICE } = require('../config');
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
 
-const MAX_SAVED_STRATEGIES = 20;
+const { saveStrategy, MAX_SAVED_STRATEGIES } = require('../services/strategyStore');
+const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../services/strategySignals');
 const MAX_WATCH_SYMBOLS = 5;
 
 const router = express.Router();
@@ -51,6 +52,25 @@ async function callService(path, { method = 'GET', body, timeoutMs } = {}) {
     clearTimeout(timer);
   }
 }
+
+// GET /api/strategies/seniq-presets — ready-made specs that use SenIQ signals (any tier).
+router.get('/seniq-presets', (req, res) => res.json({ presets: listPresets() }));
+
+// POST /api/strategies/seniq-presets/:id — the preset's Builder spec with its inputs filled
+// in (e.g. {politician}). Returns a spec to load into the Builder; saves nothing.
+router.post('/seniq-presets/:id', (req, res) => {
+  const out = instantiatePreset(req.params.id, req.body || {});
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  res.json({ spec: out.spec, preset: out.preset });
+});
+
+// POST /api/strategies/compare — the same Builder spec backtested with and without its
+// SenIQ conditions (Plus; two engine backtests).
+router.post('/compare', requireTier('plus'), async (req, res) => {
+  const out = await compareWithoutSeniq(req.body || {});
+  if (out.ok) return res.json(out.data);
+  res.status(out.status).json({ error: out.error });
+});
 
 // GET /api/strategies/catalog — strategy list + param schemas (any tier).
 router.get('/catalog', async (req, res) => {
@@ -111,6 +131,32 @@ router.post('/backtest', requireTier('plus'), async (req, res) => {
   return res.status(503).json({ error: 'Strategy engine is offline — try again later.' });
 });
 
+// POST /api/strategies/walk-forward — out-of-sample robustness check (Plus).
+// Same body as /backtest plus n_splits (2–12) and scheme (anchored | rolling).
+router.post('/walk-forward', requireTier('plus'), async (req, res) => {
+  const { strategy, custom, params, symbol, exchange, start_date, end_date, n_splits, scheme } = req.body || {};
+  if ((!strategy && !custom) || !symbol || !start_date || !end_date) {
+    return res.status(400).json({ error: 'strategy (or custom), symbol, start_date and end_date are required' });
+  }
+  const out = await callService('/api/walk-forward', {
+    method: 'POST',
+    body: {
+      strategy: strategy || null, custom: custom || null, params: params || {},
+      symbol, exchange: exchange || 'US', start_date, end_date,
+      n_splits: Number(n_splits) || 4, scheme: scheme || 'anchored',
+      seniq_data: custom ? await seniqDataIfNeeded(custom, symbol) : null,
+    },
+  });
+  if (out.status === 200) return res.json(out.data);
+  if (out.status === 400 || out.status === 404 || out.status === 422) {
+    const detail = Array.isArray(out.data.detail)
+      ? out.data.detail.map((d) => `${(d.loc || []).join('.')}: ${d.msg}`).join('; ')
+      : out.data.detail;
+    return res.status(out.status === 422 ? 400 : out.status).json({ error: detail || 'invalid request' });
+  }
+  return res.status(503).json({ error: 'Strategy engine is offline — try again later.' });
+});
+
 // ─── Saved strategies (Your Strategies) — all Plus+ ─────────
 
 // Normalizes + bounds a client watchlist: [{symbol, exchange}], max 5.
@@ -143,42 +189,9 @@ router.get('/saved', requireTier('plus'), async (req, res) => {
 
 // POST /api/strategies/saved — save a Builder spec or a configured preset.
 router.post('/saved', requireTier('plus'), async (req, res) => {
-  const { name, custom, strategy, params, symbols } = req.body || {};
-  const cleanName = String(name || (custom && custom.name) || '').trim().slice(0, 80);
-  if (!cleanName) return res.status(400).json({ error: 'name is required' });
-  if (!custom && !strategy) return res.status(400).json({ error: 'provide custom (Builder spec) or strategy (preset name)' });
-
-  const count = await queryOne('SELECT COUNT(*)::int AS n FROM user_strategies WHERE user_id = $1', [req.user.id]);
-  if (count.n >= MAX_SAVED_STRATEGIES) {
-    return res.status(400).json({ error: `Limit reached (${MAX_SAVED_STRATEGIES} saved strategies) — delete one first.` });
-  }
-
-  // Custom specs are validated by the engine before they're persisted, so the
-  // saved list never accumulates broken strategies.
-  if (custom) {
-    const check = await callService('/api/strategies/validate', {
-      method: 'POST', body: custom, timeoutMs: STRATEGY_SERVICE.CATALOG_TIMEOUT_MS,
-    });
-    if (check.status !== 200) return res.status(503).json({ error: 'Strategy engine is offline — try again later.' });
-    if (!check.data.valid) return res.status(400).json({ error: 'invalid strategy: ' + (check.data.errors || []).join('; ') });
-  }
-
-  try {
-    const row = await queryOne(
-      `INSERT INTO user_strategies (user_id, name, kind, spec, strategy_name, params, symbols)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [req.user.id, cleanName, custom ? 'custom' : 'registry',
-       custom ? JSON.stringify(custom) : null,
-       custom ? null : String(strategy),
-       custom ? null : JSON.stringify(params || {}),
-       JSON.stringify(cleanSymbols(symbols))]);
-    res.status(201).json(rowToJson(row));
-  } catch (err) {
-    if (String(err.message).includes('user_strategies_user_id_name_key')) {
-      return res.status(400).json({ error: `You already have a strategy named “${cleanName}” — pick another name.` });
-    }
-    throw err;
-  }
+  const out = await saveStrategy(req.user.id, req.body || {});
+  if (!out.ok) return res.status(out.status).json({ error: out.error });
+  res.status(201).json(out.data);
 });
 
 // PUT /api/strategies/saved/:id — rename / edit watchlist.

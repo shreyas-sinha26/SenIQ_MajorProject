@@ -32,7 +32,9 @@ async function loadCompany(ticker) {
     [ticker]
   );
   const executives = await query(
-    'SELECT full_name, role FROM executives WHERE ticker = $1 ORDER BY full_name',
+    `SELECT full_name, role, as_of::text AS as_of, source, ended_on::text AS ended_on
+       FROM executives WHERE ticker = $1
+      ORDER BY (ended_on IS NOT NULL), (role ILIKE '%CEO%') DESC, full_name`,
     [ticker]
   );
   return { company, executives };
@@ -132,7 +134,9 @@ async function buildCompanyBrief(userId, ticker, holding = {}) {
       exchange: company?.exchange || holding.exchange || null,
       country: company?.country || null,
       aliases: company?.aliases || [],
-      executives: executives.map((e) => ({ name: e.full_name, role: e.role })),
+      executives: executives.map((e) => ({
+        name: e.full_name, role: e.role, as_of: e.as_of, source: e.source, former: !!e.ended_on, ended_on: e.ended_on,
+      })),
     },
     sentiment,
     recent_events: events.map((e) => ({

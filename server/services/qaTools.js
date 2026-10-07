@@ -2,17 +2,19 @@
  * Ask's tools (E6 v2) — what Claude may call to answer a portfolio question.
  *
  * Facts come from exact queries over engine tables (holdings, attribution, events,
- * sentiment, smart money); only search_news does free-text retrieval (newsSearch.js).
+ * sentiment, smart money); only search_news does free-text retrieval (newsSearch.js), and
+ * get_story_detail expands one of its results.
  *
  * SCOPE IS ENFORCED HERE, not in the prompt: every ticker argument is checked against the
  * user's holdings (ctx.heldSet) before any query runs. A prompt-injected or confused model
  * asking for a stock the user doesn't own gets a not_in_portfolio error, never data.
  */
 
-const { QA } = require('../config');
-const { scoreTicker, labelFor } = require('./sentimentScoring');
+const { QA, SENTIMENT } = require('../config');
+const { scoreTicker, explainSentiment, labelFor } = require('./sentimentScoring');
 const { getImpactFeed } = require('./impactScoring');
-const { searchNews } = require('./newsSearch');
+const { searchNews, getStory } = require('./newsSearch');
+const { listDisclosures, getDisclosure } = require('./disclosures');
 
 const round = (n, d = 2) => (n == null ? null : Math.round(n * 10 ** d) / 10 ** d);
 const day = (t) => (t ? new Date(t).toISOString().slice(0, 10) : null);
@@ -48,11 +50,16 @@ function computeAttribution(holdings) {
 }
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const { AMBIGUOUS, AMBIGUOUS_SYMBOLS } = require('./entityResolver');
 
 /**
  * Which known tickers/companies does a question mention? `universe` = [{ticker, name, aliases}].
  * Short tickers (≤3 chars) only match as uppercase words or $TICKER, so "all"/"it"/"on" in
  * normal English never trigger; longer tickers and names match case-insensitively. Pure.
+ *
+ * Two lists are shared with the news resolver so a question is read the way a headline is:
+ * symbols that are everyday uppercase text ("F&O", "PM", "Series C") count only as $F / $PM,
+ * and names that are ordinary words ("visa", "meta", "cosmos") count only when capitalized.
  */
 function findMentionedTickers(text, universe) {
   const q = String(text || '');
@@ -60,13 +67,20 @@ function findMentionedTickers(text, universe) {
   for (const c of universe) {
     const t = c.ticker;
     if (!t || t === '__MARKET__') continue;
-    const tickerRe = t.length <= 3
+    const tickerRe = AMBIGUOUS_SYMBOLS.has(t)
+      ? new RegExp(`\\$${escapeRe(t)}(?![A-Za-z0-9&])`)
+      : t.length <= 3 || (t.length === 4 && AMBIGUOUS.has(t.toLowerCase())) // META: "meta-analysis" is not the stock
       ? new RegExp(`(^|[^A-Za-z0-9])\\$?${escapeRe(t)}(?![A-Za-z0-9])`)
       : new RegExp(`(^|[^A-Za-z0-9])\\$?${escapeRe(t)}(?![A-Za-z0-9])`, 'i');
     let hit = tickerRe.test(q);
     if (!hit) {
       for (const n of [c.name, ...(c.aliases || [])]) {
-        if (n && n.length >= 4 && new RegExp(`(^|[^A-Za-z0-9])${escapeRe(n)}(?![A-Za-z0-9])`, 'i').test(q)) { hit = true; break; }
+        if (!n || n.length < 4) continue;
+        const lower = n.toLowerCase();
+        const re = AMBIGUOUS.has(lower)
+          ? new RegExp(`(^|[^A-Za-z0-9])(${escapeRe(lower[0].toUpperCase() + lower.slice(1))}|${escapeRe(lower.toUpperCase())})(?![A-Za-z0-9-])`)
+          : new RegExp(`(^|[^A-Za-z0-9])${escapeRe(n)}(?![A-Za-z0-9])`, 'i');
+        if (re.test(q)) { hit = true; break; }
       }
     }
     if (hit) found.add(t);
@@ -126,6 +140,11 @@ const TOOLS = [
     input_schema: { type: 'object', properties: { ticker: tickerProp }, required: ['ticker'] },
   },
   {
+    name: 'explain_sentiment',
+    description: 'WHY a held ticker\'s sentiment is where it is: the stories from the last 72h that produced the acute score and z-score, each with its exact contribution (the contributions add up to the z-score), weight, source and date. Use for "why did sentiment on X jump/drop" or "what is driving X\'s score".',
+    input_schema: { type: 'object', properties: { ticker: tickerProp, limit: { type: 'integer', description: 'How many stories (1–8, default 5).' } }, required: ['ticker'] },
+  },
+  {
     name: 'get_smart_money',
     description: 'Congressional trades and institutional 13F position changes touching the user\'s holdings (or one held ticker). These disclosures lag by weeks — always state the dates.',
     input_schema: { type: 'object', properties: { ticker: { ...tickerProp, description: 'Optional: limit to one held ticker.' } } },
@@ -137,7 +156,7 @@ const TOOLS = [
   },
   {
     name: 'search_news',
-    description: 'Search the text of ingested headlines and summaries for a topic (e.g. "margin pressure", "export ban", "iPhone demand"). Restricted to the user\'s holdings and market-wide news. Use when the question is about WHAT was reported rather than scores or rankings.',
+    description: 'Search ingested news for a topic (e.g. "margin pressure", "export ban", "iPhone demand"). Returns STORIES, not single articles: each has an id, title, date span, source count and, where the story affects this portfolio, its impact. Ranked by how well it matches and how much it matters to this user. Restricted to the user\'s holdings and market-wide news. Use when the question is about WHAT was reported rather than scores or rankings.',
     input_schema: {
       type: 'object',
       properties: {
@@ -147,6 +166,24 @@ const TOOLS = [
       },
       required: ['query'],
     },
+  },
+  {
+    name: 'get_disclosures',
+    description: 'Company filings with the regulator (SEC 8-K "current reports": earnings releases, executive changes, material agreements, impairments) for the user\'s US-listed holdings. PRIMARY SOURCES: what the company itself filed, with the filing date. Use for "what did X file / announce officially", or to check a news story against the filing. Pass `query` to search filing text, or `id` (from an earlier result) for one filing\'s longer excerpt. Not available for Indian stocks, crypto or commodities — the result says which holdings are covered.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ticker: { ...tickerProp, description: 'Optional: one held ticker. Default: all US-listed holdings.' },
+        query: { type: 'string', description: 'Optional: words to look for in the filing text, e.g. "share repurchase".' },
+        days: { type: 'integer', description: 'Look-back in days (1–180, default 180).' },
+        id: { type: 'string', description: 'Optional: a filing id from an earlier result (e.g. "d12") to open it.' },
+      },
+    },
+  },
+  {
+    name: 'get_story_detail',
+    description: 'The articles behind ONE story returned by search_news (pass its id, e.g. "e12"): each article\'s title, longer summary, source and date. Use only when a story card is not enough to answer.',
+    input_schema: { type: 'object', properties: { id: { type: 'string', description: 'A story id from search_news results.' } }, required: ['id'] },
   },
 ];
 
@@ -227,6 +264,37 @@ const EXECUTORS = {
     return { ticker: t, ...s };
   },
 
+  async explain_sentiment({ ticker, limit } = {}, ctx) {
+    const t = requireHeld(ctx, ticker);
+    const n = Math.max(1, Math.min(8, Number(limit) || 5));
+    const { query } = require('../db');
+    const rows = await query(
+      `SELECT a.id, a.event_id, a.title, a.url, a.source, a.platform, a.published_at,
+              s.sentiment_score AS score, s.confidence
+         FROM article_sentiments s
+         JOIN articles a ON a.id = s.article_id
+        WHERE s.ticker = $1
+          AND a.published_at > now() - ($2 || ' days')::interval`,
+      [t, String(SENTIMENT.BASELINE_DAYS)]
+    );
+    const x = explainSentiment(rows, { limit: n });
+    const unit = x.basis === 'baseline' ? 'z-score units (they add up to the z-score)' : 'score points away from neutral 0.5 (too little history for a z-score)';
+    return {
+      ticker: t,
+      window_hours: SENTIMENT.ACUTE_WINDOW_HOURS,
+      acute: x.acute,
+      baseline: x.baseline,
+      contribution_unit: unit,
+      note: x.drivers.length ? undefined : 'No scored articles in the acute window, so the score sits at neutral.',
+      drivers: x.drivers.map((d) => ({
+        title: String(d.title).slice(0, 160), source: d.source, url: d.url, date: day(d.published_at),
+        articles: d.articles, sentiment_score: d.sentiment_score, weight_pct: d.weight_pct,
+        contribution: d.contribution, direction: d.direction,
+      })),
+      other_stories: x.rest,
+    };
+  },
+
   async get_smart_money({ ticker } = {}, ctx) {
     const tickers = ticker ? [requireHeld(ctx, ticker)] : [...ctx.heldSet];
     const { query } = require('../db');
@@ -273,17 +341,45 @@ const EXECUTORS = {
     if (!q || !String(q).trim()) throw new ScopeError('query is required');
     const tickers = ticker ? [requireHeld(ctx, ticker)] : [...ctx.heldSet, '__MARKET__'];
     const d = clampDays(days ?? QA.NEWS_DAYS_MAX);
-    const r = await searchNews({ query: String(q).slice(0, 200), tickers, includeMarket: !ticker, days: d });
-    return { window_days: d, search_mode: r.mode, results: r.results.map((x) => ({ ...x, published_at: day(x.published_at) })) };
+    const r = await searchNews({ query: String(q).slice(0, 200), tickers, userId: ctx.userId, includeMarket: !ticker, days: d });
+    return { window_days: d, search_mode: r.mode, results: r.results.map((x) => ({ ...x, first_seen: day(x.first_seen), last_seen: day(x.last_seen) })) };
+  },
+
+  async get_disclosures({ ticker, query: q, days, id } = {}, ctx) {
+    const tickers = ticker ? [requireHeld(ctx, ticker)] : [...ctx.heldSet];
+    if (id != null && String(id).trim()) {
+      const one = await getDisclosure({ id, tickers: [...ctx.heldSet] });
+      if (!one) throw new ScopeError(`filing_not_found: no filing "${String(id).slice(0, 24)}" for this portfolio. Use an id from get_disclosures results.`);
+      return { source: 'SEC EDGAR (primary source)', filing: one };
+    }
+    const r = await listDisclosures({ tickers, query: q ? String(q).slice(0, 200) : '', days });
+    const uncovered = tickers.filter((t) => !r.covered.includes(t));
+    return {
+      source: 'SEC EDGAR 8-K filings (primary source). `filed` is when it became public.',
+      filings: r.results,
+      covered_holdings: r.covered,
+      ...(uncovered.length ? { no_filings_available_for: uncovered, why: 'Filings exist only for US-listed stocks SenIQ has already checked; Indian stocks, crypto and commodities have none here, and a newly added US stock is picked up on the next poll.' } : {}),
+    };
+  },
+
+  async get_story_detail({ id } = {}, ctx) {
+    if (!id || !String(id).trim()) throw new ScopeError('id is required');
+    const st = await getStory({ id, tickers: [...ctx.heldSet], userId: ctx.userId });
+    if (!st) throw new ScopeError(`story_not_found: no story "${String(id).slice(0, 24)}" is available for this portfolio. Use an id from search_news results.`);
+    return {
+      ...st, first_seen: day(st.first_seen), last_seen: day(st.last_seen),
+      articles: st.articles.map((a) => ({ ...a, published_at: day(a.published_at) })),
+    };
   },
 };
 
 /**
- * Run one tool call. Always resolves to a tool_result block: scope violations and failures
+ * Run one tool call. `executors` is the set available in this mode (v2 adds the strategy
+ * tools); a name outside it is refused like any unknown tool. Always resolves to a tool_result block: scope violations and failures
  * come back as is_error results so Claude can explain them instead of the loop crashing.
  */
-async function runTool(block, ctx) {
-  const exec = EXECUTORS[block.name];
+async function runTool(block, ctx, executors = EXECUTORS) {
+  const exec = Object.prototype.hasOwnProperty.call(executors, block.name) ? executors[block.name] : null;
   let content;
   let isError = false;
   try {
@@ -298,4 +394,4 @@ async function runTool(block, ctx) {
   return { type: 'tool_result', tool_use_id: block.id, content, ...(isError ? { is_error: true } : {}) };
 }
 
-module.exports = { TOOLS, EXECUTORS, runTool, computeAttribution, findMentionedTickers, scopeCheck, outOfScopeAnswer, requireHeld };
+module.exports = { TOOLS, EXECUTORS, ScopeError, runTool, computeAttribution, findMentionedTickers, scopeCheck, outOfScopeAnswer, requireHeld };
