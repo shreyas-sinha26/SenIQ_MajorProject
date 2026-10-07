@@ -17,7 +17,7 @@ const { authMiddleware } = require('./auth');
 const { attachTier, requireTier } = require('../middleware/tier');
 const { generateBriefForUser, getLatestBrief } = require('../services/reports');
 const { answerQuestion } = require('../services/qa');
-const { createThread, getThread, listThreads, getMessages, recentHistory, appendTurn, deleteThread } = require('../services/askThreads');
+const { createThread, getThread, listThreads, getMessages, recentHistory, olderTurns, appendTurn, deleteThread } = require('../services/askThreads');
 const { DISCLAIMER } = require('../config');
 
 const router = express.Router();
@@ -61,11 +61,12 @@ router.post('/ask', async (req, res) => {
     }
     const history = thread ? await recentHistory(thread.id) : [];
     const dailyLimit = req.tierCfg ? req.tierCfg.qaPerDay : undefined; // Plus 10 / Pro 30
-    const result = await answerQuestion(req.user.id, body.question, history, { dailyLimit });
+    const older = thread ? await olderTurns(thread.id) : [];
+    const result = await answerQuestion(req.user.id, body.question, history, { dailyLimit, older, tier: req.tier });
     if (result.error === 'empty_question') return res.status(400).json({ error: 'Ask a question first.' });
 
     if (!thread) thread = await createThread(req.user.id, result.question);
-    await appendTurn(thread.id, result.question, result.answer, result.writer);
+    await appendTurn(thread.id, result.question, result.answer, result.writer, result.grounding, result.draft);
     res.json({ ...result, thread_id: thread.id, thread_title: thread.title, disclaimer: DISCLAIMER });
   } catch (err) {
     console.error('Q&A error:', err);

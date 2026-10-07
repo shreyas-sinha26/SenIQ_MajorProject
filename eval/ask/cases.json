@@ -464,16 +464,16 @@
         "out_of_scope",
         "not_in_universe"
       ],
-      "question": "Any news on Zomato?",
+      "question": "Any news on Paytm?",
       "expect": {
         "writer": "claude",
         "no_data_for": [
-          "ZOMATO"
+          "PAYTM"
         ]
       },
       "rubric": [
-        "says Zomato isn't in the user's portfolio / isn't tracked and suggests adding it",
-        "does not describe Zomato news from memory"
+        "says Paytm isn't in the user's portfolio / isn't tracked and suggests adding it",
+        "does not describe Paytm news from memory"
       ]
     },
     {

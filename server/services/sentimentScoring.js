@@ -51,6 +51,31 @@ function stddev(xs, mu) {
 
 const round = (n, d = 2) => (n == null ? null : Math.round(n * 10 ** d) / 10 ** d);
 
+// Rows → scored points with their age and source weight; unparseable rows are dropped.
+// `row` keeps the original so explainSentiment can report title/source/url.
+function cleanRows(rows, now) {
+  return (rows || [])
+    .map((r) => {
+      const t = new Date(r.published_at).getTime();
+      return Number.isFinite(t)
+        ? {
+            score: Number(r.score),
+            confidence: Number(r.confidence) || 0,
+            ageHours: (now - t) / HOUR_MS,
+            ageDays: (now - t) / DAY_MS,
+            srcW: sourceWeight(r.source, r.platform),
+            row: r,
+          }
+        : null;
+    })
+    .filter((r) => r && Number.isFinite(r.score) && r.ageHours >= -1); // tolerate slight clock skew
+}
+
+// An article's weight in the Acute score: recency × source credibility × confidence.
+function acuteWeight(r) {
+  return decayWeight(r.ageHours) * r.srcW * Math.max(r.confidence, 0.15);
+}
+
 /**
  * @param {Array<{score:number, confidence:number, published_at:string|number|Date, source?:string, platform?:string}>} rows
  *        A ticker's article scores over (up to) the baseline window.
@@ -66,20 +91,7 @@ function computeWindowedSentiment(rows, now = Date.now()) {
   };
   if (!rows || rows.length === 0) return empty;
 
-  const cleaned = rows
-    .map((r) => {
-      const t = new Date(r.published_at).getTime();
-      return Number.isFinite(t)
-        ? {
-            score: Number(r.score),
-            confidence: Number(r.confidence) || 0,
-            ageHours: (now - t) / HOUR_MS,
-            ageDays: (now - t) / DAY_MS,
-            srcW: sourceWeight(r.source, r.platform),
-          }
-        : null;
-    })
-    .filter((r) => r && Number.isFinite(r.score) && r.ageHours >= -1); // tolerate slight clock skew
+  const cleaned = cleanRows(rows, now);
   if (cleaned.length === 0) return empty;
 
   // ── Acute: decay × confidence × source-credibility weighted average ──
@@ -88,7 +100,7 @@ function computeWindowedSentiment(rows, now = Date.now()) {
   let acuteCount = 0;
   for (const r of cleaned) {
     if (r.ageHours > SENTIMENT.ACUTE_WINDOW_HOURS) continue;
-    const w = decayWeight(r.ageHours) * r.srcW * Math.max(r.confidence, 0.15);
+    const w = acuteWeight(r);
     wSum += w;
     wScore += w * r.score;
     acuteCount++;
@@ -130,6 +142,66 @@ function computeWindowedSentiment(rows, now = Date.now()) {
 }
 
 /**
+ * Provenance for the sentiment numbers: which stories produced the Acute score and z-score.
+ * Pure — same rows and weights as computeWindowedSentiment, so the two cannot disagree.
+ *
+ * The split is exact, not a heuristic. With wᵢ the acute weight, W = Σwᵢ, μ/σ the baseline:
+ *   acute − 0.5 = Σ wᵢ(sᵢ − 0.5) / W          (each term = that article's pull off neutral)
+ *   z           = Σ wᵢ(sᵢ − μ) / (W·σ)        (each term = that article's share of the z-score)
+ * Articles of one story (event_id) are summed into one driver, which keeps the sums intact.
+ *
+ * @param rows  scoreTicker-style rows plus { id, event_id, title, source, url }
+ * @returns { acute, baseline, basis:'baseline'|'neutral', drivers:[…], rest:{stories, contribution} }
+ *          `contribution` is in z units when basis is 'baseline', else in acute-score points.
+ */
+function explainSentiment(rows, { now = Date.now(), limit = 5 } = {}) {
+  const summary = computeWindowedSentiment(rows, now);
+  const cleaned = cleanRows(rows, now);
+  const acute = cleaned.filter((r) => r.ageHours <= SENTIMENT.ACUTE_WINDOW_HOURS).map((r) => ({ ...r, w: acuteWeight(r) }));
+  const W = acute.reduce((a, r) => a + r.w, 0);
+  const out = { acute: summary.acute, baseline: summary.baseline, basis: 'neutral', drivers: [], rest: { stories: 0, contribution: 0 } };
+  if (W <= 0) return out;
+
+  // Unrounded baseline, recomputed so the terms add up to the unrounded z.
+  const base = cleaned.filter((r) => r.ageDays <= SENTIMENT.BASELINE_DAYS).map((r) => r.score);
+  const mu = mean(base);
+  const sigma = stddev(base, mu);
+  const useBaseline = summary.baseline.z != null;
+  out.basis = useBaseline ? 'baseline' : 'neutral';
+  const ref = useBaseline ? mu : 0.5;
+  const scale = useBaseline ? W * sigma : W;
+
+  const byStory = new Map();
+  acute.forEach((r, i) => {
+    const key = r.row.event_id != null ? `e${r.row.event_id}` : r.row.id != null ? `a${r.row.id}` : `row${i}`;
+    let g = byStory.get(key);
+    if (!g) byStory.set(key, (g = { contribution: 0, w: 0, wScore: 0, articles: 0, lead: r }));
+    g.contribution += (r.w * (r.score - ref)) / scale;
+    g.w += r.w;
+    g.wScore += r.w * r.score;
+    g.articles++;
+    if (r.w > g.lead.w) g.lead = r; // the story is shown by its heaviest article
+  });
+
+  const ranked = [...byStory.values()].sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
+  const n = Math.max(1, limit);
+  out.drivers = ranked.slice(0, n).map((g) => ({
+    title: g.lead.row.title || '',
+    source: g.lead.row.source || '',
+    url: g.lead.row.url || '',
+    published_at: g.lead.row.published_at,
+    articles: g.articles,
+    sentiment_score: round(g.wScore / g.w),
+    weight_pct: round((g.w / W) * 100, 1),
+    contribution: round(g.contribution, 3),
+    direction: g.contribution > 0 ? 'up' : g.contribution < 0 ? 'down' : 'flat',
+  }));
+  const rest = ranked.slice(n);
+  out.rest = { stories: rest.length, contribution: round(rest.reduce((a, g) => a + g.contribution, 0), 3) };
+  return out;
+}
+
+/**
  * DB-backed: pull a ticker's scored articles over the baseline window and score them.
  * Lazy-requires db so the pure math above stays importable without a database.
  */
@@ -146,4 +218,4 @@ async function scoreTicker(ticker) {
   return computeWindowedSentiment(rows);
 }
 
-module.exports = { computeWindowedSentiment, scoreTicker, sourceWeight, decayWeight, labelFor };
+module.exports = { computeWindowedSentiment, explainSentiment, scoreTicker, sourceWeight, decayWeight, labelFor };
