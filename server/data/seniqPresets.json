@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "note": "Ready-made Builder specs that combine price rules with SenIQ signals. Templates to backtest, not recommendations. Each spec must pass the engine's validate_spec.",
+  "presets": [
+    {
+      "id": "trend-positive-sentiment",
+      "name": "Trend with positive sentiment",
+      "description": "Buys an EMA 20/50 upward cross only while news sentiment is above the stock's own 90-day norm. Exits on the downward cross or an 8% stop.",
+      "signals": ["sentiment_zscore"],
+      "data_depth": "Experimental. Sentiment history only goes back as far as SenIQ has been recording, so most backtest bars have no reading and the gate stays shut on them.",
+      "spec": {
+        "name": "Trend with positive sentiment",
+        "factors": [
+          { "id": "ema_f", "fn": "ema", "params": { "period": 20 } },
+          { "id": "ema_s", "fn": "ema", "params": { "period": 50 } },
+          { "id": "sz", "source": "seniq", "metric": "sentiment_zscore" }
+        ],
+        "entry": { "all": [{ "crossover": ["ema_f", "ema_s"] }, { "gt": ["sz", 0] }] },
+        "exit": { "any": [{ "crossunder": ["ema_f", "ema_s"] }, { "stop_loss_pct": 8 }] },
+        "sizing": { "type": "percent_equity", "value": 25 }
+      }
+    },
+    {
+      "id": "congress-cluster-buying",
+      "name": "Congress cluster buying",
+      "description": "Buys when at least two different members of Congress have disclosed buys in the last 45 days and the price is above its 50-day average. Exits below the average or on a 10% stop.",
+      "signals": ["congress_buyers"],
+      "data_depth": "Thin. Uses disclosure dates, which lag the trades by up to 45 days. Loaded congress data covers 2026 only, a few trades per stock.",
+      "spec": {
+        "name": "Congress cluster buying",
+        "factors": [
+          { "id": "sma50", "fn": "sma", "params": { "period": 50 } },
+          { "id": "buyers", "source": "seniq", "metric": "congress_buyers", "params": { "window_days": 45 } }
+        ],
+        "entry": { "all": [{ "gte": ["buyers", 2] }, { "gt": ["close", "sma50"] }] },
+        "exit": { "any": [{ "lt": ["close", "sma50"] }, { "stop_loss_pct": 10 }] },
+        "sizing": { "type": "percent_equity", "value": 25 }
+      }
+    },
+    {
+      "id": "follow-a-politician",
+      "name": "Follow a politician",
+      "description": "Buys when the member you name discloses a buy of this stock, and exits when they disclose a sale, on a 20% gain or a 10% loss.",
+      "signals": ["congress_buys", "congress_sells"],
+      "inputs": [{ "name": "politician", "label": "Member of Congress (full name)", "required": true }],
+      "data_depth": "Thin. One person's disclosures in one stock are rare; expect very few trades. Disclosure dates lag the actual trades by up to 45 days.",
+      "spec": {
+        "name": "Follow {{politician}}",
+        "factors": [
+          { "id": "their_buys", "source": "seniq", "metric": "congress_buys", "params": { "window_days": 30, "politician": "{{politician}}" } },
+          { "id": "their_sells", "source": "seniq", "metric": "congress_sells", "params": { "window_days": 30, "politician": "{{politician}}" } }
+        ],
+        "entry": { "all": [{ "gte": ["their_buys", 1] }] },
+        "exit": { "any": [{ "gte": ["their_sells", 1] }, { "take_profit_pct": 20 }, { "stop_loss_pct": 10 }] },
+        "sizing": { "type": "percent_equity", "value": 20 }
+      }
+    },
+    {
+      "id": "fund-accumulation",
+      "name": "Fund accumulation trend",
+      "description": "Buys while at least three tracked funds hold the stock, more of them added than cut in their latest filings, and the 20-day EMA is above the 50-day. Exits when cuts outnumber adds, the trend turns, or on a 10% stop.",
+      "signals": ["funds_holding", "funds_net_adds"],
+      "data_depth": "About a year. Ten tracked funds, quarterly 13F filings published up to 45 days after quarter end, so this signal moves at most four times a year. US stocks only.",
+      "spec": {
+        "name": "Fund accumulation trend",
+        "factors": [
+          { "id": "ema_f", "fn": "ema", "params": { "period": 20 } },
+          { "id": "ema_s", "fn": "ema", "params": { "period": 50 } },
+          { "id": "holders", "source": "seniq", "metric": "funds_holding" },
+          { "id": "net_adds", "source": "seniq", "metric": "funds_net_adds" }
+        ],
+        "entry": { "all": [{ "gte": ["holders", 3] }, { "gt": ["net_adds", 0] }, { "gt": ["ema_f", "ema_s"] }] },
+        "exit": { "any": [{ "lt": ["net_adds", 0] }, { "crossunder": ["ema_f", "ema_s"] }, { "stop_loss_pct": 10 }] },
+        "sizing": { "type": "percent_equity", "value": 25 }
+      }
+    }
+  ]
+}
