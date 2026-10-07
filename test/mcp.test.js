@@ -130,4 +130,51 @@ check('one bucket serves both transports for the same key', () => {
   assert.strictEqual(heavyLimiter.allow('sharedKey', t + 30).allowed, false);
 });
 
+console.log('data tools (shared /mcp + /v1 catalog):');
+{
+  const { DATA_TOOLS } = require('../server/services/dataTools');
+  const { EXECUTORS, TOOLS } = require('../server/services/qaTools');
+
+  check('every data tool is backed by an Ask executor', () => {
+    assert.deepStrictEqual(DATA_TOOLS.filter((t) => typeof EXECUTORS[t.name] !== 'function').map((t) => t.name), []);
+  });
+  check('every Ask tool is exposed (nothing silently left out)', () => {
+    const exposed = new Set(DATA_TOOLS.map((t) => t.name));
+    assert.deepStrictEqual(TOOLS.map((t) => t.name).filter((n) => !exposed.has(n)), []);
+  });
+  check('REST paths are unique and under /v1', () => {
+    const paths = DATA_TOOLS.map((t) => t.rest);
+    assert.strictEqual(new Set(paths).size, paths.length);
+    assert.ok(paths.every((p) => p.startsWith('/v1/')));
+  });
+  check('a :ticker path segment always has a required ticker arg', () => {
+    for (const t of DATA_TOOLS.filter((x) => x.rest.includes(':ticker'))) {
+      assert.ok(t.args.ticker && t.args.ticker.required, t.name);
+    }
+  });
+}
+
+console.log('strategy signal history:');
+{
+  const { dailySentiment } = require('../server/services/signalHistory');
+  const day = (d) => new Date(`${d}T10:00:00Z`);
+  const rows = [
+    { date: day('2026-06-01'), score: 0.9, confidence: 1, source: 'Reuters', platform: 'news' },   // weight 1.0
+    { date: day('2026-06-01'), score: 0.1, confidence: 1, source: 'r/stocks', platform: 'reddit' }, // weight 0.35
+    { date: day('2026-06-02'), score: 0.5, confidence: 0, source: 'someblog', platform: 'news' },   // weight 0.7 × 0.15 floor
+  ];
+  const out = dailySentiment(rows);
+  check('one row per day, plain mean kept for sentiment_avg', () => {
+    assert.strictEqual(out.length, 2);
+    assert.strictEqual(out[0].n_articles, 2);
+    assert.ok(Math.abs(out[0].avg_score - 0.5) < 1e-9);
+  });
+  check('weights = source credibility × confidence (floored at 0.15)', () => {
+    assert.ok(Math.abs(out[0].w_sum - 1.35) < 1e-9);
+    assert.ok(Math.abs(out[0].w_score - (0.9 + 0.035)) < 1e-9);
+    assert.ok(Math.abs(out[1].w_sum - 0.105) < 1e-9);
+  });
+  check('weighted score leans to the credible source', () => assert.ok(out[0].w_score / out[0].w_sum > 0.65));
+}
+
 console.log(`\n${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}`);

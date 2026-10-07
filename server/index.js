@@ -15,6 +15,7 @@ const smartMoneyRouter = require('./routes/smartMoney');
 const reportsRouter = require('./routes/reports');
 const adminRouter = require('./routes/admin');
 const billingRouter = require('./routes/billing');
+const emailRouter = require('./routes/email');
 const strategiesRouter = require('./routes/strategies');
 const paperRouter = require('./routes/paper');
 const apiKeysRouter = require('./routes/apiKeys');
@@ -70,6 +71,7 @@ app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 // ─── API Routes ─────────────────────────────────────────────
 app.use('/api/auth/oauth', oauthRouter); // Phase 5 — Google/GitHub sign-in (before the generic auth router)
 app.use('/api/auth', authRouter);
+app.use('/api/email', emailRouter); // unsubscribe links + email preferences
 app.use('/api/portfolio', portfolioRouter);
 app.use('/api/news', newsRouter);
 app.use('/api/smart-money', smartMoneyRouter);
