@@ -1,0 +1,508 @@
+{
+  "AAPL": [
+    { "name": "John Ternus", "role": "CEO", "aliases": ["Ternus"], "asOf": "2026-10-07", "source": "fmp" },
+    { "name": "Tim Cook", "role": "Executive Chairman", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "MSFT": [
+    { "name": "Satya Nadella", "role": "CEO", "aliases": ["Nadella"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "NVDA": [
+    { "name": "Jensen Huang", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "GOOGL": [
+    { "name": "Sundar Pichai", "role": "CEO", "aliases": ["Pichai"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "AMZN": [
+    { "name": "Andy Jassy", "role": "CEO", "aliases": ["Jassy"], "asOf": "2026-10-07", "source": "fmp" },
+    { "name": "Jeff Bezos", "role": "Founder & Executive Chairman", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "META": [
+    { "name": "Mark Zuckerberg", "role": "CEO", "aliases": ["Zuckerberg"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "TSLA": [
+    { "name": "Elon Musk", "role": "CEO", "aliases": ["Musk"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "AVGO": [
+    { "name": "Hock Tan", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "ORCL": [
+    { "name": "Clay Magouyrk", "role": "Co-CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Mike Sicilia", "role": "Co-CEO", "asOf": "2026-10-07", "source": "fmp" },
+    { "name": "Larry Ellison", "role": "Founder & Executive Chairman", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "CRM": [
+    { "name": "Marc Benioff", "role": "CEO", "aliases": ["Benioff"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "ADBE": [
+    { "name": "Shantanu Narayen", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "AMD": [
+    { "name": "Lisa Su", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "INTC": [
+    { "name": "Lip-Bu Tan", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "QCOM": [
+    { "name": "Cristiano Amon", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "CSCO": [
+    { "name": "Chuck Robbins", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "IBM": [
+    { "name": "Arvind Krishna", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "TXN": [
+    { "name": "Haviv Ilan", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "NFLX": [
+    { "name": "Ted Sarandos", "role": "Co-CEO", "asOf": "2026-10-07", "source": "fmp" },
+    { "name": "Greg Peters", "role": "Co-CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Reed Hastings", "role": "Co-founder", "asOf": "2026-10-07", "source": "web" }
+  ],
+  "PLTR": [
+    { "name": "Alex Karp", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "UBER": [
+    { "name": "Dara Khosrowshahi", "role": "CEO", "aliases": ["Khosrowshahi"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "JPM": [
+    { "name": "Jamie Dimon", "role": "CEO", "aliases": ["Dimon"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "BAC": [
+    { "name": "Brian Moynihan", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "WFC": [
+    { "name": "Charlie Scharf", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "GS": [
+    { "name": "David Solomon", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "MS": [
+    { "name": "Ted Pick", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "V": [
+    { "name": "Ryan McInerney", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "MA": [
+    { "name": "Michael Miebach", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "AXP": [
+    { "name": "Stephen Squeri", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "BLK": [
+    { "name": "Larry Fink", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "BRK.B": [
+    { "name": "Greg Abel", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" },
+    { "name": "Warren Buffett", "role": "Chairman", "aliases": ["Buffett"], "asOf": "2026-10-07", "source": "web" }
+  ],
+  "PYPL": [
+    { "name": "Enrique Lores", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "COIN": [
+    { "name": "Brian Armstrong", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "C": [
+    { "name": "Jane Fraser", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "SCHW": [
+    { "name": "Rick Wurster", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "SPGI": [
+    { "name": "Martina Cheung", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "BX": [
+    { "name": "Stephen Schwarzman", "role": "CEO", "aliases": ["Steve Schwarzman"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "HOOD": [
+    { "name": "Vlad Tenev", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "MSTR": [
+    { "name": "Phong Le", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" },
+    { "name": "Michael Saylor", "role": "Executive Chairman", "aliases": ["Saylor"], "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "UNH": [
+    { "name": "Stephen Hemsley", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "JNJ": [
+    { "name": "Joaquin Duato", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "LLY": [
+    { "name": "David Ricks", "role": "CEO", "aliases": ["Dave Ricks"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "PFE": [
+    { "name": "Albert Bourla", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "MRK": [
+    { "name": "Robert Davis", "role": "CEO", "aliases": ["Rob Davis"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "ABBV": [
+    { "name": "Robert Michael", "role": "CEO", "aliases": ["Rob Michael"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "TMO": [
+    { "name": "Marc Casper", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "ABT": [
+    { "name": "Robert Ford", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "AMGN": [
+    { "name": "Robert Bradway", "role": "CEO", "aliases": ["Bob Bradway"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "GILD": [
+    { "name": "Daniel O'Day", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "ISRG": [
+    { "name": "Dave Rosa", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "CVS": [
+    { "name": "David Joyner", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "DHR": [
+    { "name": "Rainer Blair", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "BMY": [
+    { "name": "Chris Boerner", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "WMT": [
+    { "name": "John Furner", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "PG": [
+    { "name": "Shailesh Jejurikar", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "KO": [
+    { "name": "Henrique Braun", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" },
+    { "name": "James Quincey", "role": "Executive Chairman", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "PEP": [
+    { "name": "Ramon Laguarta", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "COST": [
+    { "name": "Ron Vachris", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "PM": [
+    { "name": "Jacek Olczak", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "MDLZ": [
+    { "name": "Dirk Van de Put", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "TGT": [
+    { "name": "Michael Fiddelke", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "MCD": [
+    { "name": "Chris Kempczinski", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "NKE": [
+    { "name": "Elliott Hill", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "HD": [
+    { "name": "Ted Decker", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "SBUX": [
+    { "name": "Brian Niccol", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "LOW": [
+    { "name": "Marvin Ellison", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "BKNG": [
+    { "name": "Glenn Fogel", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "TJX": [
+    { "name": "Ernie Herrman", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "GM": [
+    { "name": "Mary Barra", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "F": [
+    { "name": "Jim Farley", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "ABNB": [
+    { "name": "Brian Chesky", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "CMG": [
+    { "name": "Scott Boatwright", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "DIS": [
+    { "name": "Josh D'Amaro", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" },
+    { "name": "Bob Iger", "role": "Senior Advisor", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "NOW": [
+    { "name": "Bill McDermott", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "INTU": [
+    { "name": "Sasan Goodarzi", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "AMAT": [
+    { "name": "Gary Dickerson", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "MU": [
+    { "name": "Sanjay Mehrotra", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "PANW": [
+    { "name": "Nikesh Arora", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "CRWD": [
+    { "name": "George Kurtz", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "DELL": [
+    { "name": "Michael Dell", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "ACN": [
+    { "name": "Julie Sweet", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "ANET": [
+    { "name": "Jayshree Ullal", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "T": [
+    { "name": "John Stankey", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "VZ": [
+    { "name": "Dan Schulman", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "TMUS": [
+    { "name": "Srini Gopalan", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "CMCSA": [
+    { "name": "Brian Roberts", "role": "Co-CEO", "asOf": "2026-10-07", "source": "fmp" },
+    { "name": "Mike Cavanagh", "role": "Co-CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "XOM": [
+    { "name": "Darren Woods", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "CVX": [
+    { "name": "Mike Wirth", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "COP": [
+    { "name": "Andy O'Brien", "role": "CEO", "aliases": ["Andrew O'Brien"], "asOf": "2026-10-07", "source": "fmp" },
+    { "name": "Ryan Lance", "role": "Executive Chairman", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "BA": [
+    { "name": "Kelly Ortberg", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "CAT": [
+    { "name": "Joe Creed", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "GE": [
+    { "name": "Larry Culp", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "HON": [
+    { "name": "Vimal Kapur", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "UPS": [
+    { "name": "Carol Tomé", "role": "CEO", "aliases": ["Carol Tome"], "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "RTX": [
+    { "name": "Chris Calio", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "LMT": [
+    { "name": "Jim Taiclet", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "DE": [
+    { "name": "John May", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "UNP": [
+    { "name": "Jim Vena", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "FDX": [
+    { "name": "Raj Subramaniam", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "NEE": [
+    { "name": "John Ketchum", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "LIN": [
+    { "name": "Sanjiv Lamba", "role": "CEO", "asOf": "2026-10-07", "source": "fmp" }
+  ],
+  "RELIANCE": [
+    { "name": "Mukesh Ambani", "role": "Chairman & MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "TCS": [
+    { "name": "K Krithivasan", "role": "CEO", "aliases": ["Krithivasan"], "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "INFY": [
+    { "name": "Salil Parekh", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Nandan Nilekani", "role": "Co-founder & Chairman", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Narayana Murthy", "role": "Founder", "asOf": "2026-10-07", "source": "web" }
+  ],
+  "HDFCBANK": [
+    { "name": "Sashidhar Jagdishan", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "ICICIBANK": [
+    { "name": "Sandeep Bakhshi", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "HINDUNILVR": [
+    { "name": "Priya Nair", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "ITC": [
+    { "name": "Sanjiv Puri", "role": "Chairman & MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "SBIN": [
+    { "name": "C S Setty", "role": "Chairman", "aliases": ["CS Setty"], "asOf": "2026-10-07", "source": "web" }
+  ],
+  "BHARTIARTL": [
+    { "name": "Shashwat Sharma", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Sunil Mittal", "role": "Founder & Chairman", "aliases": ["Sunil Bharti Mittal"], "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Gopal Vittal", "role": "Executive Vice Chairman", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "KOTAKBANK": [
+    { "name": "Ashok Vaswani", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Uday Kotak", "role": "Founder", "asOf": "2026-10-07", "source": "web" }
+  ],
+  "LT": [
+    { "name": "S N Subrahmanyan", "role": "Chairman & MD", "aliases": ["SN Subrahmanyan"], "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "AXISBANK": [
+    { "name": "Amitabh Chaudhry", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "BAJFINANCE": [
+    { "name": "Rajeev Jain", "role": "MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "ASIANPAINT": [
+    { "name": "Amit Syngle", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "MARUTI": [
+    { "name": "Hisashi Takeuchi", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "R C Bhargava", "role": "Chairman", "aliases": ["RC Bhargava"], "asOf": "2026-10-07", "source": "web" }
+  ],
+  "HCLTECH": [
+    { "name": "C Vijayakumar", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Roshni Nadar Malhotra", "role": "Chairperson", "aliases": ["Roshni Nadar"], "asOf": "2026-10-07", "source": "web" },
+    { "name": "Shiv Nadar", "role": "Founder", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "SUNPHARMA": [
+    { "name": "Kirti Ganorkar", "role": "MD", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Dilip Shanghvi", "role": "Founder & Executive Chairman", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "TITAN": [
+    { "name": "Ajoy Chawla", "role": "MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "ULTRACEMCO": [
+    { "name": "K C Jhanwar", "role": "MD", "aliases": ["KC Jhanwar"], "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "WIPRO": [
+    { "name": "Srini Pallia", "role": "CEO", "aliases": ["Srinivas Pallia"], "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Rishad Premji", "role": "Executive Chairman", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Azim Premji", "role": "Founder", "asOf": "2026-10-07", "source": "web" }
+  ],
+  "NESTLEIND": [
+    { "name": "Manish Tiwary", "role": "Chairman & MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "ONGC": [
+    { "name": "Arun Kumar Singh", "role": "Chairman & CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "NTPC": [
+    { "name": "Gurdeep Singh", "role": "Chairman & MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "POWERGRID": [
+    { "name": "Vamsi Rama Mohan Burra", "role": "Chairman & MD", "aliases": ["Burra Vamsi Rama Mohan"], "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "M&M": [
+    { "name": "Anish Shah", "role": "Group CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Anand Mahindra", "role": "Chairman", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "TMPV": [
+    { "name": "Shailesh Chandra", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "TMCV": [
+    { "name": "Girish Wagh", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "TATASTEEL": [
+    { "name": "T V Narendran", "role": "CEO", "aliases": ["TV Narendran"], "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "JSWSTEEL": [
+    { "name": "Jayant Acharya", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Sajjan Jindal", "role": "Chairman", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "ADANIENT": [
+    { "name": "Gautam Adani", "role": "Chairman", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "ADANIPORTS": [
+    { "name": "Ashwani Gupta", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Karan Adani", "role": "MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "COALINDIA": [
+    { "name": "B Sairam", "role": "Chairman & MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "BAJAJFINSV": [
+    { "name": "Sanjiv Bajaj", "role": "Chairman & MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "HDFCLIFE": [
+    { "name": "Vibha Padalkar", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "SBILIFE": [
+    { "name": "Amit Jhingran", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "GRASIM": [
+    { "name": "Himanshu Kapania", "role": "MD", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Kumar Mangalam Birla", "role": "Chairman", "asOf": "2026-10-07", "source": "web" }
+  ],
+  "DRREDDY": [
+    { "name": "Erez Israeli", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "G V Prasad", "role": "Co-Chairman & MD", "aliases": ["GV Prasad"], "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "CIPLA": [
+    { "name": "Achin Gupta", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "DIVISLAB": [
+    { "name": "Kiran Divi", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Murali Divi", "role": "Founder & MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "BRITANNIA": [
+    { "name": "Rakshit Hargave", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "EICHERMOT": [
+    { "name": "B Govindarajan", "role": "MD", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Siddhartha Lal", "role": "Executive Chairman", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "HEROMOTOCO": [
+    { "name": "Harshavardhan Chitale", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Pawan Munjal", "role": "Executive Chairman", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "BAJAJ-AUTO": [
+    { "name": "Rajiv Bajaj", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "HINDALCO": [
+    { "name": "Satish Pai", "role": "MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "TECHM": [
+    { "name": "Mohit Joshi", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "INDUSINDBK": [
+    { "name": "Rajiv Anand", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "APOLLOHOSP": [
+    { "name": "Prathap Reddy", "role": "Founder & Executive Chairman", "aliases": ["Prathap C Reddy"], "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Suneeta Reddy", "role": "Joint MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "BPCL": [
+    { "name": "Sanjay Khanna", "role": "Chairman & MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "TATACONSUM": [
+    { "name": "Sunil D'Souza", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "LTM": [
+    { "name": "Venu Lambu", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "SHRIRAMFIN": [
+    { "name": "Parag Sharma", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "TRENT": [
+    { "name": "P Venkatesalu", "role": "MD", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Noel Tata", "role": "Chairman", "asOf": "2026-10-07", "source": "web" }
+  ],
+  "BEL": [
+    { "name": "Manoj Jain", "role": "Chairman & MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "ETERNAL": [
+    { "name": "Albinder Dhindsa", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Deepinder Goyal", "role": "Founder & Vice Chairman", "asOf": "2026-10-07", "source": "web" }
+  ],
+  "JIOFIN": [
+    { "name": "Hitesh Sethia", "role": "CEO", "asOf": "2026-10-07", "source": "yahoo" }
+  ],
+  "INDIGO": [
+    { "name": "William Walsh", "role": "CEO", "aliases": ["Willie Walsh"], "asOf": "2026-10-07", "source": "yahoo" },
+    { "name": "Rahul Bhatia", "role": "Co-founder & MD", "asOf": "2026-10-07", "source": "web" }
+  ],
+  "MAXHEALTH": [
+    { "name": "Abhay Soi", "role": "Chairman & MD", "asOf": "2026-10-07", "source": "yahoo" }
+  ]
+}
