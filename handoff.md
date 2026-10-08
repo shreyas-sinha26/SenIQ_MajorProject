@@ -15,13 +15,18 @@ commits and tagged on those commits, tags pushed: **#3** (user time zones + the 
 report) = `308b1bc` = **`v1.4` / `v2.4`**; **#4** (India deals and insider trades in the reports
 and the brief) = `f5d2605` = **`v1.5` / `v2.5`**; **#5** (local FinBERT sentiment) = `7af294a` = **`v1.6` / `v2.6`**.
 `npm test` is green on `7af294a`. The dev database is on migration **0029**.
+**#7** (the "Senco Gold" fix: a commodity word inside a company name no longer tags the
+commodity) is merged with a merge commit and **not tagged**. It replaces #6, which GitHub
+closed by itself when `local-finbert` was deleted; the branch was rebased onto `main` first
+and `npm test` was green on it.
 **Every merged branch has been deleted**, on GitHub and locally (`hardening-email-reports`,
-`user-time-zones`, `india-smart-money-in-reports`, `local-finbert`); only `main` and the open
-`commodity-company-names` remain. See the sections below, newest first.
-- **The working folder may not be on `main`.** A separate session (the "Senco Gold" fix) works
-  in the same folder and switched it to `commodity-company-names`, which is based on
-  `5847545` — before the re-score script and the last handoff commits. When it is done: merge
-  or rebase it onto `main`, switch the folder back to `main` and pull.
+`user-time-zones`, `india-smart-money-in-reports`, `local-finbert`,
+`commodity-company-names`); only `main` remains, and the working folder is back on it. See
+the sections below, newest first.
+- **Still to do by Annas:** remove the 41 stored commodity tags that no longer resolve —
+  `node scripts/retag_commodities.js` to look, then
+  `node scripts/retag_commodities.js --write --backup samples/removed-commodity-tags-2026-10-08.json`.
+  Details in the FinBERT section below ("Seen in the trial, fixed for new stories").
 - Local `.env` now has `CLAUDE_REPORTS=0`, `INDIA_SMART_MONEY=1`, `FINBERT_CLASSIFY=1` and
   Annas's own `NSE_USER_AGENT`. None of these are the defaults.
 
@@ -129,7 +134,7 @@ router. Indian prices now work through Yahoo; the Upstox token is still unused.
   "market wrap" naming Kotak Bank read negative for Kotak because the market fell. Switching
   scorers changes the scale of the sentiment history; re-scoring what is stored is what keeps
   it consistent. A few hundred MB of memory, which matters on a small cloud server.
-- **Seen in the trial, fixed for new stories (2026-10-08):** "Senco Gold" (a jeweller) stories
+- **Seen in the trial, fixed for new stories (2026-10-08, pull request #7):** "Senco Gold" (a jeweller) stories
   were tagged to XAU, the gold commodity (three of 20 rows) — an entity-resolver problem,
   separate from sentiment. `entityResolver.js` now ignores a commodity word that is part of a
   company's name: a short list of known names (`COMMODITY_COMPANY_NAMES` — Senco Gold, Barrick
