@@ -68,8 +68,8 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   (no database or API calls).
 - **Dev database** *(checked)*: Postgres `seniq`, all 30 migration files applied (latest
   `0029_user_time_zone`). 1,960 articles, 334 events (2026-10-08, late).
-- **Nothing is hosted.** A local dev server was left running on `:3010` on 2026-10-08
-  (preview name `seniq-main`), with Claude calls on; `ollama serve` is not running.
+- **Nothing is running** *(checked late 2026-10-08)*: no dev server, no strategy engine, no
+  `ollama serve`. Nothing is hosted. The next `npm start` will have Claude calls on.
 - **Local `.env` switches that differ from the defaults** *(checked)*: `CLAUDE_REPORTS=1` (was `0`
   until late 2026-10-08), `INDIA_SMART_MONEY=1`, `FINBERT_CLASSIFY=1`, `COMPANY_SENTIMENT_LLM=ollama` (the local
   model reads multi-company stories, §8; it needs `ollama serve`, which is **not** running),
