@@ -36,9 +36,11 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ## 2. Standing rules
 
-1. **No Claude API calls until Annas says so** (set 2026-10-08, still in force). He approves
-   paid calls one at a time. `CLAUDE_REPORTS=0` is set in `.env`, which turns off every model
-   call the app could make by itself (and Ask with it).
+1. **A session makes no Claude API call of its own until Annas says so**; he approves those
+   one at a time. The app's own calls are a separate switch, and Annas turned it **on** late
+   on 2026-10-08: `.env` has `CLAUDE_REPORTS=1`, so a running server calls Claude for Ask,
+   the daily brief, Pro alert explanations and report cards, inside the quotas and the
+   $5/day ceiling. Set it back to `0` to stop all of that.
 2. **Ask before any run that costs money or takes long**: paid model call, embedding run,
    backfill, eval run.
 3. **Annas is the sole author.** No AI attribution in commits, pull requests or code.
@@ -60,14 +62,16 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 - **Git** *(checked 2026-10-08)*: on `main`, level with `origin/main`, no other branch, no
   open pull request. Latest tags **`v1.8` / `v2.8`** on `d13a560`, the merge of pull request #8
-  (per-company sentiment); the commits after it on `main` are handoff notes only. Untracked and never pushed: `samples/` and `.github/` (see §11).
+  (per-company sentiment). After it, untagged: the README restored and rewritten, and
+  pull request #9 (`55c5fe3`, in-page confirm dialog); the rest are handoff notes. Untracked and never pushed: `samples/` and `.github/` (see §11).
 - **Tests** *(checked 2026-10-08)*: `npm test` passes — 22 files, 530 checks, offline
   (no database or API calls).
 - **Dev database** *(checked)*: Postgres `seniq`, all 30 migration files applied (latest
-  `0029_user_time_zone`). 1,917 articles, 308 events.
-- **Nothing is running.** Nothing is hosted.
-- **Local `.env` switches that differ from the defaults** *(checked)*: `CLAUDE_REPORTS=0`,
-  `INDIA_SMART_MONEY=1`, `FINBERT_CLASSIFY=1`, `COMPANY_SENTIMENT_LLM=ollama` (the local
+  `0029_user_time_zone`). 1,960 articles, 334 events (2026-10-08, late).
+- **Nothing is hosted.** A local dev server was left running on `:3010` on 2026-10-08
+  (preview name `seniq-main`), with Claude calls on; `ollama serve` is not running.
+- **Local `.env` switches that differ from the defaults** *(checked)*: `CLAUDE_REPORTS=1` (was `0`
+  until late 2026-10-08), `INDIA_SMART_MONEY=1`, `FINBERT_CLASSIFY=1`, `COMPANY_SENTIMENT_LLM=ollama` (the local
   model reads multi-company stories, §8; it needs `ollama serve`, which is **not** running),
   plus Annas's own `NSE_USER_AGENT`.
 
@@ -314,7 +318,8 @@ All the write scripts are dry runs without their flag.
 | `FINNHUB_API_KEY` | set | US prices and company news |
 | `FMP_API_KEY` | set | Commodity fallback, executives refresh |
 | `AIROUTER_API_KEY` | set | Claude through AIRouter (`ANTHROPIC_API_KEY` is the alternative) |
-| `CLAUDE_REPORTS` | **`0`** | `1` lets the app call Claude: brief, Ask, alert narrative, report cards |
+| `CLAUDE_REPORTS` | **`1`** (since 2026-10-08) | `1` lets the app call Claude: brief, Ask, alert narrative, report cards |
+| `COMPANY_SENTIMENT_LLM` | **`ollama`** | A language model reads multi-company clauses: `ollama` (local, free) or `1` (Haiku). Default is off |
 | `FINBERT_CLASSIFY` | **`1`** | Local FinBERT scores new stories. Default is off. `FINBERT_MODE=hosted` uses the Hugging Face API instead |
 | `INDIA_SMART_MONEY`, `NSE_USER_AGENT` | **`1`**, set | India deals and insider trades. Default is off |
 | `SMTP_HOST/PORT/USER/PASS`, `EMAIL_FROM` | set (Gmail app password) | All email while there is no domain |
@@ -442,6 +447,11 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
 - A story read as neutral just below the middle (0.46) is still worded "Reads negative" on the
   news row (`impactScoring.dirLabel` has no neutral band).
 - Alerts, cached briefs and `event_outcomes` made before the re-score keep the old readings.
+
+**Front end.**
+- Do not use the browser's `confirm()`, `alert()` or `prompt()`. Embedded browsers (the
+  Claude desktop pane among them) suppress them and answer "no", so the button looks dead.
+  Use `confirmAction(message, label)` in `public/js/app.js`, which returns a promise.
 
 **Entity resolution.**
 - A commodity word inside a company name ("Senco Gold") no longer tags the commodity, using a
@@ -624,6 +634,12 @@ Pull request #6 was closed by GitHub when its base branch was deleted; #7 replac
 **Pull request #8** (`per-company-sentiment`) was merged on 2026-10-08 as `d13a560`, at
 Annas's request from a session, and the branch deleted: roundups as market stories,
 per-company sentiment, the local-model step and the labelling scripts. Tagged `v1.8` / `v2.8`.
+
+**Pull request #9** (`in-page-confirm`) was merged on 2026-10-08 as `55c5fe3`, at Annas's
+request, and the branch deleted. **Not tagged.** The five buttons that asked "are you sure?"
+with the browser's `confirm()` (delete an Ask conversation, delete a strategy, stop or delete
+a paper deployment, revoke an API key) now use an in-page dialog, `confirmAction()` in
+`public/js/app.js`.
 
 ---
 
