@@ -73,6 +73,47 @@ async function runHosted(texts) {
   return out;
 }
 
+// ── The company-aware model (optional): the same kind of model, loaded from a folder ──
+let targetPipeline = null;
+async function runTarget(texts) {
+  if (!targetPipeline) {
+    const path = require('path');
+    const { pipeline, env } = await import('@huggingface/transformers');
+    const dir = path.resolve(FINBERT.TARGET_MODEL);
+    env.localModelPath = path.dirname(dir) + path.sep; // a folder on disk is looked up by its name under this
+    targetPipeline = await pipeline('text-classification', path.basename(dir), { dtype: FINBERT.LOCAL_DTYPE, local_files_only: true });
+  }
+  const out = [];
+  for (let i = 0; i < texts.length; i += FINBERT.BATCH) {
+    out.push(...await targetPipeline(texts.slice(i, i + FINBERT.BATCH), { top_k: null }));
+  }
+  return out;
+}
+
+// Whether the company-aware model is configured and on disk.
+function targetEnabled() {
+  return FEATURES.FINBERT_CLASSIFY && !!FINBERT.TARGET_MODEL && require('fs').existsSync(FINBERT.TARGET_MODEL);
+}
+
+/**
+ * Read each text for one company. items = [{ entity, text }], entity being the company as
+ * the text names it. Returns readings aligned to `items`, or null when the model is not
+ * set up or fails (the caller falls back to FinBERT). deps for tests: { runFn }.
+ */
+async function classifyTargets(items, deps = {}) {
+  if (!deps.runFn && !targetEnabled()) return null;
+  if (!items || !items.length) return [];
+  const inputs = items.map((it) => `${it.entity}${FINBERT.TARGET_SEP}${String(it.text || '')}`.slice(0, FINBERT.MAX_CHARS));
+  try {
+    const rows = await (deps.runFn || runTarget)(inputs);
+    if (!Array.isArray(rows) || rows.length !== inputs.length) throw new Error(`expected ${inputs.length} results, got ${rows && rows.length}`);
+    return rows.map((r) => ({ ...fromProbabilities(r), model: 'finbert-target' }));
+  } catch (err) {
+    console.warn(`   ⚠️  Company-aware model failed — FinBERT reads this run instead: ${err.message}`);
+    return null;
+  }
+}
+
 // After a failure the model is left alone until this time, then tried again.
 let retryAt = 0;
 let warned = false;
@@ -110,4 +151,4 @@ function isEnabled() {
 // For tests: forget a failure.
 function resetForTests() { retryAt = 0; warned = false; }
 
-module.exports = { classifyBatch, isEnabled, fromProbabilities, resetForTests };
+module.exports = { classifyBatch, classifyTargets, targetEnabled, isEnabled, fromProbabilities, resetForTests };

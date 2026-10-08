@@ -310,7 +310,18 @@ function buildResolver(companies, executives) {
 
   // ticker → company name, for wording that must name the company (the per-company prompt).
   const nameByTicker = Object.fromEntries(companies.map((c) => [c.ticker, c.name]));
-  return { resolve, sectorByTicker, nameByTicker };
+  // What the text itself calls a company: the longest of its name, aliases and symbol that
+  // appears in the text ("Kotak Bank", not "Kotak Mahindra Bank"); its name when none does.
+  const formsByTicker = Object.fromEntries(companies.map((c) =>
+    [c.ticker, [...new Set([c.name, ...(c.aliases || []), c.ticker].filter(Boolean))].sort((a, b) => b.length - a.length)]));
+  function surface(ticker, text) {
+    const lower = String(text || '').toLowerCase();
+    const hit = (formsByTicker[ticker] || []).find((f) => new RegExp(`(?<![a-z0-9])${escapeRegex(f.toLowerCase())}(?![a-z0-9])`).test(lower));
+    if (!hit) return nameByTicker[ticker] || ticker;
+    const at = lower.search(new RegExp(`(?<![a-z0-9])${escapeRegex(hit.toLowerCase())}(?![a-z0-9])`));
+    return String(text).slice(at, at + hit.length); // as written in the text
+  }
+  return { resolve, sectorByTicker, nameByTicker, surface };
 }
 
 // ─── DB-backed singleton (cached index, refreshed periodically) ──────
