@@ -72,6 +72,32 @@ rests on that — the strategy engine behind the app in this round, the Pro end-
 Google/GitHub sign-in end to end on the new sessions, and the alert narrative through the
 router. Indian prices now work through Yahoo; the Upstox token is still unused.
 
+### Sentiment scorer — the word list misreads single words; FinBERT not switched on (2026-10-08, night)
+- **Found:** "Apple Reportedly Partners With LG Electronics To Enter Smart Home Device Market" is
+  stored as negative for AAPL (score 0, confidence 0.13). The word-list scorer
+  (`services/sentiment.js`) matched one word in 40 — "challenge", in "challenge rivals Amazon
+  and Google" — and the score is the share of matched words that are positive, so one negative
+  word gives the most negative score there is. Same for "Apple Stock And Two Investment Grade
+  Issuers…" ("debt", confidence 0.06). The low confidence shrinks their weight in the ticker's
+  score, but the label on the story is still "negative".
+- The old news row ("Impact −100 · Confidence 0%") printed the sentiment score under the word
+  "Confidence"; that row was replaced in `2d151be` (v1.3). Annas saw the old row, so his
+  browser had a cached page or an older copy of the app open.
+- **Not fixed.** Two fixes were offered: (1) quick — read a story as neutral unless at least
+  two words match or a minimum confidence is cleared, and re-score what is stored; (2) FinBERT.
+  **Annas chose FinBERT and is getting a Hugging Face token** (`HF_API_TOKEN` in `.env`).
+- **Do not set `FINBERT_CLASSIFY=1` yet.** As written (`finbertClassifier.js`, never run):
+  the pipeline classifies every fetched story on every 10-minute run, stored or not — hundreds
+  of requests against a free allowance reported as under $0.10 a month; and after ONE error the
+  classifier falls back to the word list until the app restarts, silently. Before switching it
+  on: classify only new stories, retry after a pause instead of giving up, log which scorer
+  ran, score from all three probabilities, add tests, then trial on ~20 stored headlines
+  (needs Annas's go-ahead — it is a model call), then re-score stored stories.
+- Also offered, not chosen: running FinBERT locally (no token, no cost, a few hundred MB of
+  memory) — the app's original design before it moved to the hosted service.
+- FinBERT reads the tone of the whole text, not per company; a story tagged to two companies
+  gets one reading for both.
+
 ### Reddit and X — parked (2026-10-08, night)
 - **X:** not free. Pay-per-use since February 2026 (about $0.005 per post read, per third-party
   write-ups); stays deferred.
