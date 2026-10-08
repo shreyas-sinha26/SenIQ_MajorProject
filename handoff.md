@@ -16,13 +16,14 @@ report) = `308b1bc` = **`v1.4` / `v2.4`**; **#4** (India deals and insider trade
 and the brief) = `f5d2605` = **`v1.5` / `v2.5`**; **#5** (local FinBERT sentiment) = `7af294a` = **`v1.6` / `v2.6`**.
 `npm test` is green on `7af294a`. The dev database is on migration **0029**.
 **#7** (the "Senco Gold" fix: a commodity word inside a company name no longer tags the
-commodity) is merged with a merge commit and **not tagged**. It replaces #6, which GitHub
-closed by itself when `local-finbert` was deleted; the branch was rebased onto `main` first
-and `npm test` was green on it.
+commodity) is **open, not merged** — ready to merge: rebased onto `main`, no conflicts,
+`npm test` green. It replaces #6, which GitHub closed by itself when `local-finbert` was
+deleted. Annas is to merge it (the session was not allowed to), then delete the branch.
 **Every merged branch has been deleted**, on GitHub and locally (`hardening-email-reports`,
-`user-time-zones`, `india-smart-money-in-reports`, `local-finbert`,
-`commodity-company-names`); only `main` remains, and the working folder is back on it. See
-the sections below, newest first.
+`user-time-zones`, `india-smart-money-in-reports`, `local-finbert`); only `main` and
+`commodity-company-names` remain. See the sections below, newest first.
+- **The working folder is on `commodity-company-names`**, not `main`. After #7 is merged:
+  `git checkout main && git pull`.
 - **Still to do by Annas:** remove the 41 stored commodity tags that no longer resolve —
   `node scripts/retag_commodities.js` to look, then
   `node scripts/retag_commodities.js --write --backup samples/removed-commodity-tags-2026-10-08.json`.
