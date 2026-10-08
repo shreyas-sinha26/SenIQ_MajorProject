@@ -61,11 +61,9 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 ## 3. Current state
 
 - **Git** *(checked 2026-10-08)*: on `main`, level with `origin/main`, no other branch, no
-  open pull request *(checked 2026-10-09)*. Latest tags **`v1.9` / `v2.9`** on `55c5fe3`, the merge of pull request #9
-  (in-page confirm dialog; the README restored and rewritten is in it too). After it,
-  **untagged**: pull request #10 (`839df81`, the final sentiment refinement and the
-  corrected README results); the rest are handoff notes. The next pair would be
-  `v1.10` / `v2.10` on `839df81`. Untracked and never pushed: `samples/` and `.github/` (see §11).
+  open pull request *(checked 2026-10-09)*. Latest tags **`v1.10` / `v2.10`** on `839df81`, the merge of pull request #10
+  (the final sentiment refinement and the corrected README results). The commits after it
+  on `main` are handoff notes and the README's "latest tag" line. Untracked and never pushed: `samples/` and `.github/` (see §11).
 - **Tests** *(checked 2026-10-09)*: `npm test` passes — 22 files, 537 checks, offline
   (no database or API calls).
 - **Dev database** *(checked)*: Postgres `seniq`, all 30 migration files applied (latest
@@ -674,6 +672,7 @@ hand-labelled sheets of (story, company) pairs (§8).
 | `v1.7` / `v2.7` | `898314c` | #7: commodity word inside a company name; commodity re-tag script |
 | `v1.8` / `v2.8` | `d13a560` | #8: per-company sentiment (FinBERT per company, optional local or hosted language model), roundups as market stories, re-read and labelling scripts |
 | `v1.9` / `v2.9` | `55c5fe3` | #9: in-page confirm dialog for the delete and stop buttons; README restored and brought up to date, with the hand-label sentiment results |
+| `v1.10` / `v2.10` | `839df81` | #10: the local model reads every story and its agreement with FinBERT is the confidence; optional fine-tuned FinBERT (off); two-sheet scoring; README results corrected |
 
 Pull request #6 was closed by GitHub when its base branch was deleted; #7 replaced it.
 
@@ -688,7 +687,7 @@ a paper deployment, revoke an API key) now use an in-page dialog, `confirmAction
 `public/js/app.js`.
 
 **Pull request #10** (`sentiment-agreement`) was merged on 2026-10-09 as `839df81`, at Annas's
-request, and the branch deleted. **Not tagged.** The local model reads every new story and
+request, and the branch deleted. Tagged `v1.10` / `v2.10`. The local model reads every new story and
 its agreement with FinBERT is the reading's confidence; an optional fine-tuned FinBERT is
 wired but off; the README's results section now carries both label sheets (§8).
 
