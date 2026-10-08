@@ -16,7 +16,7 @@ report) = `308b1bc` = **`v1.4` / `v2.4`**; **#4** (India deals and insider trade
 and the brief) = `f5d2605` = **`v1.5` / `v2.5`**; **#5** (local FinBERT sentiment) = `7af294a` = **`v1.6` / `v2.6`**.
 `npm test` is green on `7af294a`. The dev database is on migration **0029**.
 **#7** (the "Senco Gold" fix: a commodity word inside a company name no longer tags the
-commodity) is merged = `898314c`, **not tagged**. It replaces #6, which GitHub closed by
+commodity) is merged = `898314c` = **`v1.7` / `v2.7`** (tags pushed). It replaces #6, which GitHub closed by
 itself when `local-finbert` was deleted. `npm test` was green on the branch before the merge.
 **Every merged branch has been deleted**, on GitHub and locally (`hardening-email-reports`,
 `user-time-zones`, `india-smart-money-in-reports`, `local-finbert`,
