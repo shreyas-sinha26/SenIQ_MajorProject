@@ -114,6 +114,38 @@ function showToast(message, type = 'info') {
   setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(40px)'; setTimeout(() => toast.remove(), 300); }, 4000);
 }
 
+// ─── Confirm dialog ──────────────────────────────────────────
+// An in-page "are you sure?" that resolves true or false. The browser's own confirm() is
+// not used: embedded browsers and some extensions suppress it and answer "no", which made
+// every delete button look dead.
+function confirmAction(message, confirmLabel = 'Delete') {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal glass" role="alertdialog" aria-modal="true" style="max-width: 400px;">
+        <div class="modal-body"><p class="confirm-message"></p></div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" type="button" data-answer="no">Cancel</button>
+          <button class="btn btn-primary" type="button" data-answer="yes"></button>
+        </div>
+      </div>`;
+    overlay.querySelector('.confirm-message').textContent = message;
+    const yes = overlay.querySelector('[data-answer="yes"]');
+    yes.textContent = confirmLabel;
+    const done = (answer) => { document.removeEventListener('keydown', onKey); overlay.remove(); resolve(answer); };
+    const onKey = (e) => { if (e.key === 'Escape') done(false); };
+    overlay.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-answer]');
+      if (btn) done(btn.dataset.answer === 'yes');
+      else if (e.target === overlay) done(false);
+    });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+    yes.focus();
+  });
+}
+
 // ─── Auth Logic ──────────────────────────────────────────────
 function selectAuthTab(name) {
   const tab = document.querySelector(`.auth-tab[data-tab="${name}"]`);
@@ -2989,7 +3021,7 @@ async function ysLoadSignal(id, nSymbols) {
 }
 
 async function ysDelete(id) {
-  if (!confirm('Delete this strategy?')) return;
+  if (!(await confirmAction('Delete this strategy?'))) return;
   try {
     await api(`/api/strategies/saved/${id}`, { method: 'DELETE' });
     ysInitDone = false;
@@ -3183,7 +3215,7 @@ async function ptLoadState(id) {
 }
 
 async function ptStop(id) {
-  if (!confirm('Stop this deployment? Its track record freezes as of today.')) return;
+  if (!(await confirmAction('Stop this deployment? Its track record freezes as of today.', 'Stop'))) return;
   try {
     await api(`/api/paper/${id}/stop`, { method: 'POST' });
     ptInitDone = false;
@@ -3194,7 +3226,7 @@ async function ptStop(id) {
 }
 
 async function ptDelete(id) {
-  if (!confirm('Delete this deployment and its paper history?')) return;
+  if (!(await confirmAction('Delete this deployment and its paper history?'))) return;
   try {
     await api(`/api/paper/${id}`, { method: 'DELETE' });
     ptInitDone = false;
@@ -3585,7 +3617,7 @@ async function openAskThread(id) {
 }
 
 async function deleteAskThread(id) {
-  if (!confirm('Delete this conversation?')) return;
+  if (!(await confirmAction('Delete this conversation?'))) return;
   try {
     await api(`/api/reports/threads/${id}`, { method: 'DELETE' });
     if (Number(id) === askThreadId) { askThreadId = null; askThread = []; renderAskThread(); }
@@ -3833,7 +3865,7 @@ async function createApiKey() {
 }
 
 async function revokeApiKey(id) {
-  if (!confirm('Revoke this key? Agents using it will stop working immediately.')) return;
+  if (!(await confirmAction('Revoke this key? Agents using it will stop working immediately.', 'Revoke'))) return;
   try {
     await api(`/api/keys/${id}`, { method: 'DELETE' });
     showToast('Key revoked', 'info');
