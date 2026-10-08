@@ -191,13 +191,46 @@ The tests run offline: no database, no API calls, no model downloads.
 
 - **Sentiment history is short.** It is only as long as the app has been recording, so the
   "90-day normal" rests on less than that until the store fills.
-- **No accuracy figure is claimed for sentiment.** Readings have been checked against one
-  small hand-labelled set only; treat them as a signal, not a measurement.
+- **Sentiment has been checked on one small hand-labelled set only** (below). Treat the
+  readings as a signal, not a measurement.
 - **Nothing is hosted.** `DEPLOY.md` and `render.yaml` describe a deployment that has not
   been carried out.
 - **Payments are not wired.** Upgrading a tier works only through the development stub.
 - **macOS ↔ Windows:** native modules don't transfer across platforms. If you copied
   `node_modules` from another OS and hit a `sharp` load error, run a clean `npm install`.
+
+## How the sentiment readings were checked
+
+One person labelled 100 (story, company) pairs from the stored news by hand: positive,
+neutral or negative for that company, or "not about this company". 65 pairs came from
+stories naming two or more companies and 35 from single-company stories. The stories were
+kept out of the work of writing the rules.
+
+| How the story is read | Pairs matching the label (of 100) | Multi-company pairs (of 65) | Opposite direction |
+|---|---|---|---|
+| One FinBERT reading for the whole story, given to every company named | 54 | 32 | 11 |
+| FinBERT per company (the sentences that name it) | 55 | 34 | 8 |
+| + a local model (Qwen 2.5 7B through Ollama) for shared clauses | 65 | 44 | 3 |
+| + Claude Haiku 4.5 for shared clauses | 70 | 49 | 3 |
+
+"Opposite direction" counts readings that said positive where the label said negative, or
+the reverse.
+
+What this does and does not show:
+
+- The gain is in multi-company stories and comes from the language-model step. Reading per
+  company with FinBERT alone made no measurable difference.
+- Single-company stories are read by FinBERT alone, which matched the label on 21 or 22 of
+  35 pairs.
+- 18 of the 100 pairs were labelled "not about this company". The Claude run recognised 8
+  of them. The local model's "not about" answers were not reliable enough to act on, so they
+  are stored as neutral readings.
+- This is one labeller, one run and 100 pairs, and the same pairs were used to choose
+  between settings, so the figures are indicative, not a benchmark. No comparison against
+  price moves has been made.
+
+`scripts/sentiment_label_sheet.js` writes such a sheet and `scripts/score_sentiment_labels.js`
+scores it.
 
 ## More documentation
 
