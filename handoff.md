@@ -10,18 +10,20 @@ in `RAG_PLAN.md`; the matching engine edits live only in the gitignored `strateg
 Every commit passes `npm test` on its own. Nothing in the merge has run with a real model
 key, real embeddings, or the real strategy engine behind the app.
 
-**Uncommitted on top of `main` (2026-10-08, the two sections below):** a hardening pass, Gmail
-sending, and report emails as PDF attachments — about 45 changed or new files, `npm test`
-green. The app was started on the dev database this session (migrations 0020–0025 applied,
-news pipeline and smart-money poller ran clean) and has been **stopped** again. Commit this
-work before anything else; fetch first (§8).
+**Committed on the branch `hardening-email-reports` (`be98ba8`, 2026-10-08, not pushed):** a
+hardening pass, Gmail sending, report emails as PDF attachments, and Claude through AIRouter
+(the three sections below) — 51 files, `npm test` green (351 checks). The dev database is on
+migration 0025. `origin/main` has since gained one commit from Shreyas (`ffa4fde`, README
+only — no overlap). **Next:** merge `origin/main` into the branch (merge, not rebase), run
+`npm test`, push the branch with the `Annas-Shariff` gh account and open a pull request (§8).
+`.github/workflows/ci.yml` is still left out of commits (needs the `workflow` token scope).
 
 **What is still switched off or never run for real:** Claude answers (`ANTHROPIC_API_KEY` +
 `CLAUDE_REPORTS=1`), Indian prices (Upstox), news embeddings, and hosting — so sentiment
 history is only ~16 days and SenIQ-factor backtests mean little. Email now works through a
 Gmail app password, but no SenIQ account uses a real address yet.
 
-### Hardening pass (2026-10-08, uncommitted — run `npm test`, then commit)
+### Hardening pass (2026-10-08, in `be98ba8`)
 A read-through of the whole Node app, then fixes. Nothing here changes a feature.
 - **Crashes:** every router is built with `server/middleware/asyncRouter.js`, so an error in an
   `async` handler is a 500 for that request. Before, it ended the process (Express 4 ignores
@@ -56,7 +58,7 @@ A read-through of the whole Node app, then fixes. Nothing here changes a feature
   at the same moment. The SEC contact email differs between `render.yaml` and `config.js`.
   Two migrations are numbered `0016`; harmless, and renaming an applied one would re-run it.
 
-### Email sending + report emails (2026-10-08, uncommitted)
+### Email sending + report emails (2026-10-08, in `be98ba8`)
 - **Sending without a domain:** `emailService.js` sends through Resend when `RESEND_API_KEY` is
   set, otherwise through SMTP (`SMTP_HOST/PORT/USER/PASS`, nodemailer) — a Gmail app password,
   ~500 emails/day, sent from that address. Moving to a domain later is an `.env` change only.
@@ -86,7 +88,7 @@ A read-through of the whole Node app, then fixes. Nothing here changes a feature
   time, so they are hit-and-miss until it is hosted.
 - New dependencies: `nodemailer`, `pdfkit`, `@expo-google-fonts/inter` (the embedded font).
 
-### Claude through AIRouter (2026-10-08, uncommitted)
+### Claude through AIRouter (2026-10-08, in `be98ba8`)
 - Annas bought credits on AIRouter (airouter.in — OpenAI-compatible only, `POST
   https://api.airouter.in/v1/chat/completions`, models named `provider/model`).
 - `services/llmClient.js`: when `AIROUTER_API_KEY` is set, the brief, Ask (incl. its tool loop)
