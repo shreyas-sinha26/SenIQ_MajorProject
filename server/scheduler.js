@@ -26,8 +26,9 @@ const { syncDisclosures } = require('./services/disclosures');
 const { generateDailyBriefs } = require('./services/reports');
 const { embedPendingArticles } = require('./services/newsSearch');
 const { purgeOldThreads } = require('./services/askThreads');
+const { runReportEmails } = require('./services/reportEmails');
 const { captureException } = require('./observability');
-const { REPORTS, QA } = require('./config');
+const { REPORTS, QA, REPORT_EMAIL } = require('./config');
 
 let isRunning = false;
 
@@ -204,6 +205,13 @@ async function runThreadPurge() {
   }
 }
 
+// Report emails — whoever is inside their morning (or Sunday-evening) window and has not had
+// that day's report. The service never throws; this only logs what went out.
+async function runReportEmailJob() {
+  const r = await runReportEmails();
+  if (r.due) console.log(`📬 Report emails: ${r.sent} sent, ${r.failed} failed`);
+}
+
 function startScheduler() {
   // Collect the cron tasks so graceful shutdown can stop them (SIGTERM on deploy).
   const tasks = [];
@@ -222,6 +230,9 @@ function startScheduler() {
   console.log(`⏰ Daily-brief generator started — ${REPORTS.CRON}`);
 
   tasks.push(cron.schedule(QA.THREAD_PURGE_CRON, runThreadPurge));
+
+  tasks.push(cron.schedule(REPORT_EMAIL.CRON, runReportEmailJob));
+  console.log(`⏰ Report emails started — ${REPORT_EMAIL.CRON}`);
 
   return tasks;
 }

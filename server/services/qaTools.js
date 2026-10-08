@@ -61,6 +61,11 @@ const { AMBIGUOUS, AMBIGUOUS_SYMBOLS } = require('./entityResolver');
  * symbols that are everyday uppercase text ("F&O", "PM", "Series C") count only as $F / $PM,
  * and names that are ordinary words ("visa", "meta", "cosmos") count only when capitalized.
  */
+// Tickers that are also everyday words. Like the short symbols, they count only when
+// written as a symbol (UPPERCASE or $-prefixed): "near-term" is not NEAR Protocol and
+// "the cost of capital" is not Costco.
+const WORD_TICKERS = new Set(['near', 'cost', 'coin', 'hood', 'link', 'atom', 'uber', 'dell', 'doge']);
+
 function findMentionedTickers(text, universe) {
   const q = String(text || '');
   const found = new Set();
@@ -69,7 +74,7 @@ function findMentionedTickers(text, universe) {
     if (!t || t === '__MARKET__') continue;
     const tickerRe = AMBIGUOUS_SYMBOLS.has(t)
       ? new RegExp(`\\$${escapeRe(t)}(?![A-Za-z0-9&])`)
-      : t.length <= 3 || (t.length === 4 && AMBIGUOUS.has(t.toLowerCase())) // META: "meta-analysis" is not the stock
+      : t.length <= 3 || WORD_TICKERS.has(t.toLowerCase()) || (t.length === 4 && AMBIGUOUS.has(t.toLowerCase())) // META: "meta-analysis" is not the stock
       ? new RegExp(`(^|[^A-Za-z0-9])\\$?${escapeRe(t)}(?![A-Za-z0-9])`)
       : new RegExp(`(^|[^A-Za-z0-9])\\$?${escapeRe(t)}(?![A-Za-z0-9])`, 'i');
     let hit = tickerRe.test(q);

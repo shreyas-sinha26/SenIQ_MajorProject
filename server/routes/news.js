@@ -1,4 +1,4 @@
-const express = require('express');
+const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, execute } = require('../db');
 const { authMiddleware } = require('./auth');
 const { fetchNewsForTickers } = require('../services/newsFetcher');
@@ -10,9 +10,10 @@ const { explainForPortfolio } = require('../services/ollamaExplainer');
 const { scoreTicker } = require('../services/sentimentScoring');
 const { getImpactFeed } = require('../services/impactScoring');
 const { attachTier, requireTier } = require('../middleware/tier');
+const { userRateLimit, LIMITS } = require('../middleware/rateLimit');
 const { EXECUTORS: ASK_TOOLS, ScopeError } = require('../services/qaTools');
 
-const router = express.Router();
+const router = asyncRouter();
 router.use(authMiddleware, attachTier);
 
 // ─── GET /api/news/feed ──────────────────────────────────────
@@ -112,7 +113,7 @@ router.get('/feed', async (req, res) => {
 
 // ─── GET /api/news/sentiment/:ticker ─────────────────────────
 // Get sentiment analysis for a specific ticker
-router.get('/sentiment/:ticker', async (req, res) => {
+router.get('/sentiment/:ticker', userRateLimit(LIMITS.LIVE_NEWS), async (req, res) => {
   try {
     const ticker = req.params.ticker.toUpperCase();
     const apiKey = process.env.FINNHUB_API_KEY || '';
@@ -157,7 +158,7 @@ router.get('/sentiment/:ticker/drivers', requireTier('plus'), async (req, res) =
 
 // ─── GET /api/news/portfolio-sentiment ───────────────────────
 // Get aggregate sentiment for entire portfolio
-router.get('/portfolio-sentiment', async (req, res) => {
+router.get('/portfolio-sentiment', userRateLimit(LIMITS.LIVE_NEWS), async (req, res) => {
   try {
     const holdings = await query('SELECT ticker FROM portfolio WHERE user_id = $1', [req.user.id]);
     const tickers = holdings.map(h => h.ticker);
@@ -265,9 +266,10 @@ router.put('/alerts/:id/dismiss', async (req, res) => {
 
 // ─── POST /api/news/analyze ─────────────────────────────────
 // Analyze headline, URL, or article text
-router.post('/analyze', async (req, res) => {
-  const { text } = req.body;
-  if (!text) return res.status(400).json({ error: 'Text is required' });
+router.post('/analyze', userRateLimit(LIMITS.ANALYZE), async (req, res) => {
+  const { text } = req.body || {};
+  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'Text is required' });
+  if (text.length > 20000) return res.status(400).json({ error: 'That text is too long to analyze' });
 
   let inputText = text.trim();
   let summary = null;

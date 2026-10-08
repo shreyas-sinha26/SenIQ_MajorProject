@@ -224,7 +224,7 @@ function initAuth() {
       okEl.textContent = data.message;
       // Local dev without an email provider: the server hands the link back.
       if (data.devResetLink) {
-        okEl.innerHTML = `${data.message}<br><a href="${data.devResetLink}" style="color:inherit;text-decoration:underline">Dev: open reset link</a>`;
+        okEl.innerHTML = `${escapeHtml(data.message)}<br><a href="${escapeHtml(data.devResetLink)}" style="color:inherit;text-decoration:underline">Dev: open reset link</a>`;
       }
       okEl.classList.remove('hidden');
     } catch (err) {
@@ -349,18 +349,18 @@ function renderHoldings() {
           : ''}</span>`
       : '<span class="ht-price muted">—</span>';
     return `
-    <tr class="${rowClass}" data-ticker="${h.ticker}" onclick="toggleFilter('${h.ticker}')">
+    <tr class="${rowClass}" data-ticker="${escapeHtml(h.ticker)}" onclick="toggleFilter('${escapeHtml(h.ticker)}')">
       <td>
-        <div class="ht-ticker">${h.ticker} <span class="asset-class-badge ${cls}">${clsLabel}</span>${h.coverage === 'basic' ? ' <span class="coverage-badge" title="Outside SenIQ\'s curated list of companies. News is matched on the name and symbol only, so expect fewer stories and a thinner sentiment score.">Basic coverage</span>' : ''} ${priceInline}</div>
-        <div class="ht-name">${h.company_name || h.ticker}</div>
+        <div class="ht-ticker">${escapeHtml(h.ticker)} <span class="asset-class-badge ${cls}">${clsLabel}</span>${h.coverage === 'basic' ? ' <span class="coverage-badge" title="Outside SenIQ\'s curated list of companies. News is matched on the name and symbol only, so expect fewer stories and a thinner sentiment score.">Basic coverage</span>' : ''} ${priceInline}</div>
+        <div class="ht-name">${escapeHtml(h.company_name || h.ticker)}</div>
       </td>
       <td class="ht-exposure">${exposure}</td>
-      <td><span class="ht-senti-label neutral" id="senti-label-${h.ticker}">—</span></td>
-      <td><button class="ht-score-why" type="button" title="See the stories behind this score" onclick="event.stopPropagation(); toggleSentimentDrivers('${h.ticker}')"><span class="ht-score neutral" id="score-${h.ticker}">—</span><span class="ht-score-caret" aria-hidden="true">▾</span></button></td>
-      <td><span class="ht-headline" id="headline-${h.ticker}">—</span></td>
+      <td><span class="ht-senti-label neutral" id="senti-label-${escapeHtml(h.ticker)}">—</span></td>
+      <td><button class="ht-score-why" type="button" title="See the stories behind this score" onclick="event.stopPropagation(); toggleSentimentDrivers('${escapeHtml(h.ticker)}')"><span class="ht-score neutral" id="score-${escapeHtml(h.ticker)}">—</span><span class="ht-score-caret" aria-hidden="true">▾</span></button></td>
+      <td><span class="ht-headline" id="headline-${escapeHtml(h.ticker)}">—</span></td>
       <td class="ht-actions">
-        <button class="ht-info" onclick="event.stopPropagation(); openBriefFor('${h.ticker}')" title="Company brief">ℹ</button>
-        <button class="ht-remove" onclick="event.stopPropagation(); removeStock('${h.ticker}')" title="Remove">×</button>
+        <button class="ht-info" onclick="event.stopPropagation(); openBriefFor('${escapeHtml(h.ticker)}')" title="Company brief">ℹ</button>
+        <button class="ht-remove" onclick="event.stopPropagation(); removeStock('${escapeHtml(h.ticker)}')" title="Remove">×</button>
       </td>
     </tr>
   `}).join('');
@@ -430,10 +430,10 @@ function initTickerSearch() {
         const scoreClass = s ? s.label : 'neutral';
         const isActive = activeFilter === h.ticker;
         return `
-          <div class="search-result-item${isActive ? ' active-item' : ''}" onclick="selectSearchResult('${h.ticker}')">
+          <div class="search-result-item${isActive ? ' active-item' : ''}" onclick="selectSearchResult('${escapeHtml(h.ticker)}')">
             <div>
-              <span class="search-result-ticker">${h.ticker}</span>
-              <span class="search-result-name">${h.company_name || ''}</span>
+              <span class="search-result-ticker">${escapeHtml(h.ticker)}</span>
+              <span class="search-result-name">${escapeHtml(h.company_name || '')}</span>
             </div>
             <span class="search-result-score sentiment-score ${scoreClass}">${scoreVal}${s ? '%' : ''}</span>
           </div>
@@ -454,10 +454,10 @@ function initTickerSearch() {
         const scoreClass = s ? s.label : 'neutral';
         const isActive = activeFilter === h.ticker;
         return `
-          <div class="search-result-item${isActive ? ' active-item' : ''}" onclick="selectSearchResult('${h.ticker}')">
+          <div class="search-result-item${isActive ? ' active-item' : ''}" onclick="selectSearchResult('${escapeHtml(h.ticker)}')">
             <div>
-              <span class="search-result-ticker">${h.ticker}</span>
-              <span class="search-result-name">${h.company_name || ''}</span>
+              <span class="search-result-ticker">${escapeHtml(h.ticker)}</span>
+              <span class="search-result-name">${escapeHtml(h.company_name || '')}</span>
             </div>
             <span class="search-result-score sentiment-score ${scoreClass}">${scoreVal}${s ? '%' : ''}</span>
           </div>
@@ -595,10 +595,10 @@ function renderNewsItem(a) {
       <div class="news-sentiment-dot ${a.sentiment.label}"></div>
       <div class="news-content">
         <div class="news-title">${a.url
-          ? `<a href="${escapeHtml(a.url)}" target="_blank" rel="noopener noreferrer" class="news-title-link">${escapeHtml(a.title)}</a>`
+          ? `<a href="${safeUrl(a.url)}" target="_blank" rel="noopener noreferrer" class="news-title-link">${escapeHtml(a.title)}</a>`
           : escapeHtml(a.title)}</div>
         <div class="news-meta">
-          ${tickers.map(t => `<span class="news-ticker">${t}</span>`).join('')}
+          ${tickers.map(t => `<span class="news-ticker">${escapeHtml(t)}</span>`).join('')}
           <span>${escapeHtml(a.source || '')}</span>
           ${sources}
           <span>${time}</span>
@@ -733,7 +733,7 @@ function renderFilteredAlerts() {
   feed.innerHTML = visible.map(a => {
     const urgency = a.alert_type.includes('negative') ? 'high' : a.alert_type.includes('positive') ? 'medium' : 'low';
     const msg = a.article_url
-      ? `<a href="${escapeHtml(a.article_url)}" target="_blank" rel="noopener noreferrer" class="alert-title-link">${escapeHtml(a.message)}</a>`
+      ? `<a href="${safeUrl(a.article_url)}" target="_blank" rel="noopener noreferrer" class="alert-title-link">${escapeHtml(a.message)}</a>`
       : escapeHtml(a.message);
     return `
       <div class="alert-item ${urgency}${a.read ? ' read' : ''}">
@@ -794,7 +794,7 @@ function renderSentimentDrivers(d) {
   if (!d.drivers.length) return head + `<div class="drv-empty">${escapeHtml(d.note || 'No recent articles are driving this score.')}</div>`;
   const unit = z ? 'σ' : ' pts';
   const rows = d.drivers.map((x) => {
-    const title = x.url && x.url !== '#' ? `<a href="${escapeHtml(x.url)}" target="_blank" rel="noopener">${escapeHtml(x.title)}</a>` : escapeHtml(x.title);
+    const title = x.url && x.url !== '#' ? `<a href="${safeUrl(x.url)}" target="_blank" rel="noopener">${escapeHtml(x.title)}</a>` : escapeHtml(x.title);
     return `<li class="drv-item ${x.direction}">
         <span class="drv-arrow">${x.direction === 'up' ? '▲' : x.direction === 'down' ? '▼' : '■'}</span>
         <span class="drv-title">${title}</span>
@@ -857,7 +857,7 @@ function renderImpactFeed(top, feed) {
   const dir = top.direction || 'neutral';
   const hasUrl = (u) => u && u !== '#';
   const topTitle = hasUrl(top.url)
-    ? `<a class="impact-hero-title" href="${escapeHtml(top.url)}" target="_blank" rel="noopener">${escapeHtml(top.title)}</a>`
+    ? `<a class="impact-hero-title" href="${safeUrl(top.url)}" target="_blank" rel="noopener">${escapeHtml(top.title)}</a>`
     : `<span class="impact-hero-title no-link">${escapeHtml(top.title)}</span>`;
   hero.innerHTML = `
     <div class="impact-hero-tag">Most important event for you</div>
@@ -876,7 +876,7 @@ function renderImpactFeed(top, feed) {
         <span class="impact-row-title">${escapeHtml(e.title)}</span>
         <span class="impact-row-exposure">${e.exposure_pct}%</span>`;
     return hasUrl(e.url)
-      ? `<a class="impact-row glass" href="${escapeHtml(e.url)}" target="_blank" rel="noopener">${inner}</a>`
+      ? `<a class="impact-row glass" href="${safeUrl(e.url)}" target="_blank" rel="noopener">${inner}</a>`
       : `<div class="impact-row glass no-link">${inner}</div>`;
   }).join('');
 }  // end renderImpactFeed
@@ -1199,10 +1199,12 @@ function initUserMenu() {
     const msgEl = document.getElementById('profile-pw-msg');
     if (!cur || !nw || !conf) return showProfileMsg(msgEl, 'All password fields are required', 'error');
     if (nw !== conf) return showProfileMsg(msgEl, 'New passwords do not match', 'error');
-    if (nw.length < 6) return showProfileMsg(msgEl, 'New password must be at least 6 characters', 'error');
+    if (nw.length < 8) return showProfileMsg(msgEl, 'New password must be at least 8 characters', 'error');
     try {
       document.getElementById('profile-pw-btn').disabled = true;
-      await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: nw }) });
+      const changed = await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: nw }) });
+      // The change signs out every other session; this one carries on with the new token.
+      if (changed.token) { token = changed.token; localStorage.setItem('copilot_token', token); }
       document.getElementById('profile-cur-pw').value = '';
       document.getElementById('profile-new-pw').value = '';
       document.getElementById('profile-confirm-pw').value = '';
@@ -1229,6 +1231,7 @@ function openProfilePage() {
   populateProfilePage(currentUser);
   loadPlans();
   loadApiKeys();
+  loadEmailPrefs();
   moveNavIndicator();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -1254,8 +1257,18 @@ function emailPrefMsg(text, kind = 'success') {
   el.textContent = text;
   el.className = `profile-msg ${kind}`;
 }
+// "Weekly summary, Sundays at 18:00 India time" — from the server's own schedule.
+function showReportSchedule(p) {
+  const r = p.report;
+  if (!r) return;
+  const when = r.kind === 'daily' ? `The daily brief, weekdays at ${r.time}` : `A weekly summary, Sundays at ${r.time}`;
+  document.getElementById('email-reports-hint').textContent =
+    `${when} ${r.market_label} time${r.kind === 'weekly' ? '. Plus and Pro get the daily brief.' : '.'}`;
+}
 async function loadEmailPrefs() {
   const toggle = document.getElementById('email-alerts-toggle');
+  const reportsToggle = document.getElementById('email-reports-toggle');
+  const marketSelect = document.getElementById('email-market-select');
   const status = document.getElementById('email-verify-status');
   const btn = document.getElementById('email-verify-btn');
   if (!emailPrefsBound) {
@@ -1266,6 +1279,24 @@ async function loadEmailPrefs() {
         emailPrefMsg(r.email_alerts ? 'Alert emails are on.' : 'Alert emails are off — alerts still appear in the app.');
       } catch (err) {
         toggle.checked = !toggle.checked;
+        emailPrefMsg(err.message || 'Could not save that', 'error');
+      }
+    });
+    reportsToggle.addEventListener('change', async () => {
+      try {
+        const r = await api('/api/email/preferences', { method: 'PUT', body: JSON.stringify({ email_reports: reportsToggle.checked }) });
+        emailPrefMsg(r.email_reports ? 'Report emails are on.' : 'Report emails are off — your brief is still in the app.');
+      } catch (err) {
+        reportsToggle.checked = !reportsToggle.checked;
+        emailPrefMsg(err.message || 'Could not save that', 'error');
+      }
+    });
+    marketSelect.addEventListener('change', async () => {
+      try {
+        const r = await api('/api/email/preferences', { method: 'PUT', body: JSON.stringify({ home_market: marketSelect.value || null }) });
+        showReportSchedule(r);
+        emailPrefMsg(`Reports are timed for ${r.report.market_label}.`);
+      } catch (err) {
         emailPrefMsg(err.message || 'Could not save that', 'error');
       }
     });
@@ -1282,8 +1313,11 @@ async function loadEmailPrefs() {
   try {
     const p = await api('/api/email/preferences');
     toggle.checked = !!p.email_alerts;
+    reportsToggle.checked = !!p.email_reports;
+    marketSelect.value = p.home_market || '';
+    showReportSchedule(p);
     document.getElementById('email-verify-row').classList.remove('hidden');
-    status.textContent = p.email_verified ? 'Verified' : 'Not verified — alert emails are only sent to a verified address';
+    status.textContent = p.email_verified ? 'Verified' : 'Not verified — alert and report emails are only sent to a verified address';
     status.className = `email-verify-status ${p.email_verified ? 'ok' : 'warn'}`;
     btn.classList.toggle('hidden', !!p.email_verified);
   } catch { /* leave the controls as they are */ }
@@ -2760,7 +2794,7 @@ function renderDashboardSummary() {
       ? top5.map(a => {
           const urgency = a.alert_type.includes('negative') ? 'high' : a.alert_type.includes('positive') ? 'medium' : 'low';
           const msg = a.article_url
-            ? `<a href="${escapeHtml(a.article_url)}" target="_blank" rel="noopener noreferrer" class="alert-title-link">${escapeHtml(a.message)}</a>`
+            ? `<a href="${safeUrl(a.article_url)}" target="_blank" rel="noopener noreferrer" class="alert-title-link">${escapeHtml(a.message)}</a>`
             : escapeHtml(a.message);
           return `<div class="alert-item ${urgency}${a.read ? ' read' : ''}"><div>${msg}</div><div class="alert-time">${timeAgo(new Date(a.created_at))}</div></div>`;
         }).join('')
@@ -2819,10 +2853,15 @@ function timeAgo(date) {
   return `${days}d ago`;
 }
 
+// Safe inside element text AND inside a quoted attribute (quotes are escaped too).
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  return String(text ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+}
+
+// For href="…": only http(s) links from feeds are followed; anything else becomes "#".
+function safeUrl(url) {
+  return /^https?:\/\//i.test(String(url || '').trim()) ? escapeHtml(String(url).trim()) : '#';
 }
 
 // Format a USD price: 2 decimals for ≥$1, up to 6 for sub-dollar (small-cap crypto).
@@ -3392,7 +3431,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Phase 5 boot: OAuth return, OAuth errors, reset + verify links ──
   {
     const qp = new URLSearchParams(location.search);
-    const oauthTok = qp.get('oauth');
+    // The sign-in token arrives in the fragment (never sent to a server or in a Referer).
+    const oauthTok = new URLSearchParams(location.hash.slice(1)).get('oauth');
     if (oauthTok) {
       // Callback landed with a fresh SenIQ JWT — adopt it and clean the URL.
       token = oauthTok;

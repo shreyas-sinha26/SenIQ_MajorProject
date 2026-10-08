@@ -7,19 +7,20 @@
  * "mine" (followed politicians + held tickers) — the full firehose is opt-in (?scope=all),
  * since 500+ members trading would be noise.
  *
- * NOTE: tier gating (Free teaser / Plus+ full / Pro webhooks) lands with the billing
- * middleware in Phase 4. Until then these are open to any authenticated user.
+ * Tier gating: Free sees a teaser, Plus and Pro the full lists; registering a webhook is
+ * Pro (TIERS[tier].webhooks). The manual poll is admin-only.
  */
 
-const express = require('express');
+const { asyncRouter } = require('../middleware/asyncRouter');
 const crypto = require('crypto');
 const { query, queryOne, execute } = require('../db');
 const { authMiddleware } = require('./auth');
-const { attachTier } = require('../middleware/tier');
+const { attachTier, requireTier, requireAdmin } = require('../middleware/tier');
+const { assertPublicUrl, UnsafeUrlError } = require('../services/safeFetch');
 const { SMART_MONEY, DISCLAIMER } = require('../config');
 const { pollSmartMoney, polKey } = require('../services/smartMoney');
 
-const router = express.Router();
+const router = asyncRouter();
 router.use(authMiddleware, attachTier);
 
 // Phase 6 — Free tier gets a teaser (top 2 only) of smart money; Plus/Pro get the full set.
@@ -177,7 +178,7 @@ router.get('/follows', async (req, res) => {
 
 router.post('/follow', async (req, res) => {
   try {
-    const { entity_type, entity_ref, label } = req.body;
+    const { entity_type, entity_ref, label } = req.body || {};
     if (!['institution', 'politician'].includes(entity_type)) {
       return res.status(400).json({ error: 'entity_type must be institution or politician' });
     }
@@ -223,7 +224,8 @@ router.delete('/follow/:type/:ref', async (req, res) => {
   }
 });
 
-// ─── Outbound webhooks (Pro tier — see NOTE at top) ───────────────────────────
+// ─── Outbound webhooks (Pro to register; listing + deleting stay open so a ─────
+// downgraded user can still see and remove theirs) ─────────────────────────────
 router.get('/webhooks', async (req, res) => {
   try {
     const hooks = await query(
@@ -238,14 +240,26 @@ router.get('/webhooks', async (req, res) => {
   }
 });
 
-router.post('/webhooks', async (req, res) => {
+router.post('/webhooks', requireTier('pro'), async (req, res) => {
   try {
-    const { url, event_types } = req.body;
-    if (!url || !/^https?:\/\//i.test(url)) {
+    const { event_types } = req.body || {};
+    const url = typeof (req.body || {}).url === 'string' ? req.body.url.trim() : '';
+    if (!url || url.length > 2000 || !/^https?:\/\//i.test(url)) {
       return res.status(400).json({ error: 'A valid http(s) url is required' });
     }
+    // The server will POST to this address, so it must be a public one.
+    try {
+      await assertPublicUrl(url);
+    } catch (err) {
+      if (err instanceof UnsafeUrlError) return res.status(400).json({ error: `That webhook URL can't be used: ${err.message}` });
+      throw err;
+    }
+    const have = await queryOne('SELECT count(*)::int AS n FROM webhooks WHERE user_id = $1', [req.user.id]);
+    if (have.n >= SMART_MONEY.MAX_WEBHOOKS_PER_USER) {
+      return res.status(400).json({ error: `Limit reached (${SMART_MONEY.MAX_WEBHOOKS_PER_USER} webhooks) — delete one first.` });
+    }
     const secret = crypto.randomBytes(24).toString('hex');
-    const types = (event_types && String(event_types).trim()) || 'smart_money';
+    const types = (event_types && String(event_types).trim().slice(0, 200)) || 'smart_money';
     const created = await queryOne(
       `INSERT INTO webhooks (user_id, url, secret, event_types) VALUES ($1, $2, $3, $4) RETURNING id`,
       [req.user.id, url, secret, types]
@@ -270,8 +284,9 @@ router.delete('/webhooks/:id', async (req, res) => {
 });
 
 // ─── POST /api/smart-money/poll ───────────────────────────────────────────────
-// Manual trigger (handy for testing / forcing a refresh outside the cron cadence).
-router.post('/poll', async (req, res) => {
+// Manual trigger (handy for testing / forcing a refresh outside the cron cadence). Admin
+// only: each run sends a batch of requests to the SEC under SenIQ's name.
+router.post('/poll', requireAdmin, async (req, res) => {
   try {
     const result = await pollSmartMoney();
     res.json({ ok: true, result });

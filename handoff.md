@@ -7,13 +7,115 @@ the state up to `a66a164`. **The 2026-10-07/08 work is merged into `main`** (pul
 merge commit `ac88e2a`, six commits, not yet tagged). It covers the company knowledge base,
 alert quality and email safeguards, the v2/MCP round, and the Ask, retrieval and signals work
 in `RAG_PLAN.md`; the matching engine edits live only in the gitignored `strategy-service/`.
-Every commit passes `npm test` on its own. The local dev database is still on migration 0019
-(0020–0023 apply on the next app start), and nothing in the merge has run with a real model
+Every commit passes `npm test` on its own. Nothing in the merge has run with a real model
 key, real embeddings, or the real strategy engine behind the app.
 
+**Uncommitted on top of `main` (2026-10-08, the two sections below):** a hardening pass, Gmail
+sending, and report emails as PDF attachments — about 45 changed or new files, `npm test`
+green. The app was started on the dev database this session (migrations 0020–0025 applied,
+news pipeline and smart-money poller ran clean) and has been **stopped** again. Commit this
+work before anything else; fetch first (§8).
+
 **What is still switched off or never run for real:** Claude answers (`ANTHROPIC_API_KEY` +
-`CLAUDE_REPORTS`), any real email (`RESEND_API_KEY`), Indian prices (Upstox), news embeddings,
-and hosting — so sentiment history is only ~16 days and SenIQ-factor backtests mean little.
+`CLAUDE_REPORTS=1`), Indian prices (Upstox), news embeddings, and hosting — so sentiment
+history is only ~16 days and SenIQ-factor backtests mean little. Email now works through a
+Gmail app password, but no SenIQ account uses a real address yet.
+
+### Hardening pass (2026-10-08, uncommitted — run `npm test`, then commit)
+A read-through of the whole Node app, then fixes. Nothing here changes a feature.
+- **Crashes:** every router is built with `server/middleware/asyncRouter.js`, so an error in an
+  `async` handler is a 500 for that request. Before, it ended the process (Express 4 ignores
+  rejected promises) — e.g. a non-string `text` to `/api/news/analyze`, or a bad `:id`.
+- **Checkout stub** (`routes/billing.js`) refuses in production unless the caller is an admin.
+- **User-supplied URLs** (analyze-a-link, webhooks) go through `services/safeFetch.js`: public
+  addresses only, re-checked on each redirect, capped body. Webhooks: Pro to register, max 5.
+- **Sign-in:** linking Google/GitHub to an account whose email was never verified removes that
+  account's password. A password change or reset ends all older sessions (migration `0024`,
+  `users.password_changed_at`). The OAuth token returns in the URL fragment. Passwords are 8–72
+  characters. `authMiddleware` now reads the user row (deleted users and OAuth state tokens are
+  refused) and hands it to the tier middleware, so it is still one query per request.
+- **Ask quota** is reserved under a per-user lock before Claude is called (`reserveQuestion` in
+  `qa.js`); parallel requests can no longer all pass the check. The daily-brief quota counts
+  briefs only.
+- **`CLAUDE_REPORTS` is now an env var** (`CLAUDE_REPORTS=1`), still off by default.
+- **Limits:** per-user rate limits on Ask, analyze, live sentiment routes and web backtests
+  (`middleware/rateLimit.js`); `POST /api/smart-money/poll` is admin-only.
+- **Input/output:** tickers and exchanges are validated on add; the frontend escape helper is
+  safe inside attributes and feed links must be http(s).
+- **Headers:** CORS only on `/v1` and `/mcp`; a Content-Security-Policy on every response
+  (still allows inline scripts — the pages use `onclick`).
+- **Deploy files:** `.dockerignore` excludes `strategy-service/`, `eval/`, `.claude/`;
+  `render.yaml` lists every env var the code reads; `.env.example` matches the code.
+- **Cleanup:** one strategy-engine client (`services/strategyClient.js`, incl. `replayPaper`)
+  used by the web routes, `/v1` and `/mcp`; `public/logo-test.html` removed; `npm audit fix`
+  (critical + high advisories gone; 25 moderate remain, the rest need `node-cron` 4).
+- **Tests:** `test/hardening.test.js` (12 checks) added to `npm test`.
+- **Not done / to decide:** the app was not started against the database in this pass — do
+  that once (it applies `0024`) and click through sign-in, portfolio add, Ask and a backtest.
+  The global $/day Claude ceiling can still be overshot by a few calls when several users ask
+  at the same moment. The SEC contact email differs between `render.yaml` and `config.js`.
+  Two migrations are numbered `0016`; harmless, and renaming an applied one would re-run it.
+
+### Email sending + report emails (2026-10-08, uncommitted)
+- **Sending without a domain:** `emailService.js` sends through Resend when `RESEND_API_KEY` is
+  set, otherwise through SMTP (`SMTP_HOST/PORT/USER/PASS`, nodemailer) — a Gmail app password,
+  ~500 emails/day, sent from that address. Moving to a domain later is an `.env` change only.
+  **Status: working. One sample daily report (the first, HTML-body version) was sent to
+  Annas's own address on 2026-10-08 and Gmail accepted it. The PDF version has been rendered
+  and reviewed as files but not yet emailed.** `.env` now has `SMTP_*`, `EMAIL_FROM` and
+  `APP_URL=http://localhost:3010` (the dev port).
+- **Report emails** (`services/reportEmails.js`, migration `0025`, cron every 15 min): Free gets
+  a weekly summary Sunday 18:00, Plus/Pro the daily brief weekdays 08:30 — in the local time of
+  the user's market (`users.home_market`, else worked out from the portfolio: India or US).
+  Only to verified addresses with `users.email_reports` on. Each report is claimed in
+  `report_sends` before sending, so it goes out once per local day. The daily email is the
+  in-app brief (same writer and Claude guardrails). Own unsubscribe link (`?list=reports`).
+  Profile has the switch and the market choice. Not built: the Pro end-of-day wrap.
+- **The report is a PDF attachment** (`services/reportPdf.js`, pdfkit + embedded Inter so ₹
+  prints): header, most important event, figures strip, what changed, events table, holdings
+  with exposure bars, smart money, disclaimer + page numbers. The email body is one line
+  ("Here is your SenIQ daily brief for …, attached as a PDF") plus the stop link — Annas asked
+  for this after seeing the first HTML version. `sendEmail` takes `attachments` on both
+  transports. Alert emails are unchanged (still HTML).
+- Fixed on the way: the header profile button never loaded the email settings.
+- Tests: `test/reportEmails.test.js` (15 checks). Migrations 0020–0025 are applied on the dev DB.
+- **To finish:** email the PDF version to Annas once (he was asked, no answer yet) → sign up
+  in the app with a real address → verify it (the first real verification email) → check one
+  alert email and one scheduled report arrive. No dev account uses a real address yet, so
+  nothing is sent on its own until then. Scheduled reports need the server running at send
+  time, so they are hit-and-miss until it is hosted.
+- New dependencies: `nodemailer`, `pdfkit`, `@expo-google-fonts/inter` (the embedded font).
+
+### Claude through AIRouter (2026-10-08, uncommitted)
+- Annas bought credits on AIRouter (airouter.in — OpenAI-compatible only, `POST
+  https://api.airouter.in/v1/chat/completions`, models named `provider/model`).
+- `services/llmClient.js`: when `AIROUTER_API_KEY` is set, the brief, Ask (incl. its tool loop)
+  and the alert narrative go through a client that keeps the Anthropic `messages.create()`
+  shape and translates to/from chat-completions. Without it, `ANTHROPIC_API_KEY` works as
+  before. Model: `AIROUTER_MODEL`, default `anthropic/claude-haiku-4.5` ($1/$5 per M tokens,
+  same as direct). The router's reported `total_cost` is what gets logged to `claude_calls`.
+- Still needs `CLAUDE_REPORTS=1`. All quotas and the $5/day ceiling apply unchanged.
+- Tests: `test/llmClient.test.js` (7 checks, scripted router).
+- **First real call (2026-10-08): the router accepted the key but refused Claude Haiku 4.5 with
+  403 `plan_restricted` — "This model requires a paid plan. Add credits to unlock all models."**
+  Ask fell back to the data summary and gave the question back to the quota, as designed. So
+  the credits are not on the account this key belongs to (or had not landed yet). The same
+  question through `airouter/free` got a reply, but that model called no tools and invented a
+  headline — it proves the connection only, and is not usable for Ask. Tool calling against
+  real Claude on the router is still unproven. `.env` has `AIROUTER_API_KEY` + `CLAUDE_REPORTS=1`.
+- **Working (2026-10-08, after the credits landed):** one Ask question through the running
+  app as the demo Pro account → real Claude Haiku 4.5 via the router (served by Bedrock),
+  three tool calls (`get_top_events`, `get_attribution`, `get_portfolio_overview`), 10 s,
+  6,700 in / 445 out tokens, **$0.0089** logged from the router's own figure, quota counted.
+  Daily brief and alert narrative via the router are not yet exercised.
+- Three things seen in that first answer, fixed the same day: markdown is stripped from Ask
+  answers (`toPlainText` in `qa.js`, the app shows plain text); the prompt now sets a hard
+  length (≤ 6 sentences, ~120 words) and forbids markdown; and word-like tickers (NEAR, COST,
+  LINK, COIN…) only count when written as symbols, so "near-term" no longer trips the
+  grounding check. **The new length rule has not been checked against a live answer yet.**
+- Note: shells started from Claude Code carry their own `ANTHROPIC_BASE_URL`; it is not in
+  `.env` and does not matter while the router key is set.
+- `eval/ask/run.js` still constructs the Anthropic SDK directly (needs `ANTHROPIC_API_KEY`).
 
 ### The 2026-10-07 session at a glance (details in §3; merged in pull request #1)
 | Area | What changed | Migration |
@@ -325,15 +427,16 @@ and verified. Crypto via CoinGecko (no key). **Indian stocks: not priced yet** (
 | `FINNHUB_API_KEY` | set | US prices + company news |
 | `FMP_API_KEY` | set | commodities; US fallback |
 | `UPSTOX_ANALYTICS_TOKEN` | **empty** | Indian prices (code not built yet) |
-| `ANTHROPIC_API_KEY` | not set | Claude brief + Ask (also needs `CLAUDE_REPORTS`, §6) |
+| `AIROUTER_API_KEY` (or `ANTHROPIC_API_KEY`) | to be added by Annas | Claude brief + Ask + alert narrative (also needs `CLAUDE_REPORTS=1`) |
 | `HF_API_TOKEN` (+ `FINBERT_CLASSIFY=1`, `NEWS_EMBEDDINGS=1`) | not set | FinBERT sentiment, RAG embeddings |
 | `FEATURES_STRATEGIES` | unset = v1 | `1` = v2 |
 | `CONGRESS_TRADES_URL` | not set locally | live congress data (set on the deploy host); local uses sample |
 | `REDDIT_CLIENT_ID/SECRET`, `SENTRY_DSN` | not set | Reddit ingest, error monitoring |
 | `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET` | not set | OAuth sign-in buttons (hidden until set) |
-| `RESEND_API_KEY`, `EMAIL_FROM` | not set | all email. `EMAIL_FROM` needs a domain verified in Resend; the default `onboarding@resend.dev` only reaches the Resend account's own address |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM` | **set** (Gmail app password) | all email while there is no domain; ~500/day, sent from that Gmail address |
+| `RESEND_API_KEY` | not set | takes over from SMTP when set; needs a domain verified in Resend for `EMAIL_FROM` |
 | `JWT_SECRET` | set | sessions **and** unsubscribe-link signatures — changing it breaks links in emails already sent |
-| `APP_URL` | not set | OAuth callback + email links; falls back to `http://localhost:$PORT` |
+| `APP_URL` | **set** (`http://localhost:3010`) | OAuth callback + email links; must be the public URL once hosted |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | not set | local fallback for alert narratives |
 
 Full API inventory: price (Finnhub, FMP, CoinGecko, Upstox planned) · news (Finnhub news,
@@ -343,7 +446,8 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
 
 ## 5. Tests & evaluation
 - `npm test` — offline, no DB/API calls, all passing: resolver 49 · engine/alerts logic 50 ·
-  reports 23 · Ask 83 · eval 15 · strategy signals 12 · filings 10 · strategy drafts 14 · MCP/keys/data tools 19 · auth 9 · alert email 30.
+  reports 23 · Ask 83 · eval 15 · strategy signals 12 · filings 10 · strategy drafts 14 · MCP/keys/data tools 19 · auth 9 · alert email 30 ·
+  request safety 12 · report emails + PDF 15 · model router + answer hygiene 10.
 - Engine: `cd strategy-service && ./venv/bin/python -m pytest -q` → 37 passing (local-only).
 - **Clean-database check (2026-10-07):** all 19 migrations + the seed applied twice to a
   brand-new database, then dropped.
@@ -363,11 +467,11 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
    engine and check the strategy pages and Ask's strategy tools against it; then tag
    (`v1.3` / `v2.3`). If a Render service is connected to `main`, the merge already deployed
    there and applied 0017–0023 — check its dashboard. The CI workflow is still uncommitted (§8).
-2. **First real email.** Needs `RESEND_API_KEY` (Annas adds it to `.env` himself) and a verified
-   sending domain for `EMAIL_FROM` — which domain is undecided (keniclean.com is the laundry
-   business). With the key alone: verify his own account, send one test alert.
-3. **Turn on real AI answers:** `ANTHROPIC_API_KEY` **and** flip `CLAUDE_REPORTS` — it is
-   hard-coded `false` in `server/config.js`, so a key alone does nothing.
+2. **Email, remaining.** Sending works through Gmail (see the top section). Left: Annas signs
+   up with a real address and verifies it, then one test alert and one report to that account.
+   For a public launch buy/verify a domain and set `RESEND_API_KEY` — Gmail is for demos only.
+3. **Turn on real AI answers:** set `ANTHROPIC_API_KEY` **and** `CLAUDE_REPORTS=1` in `.env`
+   (a key alone does nothing).
 4. **Reports by email** (agreed direction, not built): Free weekly summary, Plus daily brief
    before the user's market opens, Pro daily + optional end-of-day wrap. No hourly/6h/12h
    reports — anything that can't wait is an alert. Needs per-user time zone + home market, which
@@ -386,8 +490,7 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
 10. **Knowledge base upkeep:** Noel Tata retires as Trent chairman in November 2026; re-run
     `node scripts/refresh_executives.js` now and then (US only, ~100 FMP calls).
 11. Smaller: dark-mode toggle; realistic demo portfolio quantities; browser check of the
-    OAuth sign-in page; price service has no cache or backoff; `reports.js` counts Ask questions
-    toward the daily-brief quota; the company card shows "US · US" (exchange and country).
+    OAuth sign-in page; price service has no cache or backoff; the company card shows "US · US" (exchange and country).
 
 ## 7. Where things live
 | Area | Files |

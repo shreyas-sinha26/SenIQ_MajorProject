@@ -117,8 +117,7 @@ Rules:
 - Write ${ALERT_NARRATIVE.MIN_WORDS}–${ALERT_NARRATIVE.MAX_WORDS} words of plain text (no markdown, no bullet characters), covering, in order: what happened; why it matters; which holdings are affected; portfolio exposure; expected short-term impact; your confidence; key risks.`;
 
 async function claudeNarrative(facts) {
-  const Anthropic = require('@anthropic-ai/sdk');
-  const client = new Anthropic(); // reads ANTHROPIC_API_KEY from env
+  const client = require('./llmClient').getClient(); // Anthropic directly, or the router
   const resp = await client.messages.create({
     model: ALERT_NARRATIVE.MODEL,
     max_tokens: ALERT_NARRATIVE.MAX_OUTPUT_TOKENS,
@@ -127,7 +126,7 @@ async function claudeNarrative(facts) {
   });
   const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
   if (!text) throw new Error('Claude returned empty narrative');
-  return { writer: 'claude', model: ALERT_NARRATIVE.MODEL, narrative: text, usage: { input: resp.usage.input_tokens || 0, output: resp.usage.output_tokens || 0 } };
+  return { writer: 'claude', model: ALERT_NARRATIVE.MODEL, narrative: text, usage: { input: resp.usage.input_tokens || 0, output: resp.usage.output_tokens || 0, cost_usd: resp.usage.cost_usd || 0 } };
 }
 
 // ── Ollama tier (reuses ollamaExplainer.generate) ──
@@ -180,7 +179,7 @@ async function generateProNarrative(userId, alert) {
   const spendRow = await queryOne('SELECT COALESCE(sum(cost_usd),0) s FROM claude_calls WHERE created_at >= $1', [dayStart]);
   const guard = guardCheck({
     flagOn: FEATURES.CLAUDE_REPORTS,
-    hasKey: !!process.env.ANTHROPIC_API_KEY,
+    hasKey: require('./llmClient').llmConfigured(),
     userCallsToday: Number(madeRow.c),
     quota: ALERT_NARRATIVE.PER_USER_DAILY_QUOTA,
     globalSpendToday: Number(spendRow.s),
