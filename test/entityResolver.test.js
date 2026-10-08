@@ -146,6 +146,46 @@ check('the rule is for commodities only: a company named only in the summary sti
   assert.ok(full('Markets wrap', 'Bitcoin slipped below $60,000.').includes('BTC'));
 });
 
+console.log('a commodity word inside a company name is not the commodity:');
+check('Senco Gold (a jeweller) is not gold — the three stored headlines', () => {
+  assert.deepStrictEqual(tk('Senco Gold jumps 8% on Q2 biz update; achieves highest-ever topline'), []);
+  assert.deepStrictEqual(tk('Senco Gold shares gain 6% on strong Q2 business update; revenue up'), []);
+  assert.deepStrictEqual(tk('PC Jeweller vs Senco Gold vs Kalyan Jewellers - Best jewellery stock to buy'), []);
+  assert.deepStrictEqual(full('Senco Gold jumps 8% on Q2 biz update', 'Senco Gold shares rose after the jeweller reported record revenue.'), []);
+});
+check('known company names: gold, silver, oil', () => {
+  assert.deepStrictEqual(tk('Barrick Gold Raises Dividend After Strong Quarter'), []);
+  assert.deepStrictEqual(tk('Gold Fields to buy a Canadian miner'), []);
+  assert.deepStrictEqual(tk('SILVER LAKE LEADS $2 BILLION BUYOUT'), []);
+  assert.deepStrictEqual(tk('Pan American Silver posts a quarterly loss'), []);
+  assert.deepStrictEqual(full('Oil India shares rise 4%', 'Crude oil output grew at the explorer.'), []);
+  assert.deepStrictEqual(full('Indian Oil prices its bond issue', 'The refiner raised Rs 2,500 crore.'), []);
+  assert.deepStrictEqual(full('Oil and Natural Gas Corporation posts record profit', 'Higher crude oil prices and natural gas output lifted earnings.'), ['ONGC']);
+  assert.deepStrictEqual(full('Petronet LNG expands its Dahej terminal', 'Natural gas demand is rising.'), []);
+});
+check('a name not on the list: Capitalised word in front, or "Ltd" behind', () => {
+  assert.deepStrictEqual(tk('Thangam Gold shares hit upper circuit after results'), []);
+  assert.deepStrictEqual(tk('Laxmi Silver Ltd files for an IPO'), []);
+  assert.deepStrictEqual(tk("Thangam Gold's promoters pledge shares"), []);
+});
+check('real commodity headlines still resolve', () => {
+  assert.deepStrictEqual(tk('Gold slides to two-month low as robust dollar weighs'), ['XAU']);
+  assert.deepStrictEqual(tk('Gold prices rise on safe-haven demand'), ['XAU']);
+  assert.deepStrictEqual(tk('Spot Gold Falls To Two-Month Low As Dollar Firms'), ['XAU']);
+  assert.deepStrictEqual(tk('Why Gold is rising again'), ['XAU']);
+  assert.deepStrictEqual(tk('MCX Gold slips below Rs 1 lakh'), ['XAU']);
+  assert.deepStrictEqual(tk('RBI Gold reserves rise for a sixth week'), ['XAU']);
+  assert.deepStrictEqual(tk('India Gold demand falls as prices bite'), ['XAU']);
+  assert.deepStrictEqual(tk('Dollar firms. Gold slips for a third day'), ['XAU']);
+  assert.deepStrictEqual(tk('Gold, Silver rates today'), ['XAG', 'XAU']);
+  assert.deepStrictEqual(tk('Silver outshines gold this year'), ['XAG', 'XAU']);
+  assert.deepStrictEqual(full('Brent Oil climbs past $90', 'Oil prices rose on supply fears.'), ['WTI']);
+});
+check('a company and the commodity in one headline: the commodity still counts', () => {
+  assert.deepStrictEqual(tk('Senco Gold falls as gold prices hit a record'), ['XAU']);
+  assert.deepStrictEqual(full('Oil India gains as oil tops $90', 'Crude oil rallied overnight.'), ['WTI']);
+});
+
 console.log('crypto and India coverage:');
 check('every universe coin is filed as crypto and has a price key', () => {
   const { resolveAsset, coingeckoIdFor, NON_EQUITY_ALIASES } = require('../server/services/assetRegistry');
