@@ -156,15 +156,30 @@ router. Indian prices now work through Yahoo; the Upstox token is still unused.
     Gas utilities (Mahanagar Gas, Gujarat Gas) are not on the list.
 - The quick fix offered first (neutral unless two words match) was not built.
 
-### Reddit and X — parked (2026-10-08, night)
+### Reddit and X — Reddit access requested, X deferred (2026-10-08, night)
 - **X:** not free. Pay-per-use since February 2026 (about $0.005 per post read, per third-party
   write-ups); stays deferred.
-- **Reddit: parked by Annas until Reddit replies.** Self-service API access is closed: the
-  "create app" form at reddit.com/prefs/apps just reloads, and Reddit's API page says new Data
-  API apps need a request and ties it to "a valid moderation use case" — SenIQ's is not one, so
-  approval is uncertain. Annas is to submit the request truthfully (non-commercial college
-  project, read-only, a few finance subreddits). No scraping around it. `REDDIT_CLIENT_ID` /
+- **Reddit: request submitted 2026-10-08, waiting for Reddit's reply.** Self-service API access
+  is closed: the "create app" form at reddit.com/prefs/apps just reloads, and Reddit's API page
+  ties new Data API apps to "a valid moderation use case" — SenIQ's is not one, so approval is
+  uncertain. Annas filed Reddit's Data Access Request ("I'm a developer… app that does not
+  work in the Devvit ecosystem") from the Reddit account `Sweaty_Style_1166`, described
+  truthfully as a student project. No scraping around it. `REDDIT_CLIENT_ID` /
   `REDDIT_CLIENT_SECRET` stay empty, so `ingest/reddit.js` keeps returning nothing.
+- **What the request told Reddit — the app must match this before Reddit is switched on:**
+  - read-only: no posting, commenting, voting, messaging or moderation;
+  - the "hot" listing (25 posts) of five subreddits about every 10–15 minutes: r/stocks,
+    r/wallstreetbets, r/CryptoCurrency, r/IndianStreetBets, r/IndiaInvestments (the code has
+    the first three only — `INGEST.REDDIT_SUBREDDITS`);
+  - keeps only posts naming a company in the curated list (**not built** — today every
+    fetched post is stored);
+  - stores title, a shortened excerpt, permalink, subreddit and time; no usernames, comments,
+    votes or profile data (true of the code today);
+  - each item links back to the Reddit thread;
+  - Reddit content is not used to train models and is not resold or redistributed;
+  - **stored Reddit items are kept at most 90 days (not built — needs a clean-up job)**;
+  - source given as the private GitHub repository, access on request.
+  It was described as a student project; a paid launch needs Reddit's commercial agreement.
 - **If access comes, do not just switch it on.** Today a Reddit post goes through the news
   pipeline unchanged: one naming a holding can create an event, a report card and an alert by
   itself; upvotes, comments and post type are not read; the Plus/Pro-only rule for Reddit is
