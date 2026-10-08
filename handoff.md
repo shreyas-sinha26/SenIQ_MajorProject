@@ -18,8 +18,8 @@ fix (`de41aa7`), the afternoon session in one commit (`2d151be` — it could not
 topic safely: the topics share `app.js`, `config.js` and the tests), and a merge of
 `origin/main` (`cbf1115`, Shreyas's README commit `ffa4fde`). **Tags `v1.3` and `v2.3` sit on
 `cbf1115`** (same code; v2 = `FEATURES_STRATEGIES=1`), pushed and reachable from `main`.
-`npm test` is green on `cbf1115` (448 checks). The remote branch `hardening-email-reports` still
-exists. The working tree is clean except `samples/` and `.github/` (both untracked, not pushed —
+`npm test` is green on `cbf1115` (448 checks). The branch `hardening-email-reports` was deleted
+after the merge, on GitHub and locally. The working tree is clean except `samples/` and `.github/` (both untracked, not pushed —
 see §8). The dev database is on migration **0028**.
 - **`README.md` on `main` is garbled** since `ffa4fde` (316 bytes of random characters ending
   in `[cite: 1]`). Not fixed; tell Shreyas.
@@ -810,7 +810,7 @@ The immediate queue is the "Next, in order" list at the top. Behind it:
 - **2026-10-08, evening:** fetched, merged `origin/main` (`ffa4fde`) into
   `hardening-email-reports`, ran `npm test`, pushed the branch and the tags `v1.3` + `v2.3`, and
   opened pull request #2 against `main`, then merged it with a merge commit (`06006bf`). The
-  remote branch was kept. `samples/` (a sample report PDF built from
+  branch was then deleted on GitHub and locally. `samples/` (a sample report PDF built from
   the demo account and a backup of removed ticker tags) and `.github/` were left out.
 - Next time: **fetch first**, merge (not rebase) if teammates pushed, run `npm test`, then
   push the branch and open a pull request, as was done for #1.
