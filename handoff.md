@@ -102,8 +102,21 @@ router. Indian prices now work through Yahoo; the Upstox token is still unused.
   "market wrap" naming Kotak Bank read negative for Kotak because the market fell. Switching
   scorers changes the scale of the sentiment history; re-scoring what is stored is what keeps
   it consistent. A few hundred MB of memory, which matters on a small cloud server.
-- **Seen in the trial, not fixed:** "Senco Gold" (a jeweller) stories are tagged to XAU, the
-  gold commodity (three of 20 rows) — an entity-resolver problem, separate from sentiment.
+- **Seen in the trial, fixed for new stories (2026-10-08):** "Senco Gold" (a jeweller) stories
+  were tagged to XAU, the gold commodity (three of 20 rows) — an entity-resolver problem,
+  separate from sentiment. `entityResolver.js` now ignores a commodity word that is part of a
+  company's name: a short list of known names (`COMMODITY_COMPANY_NAMES` — Senco Gold, Barrick
+  Gold, Gold Fields, Silver Lake, Oil India, Indian Oil, ONGC's full name…), a word followed
+  by "Ltd"/"Inc", or a Capitalised word right after another Capitalised word in a
+  sentence-case line ("Thangam Gold shares…"). Real gold/silver/oil headlines still resolve,
+  and "Senco Gold falls as gold prices hit a record" still counts for gold.
+  - **Stored stories keep their old tags.** Nothing re-resolves what is already in
+    `article_sentiments` (there is no re-resolve script; `scripts/rescore_sentiment.js`
+    re-reads tone only, not tags), so the existing Senco Gold rows still sit under XAU until
+    they are removed or re-resolved — not done, Annas to decide.
+  - **Limits:** a Title Case Headline gives no capital-letter clue, so an unlisted name there
+    ("Xyz Gold Hits Upper Circuit") still tags the commodity — add it to the list when seen.
+    Gas utilities (Mahanagar Gas, Gujarat Gas) are not on the list.
 - The quick fix offered first (neutral unless two words match) was not built.
 
 ### Reddit and X — parked (2026-10-08, night)
