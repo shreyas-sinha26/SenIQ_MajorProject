@@ -72,7 +72,7 @@ rests on that — the strategy engine behind the app in this round, the Pro end-
 Google/GitHub sign-in end to end on the new sessions, and the alert narrative through the
 router. Indian prices now work through Yahoo; the Upstox token is still unused.
 
-### Sentiment scorer — local FinBERT built, NOT switched on (2026-10-08, night; branch `local-finbert`, pull request open)
+### Sentiment scorer — local FinBERT, switched on locally and stored stories re-scored (2026-10-08, night; pull request #5)
 - **Why:** the word-list scorer (`services/sentiment.js`) scores a story by the share of
   matched words that are positive, so one ambiguous word decides it. "Apple Reportedly
   Partners With LG Electronics…" was stored negative at score 0 (confidence 0.13) because the
@@ -95,15 +95,27 @@ router. Indian prices now work through Yahoo; the Upstox token is still unused.
   positive↔negative. Apple–LG: negative 0.00 → positive 0.95. "Two Investment Grade Issuers"
   ("debt"): negative 0.00 → neutral 0.45. Word-list "positive 1.00" on a single match became
   neutral or negative in five cases.
-- **State:** `FINBERT_CLASSIFY` is still empty in `.env`, so the app is on the word list.
-  **Stored stories have not been re-scored** — Annas is to approve that after seeing the trial.
-  Until then the Apple–LG story still reads negative in the app.
+- **State:** `FINBERT_CLASSIFY=1` is set in the local `.env` (the default everywhere else is
+  still off). **All stored readings were re-scored** with `node scripts/rescore_sentiment.js
+  --write` (dry run without the flag; only word-list readings are touched, so it is safe to
+  run again): 931 stories, 1,222 readings — label unchanged on 755, to or from neutral on 360,
+  positive↔negative on 107. Old readings are saved in
+  `samples/sentiment-before-finbert-2026-10-08.json` (untracked). Apple–LG now reads positive
+  0.96 and shows "Reads positive" in the app; the next pipeline run logged "read by FinBERT: 3,
+  word list: 0".
+- **Not re-made after the re-score:** alerts already raised, cached daily briefs and
+  `event_outcomes` snapshots keep what they recorded under the word list. Impact rows are
+  recomputed by the pipeline on its own.
+- **Seen, not fixed:** a story FinBERT reads as neutral just below the middle (0.46) is still
+  worded "Reads negative" on the news row — the impact score's direction has no neutral band
+  (`impactScoring.dirLabel`).
 - **Limits:** FinBERT reads the tone of the whole text, not per company — in the trial a
   "market wrap" naming Kotak Bank read negative for Kotak because the market fell. Switching
   scorers changes the scale of the sentiment history; re-scoring what is stored is what keeps
   it consistent. A few hundred MB of memory, which matters on a small cloud server.
 - **Seen in the trial, not fixed:** "Senco Gold" (a jeweller) stories are tagged to XAU, the
-  gold commodity (three of 20 rows) — an entity-resolver problem, separate from sentiment.
+  gold commodity (three of 20 rows) — an entity-resolver problem, separate from sentiment. A separate
+  session is fixing it on the branch `commodity-company-names` (in the same working folder).
 - The quick fix offered first (neutral unless two words match) was not built.
 
 ### Reddit and X — parked (2026-10-08, night)
