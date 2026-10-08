@@ -10,10 +10,12 @@ in `RAG_PLAN.md`; the matching engine edits live only in the gitignored `strateg
 Every commit passes `npm test` on its own. Nothing in the merge has run with a real model
 key, real embeddings, or the real strategy engine behind the app.
 
-**Latest (2026-10-08, night):** pull request #3 (user time zones + the Pro end-of-day report)
-is merged into `main` with a merge commit (`308b1bc`), tagged **`v1.4` / `v2.4`** on that commit
-and pushed; `npm test` is green there (483 checks). The dev database is on migration **0029**.
-The remote and local branch `user-time-zones` still exist. See the first section below.
+**Latest (2026-10-08, night):** two more pull requests are merged into `main` with merge
+commits and tagged on those commits, tags pushed: **#3** (user time zones + the Pro end-of-day
+report) = `308b1bc` = **`v1.4` / `v2.4`**; **#4** (India deals and insider trades in the reports
+and the brief) = `f5d2605` = **`v1.5` / `v2.5`**. `npm test` is green on `f5d2605`. The dev
+database is on migration **0029**. The branches `user-time-zones` and
+`india-smart-money-in-reports` still exist, on GitHub and locally. See the first section below.
 
 **Where things stood before that (2026-10-08, evening):** everything is on `main` on GitHub.
 Pull request #2 (branch `hardening-email-reports`) was **merged with a merge commit
@@ -107,8 +109,8 @@ code, and the 15-minute jobs have not been watched through a real morning or eve
   full, −0.75%, India 8 Oct + US 7 Oct + crypto, 3 cards, 3-page PDF. Not exercised live: the
   closed and skip outcomes, a session in progress, an actual send, the Pro hint in Profile.
 - Not in the evening report: a per-user choice of hour.
-- **India deals and insider trades are in both reports and the brief** (branch
-  `india-smart-money-in-reports`, pull request open, not merged). `grounding.smartMoneyContext`
+- **India deals and insider trades are in both reports and the brief** (pull request #4,
+  merged as `f5d2605`, `v1.5` / `v2.5`). `grounding.smartMoneyContext`
   now also returns `india_deals` (bulk/block deals in the user's Indian holdings, last 7 days)
   and `india_insiders` (last 90 days, only trades that pass the alert rule: promoter, director
   or key manager, open market, ₹1 crore or more), 3 rows each (`INDIA_SMART_MONEY.REPORT`). The
@@ -480,6 +482,8 @@ workflow file is rejected until the token has the `workflow` scope (see §8).
 | `v2.3` | `cbf1115` | same code as v1.3, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
 | `v1.4` | `308b1bc` | v1.3 + user time zones (reports, brief and daily limits on the user's clock) and the Pro end-of-day report | `npm start` |
 | `v2.4` | `308b1bc` | same code as v1.4, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
+| `v1.5` | `f5d2605` | v1.4 + India deals and insider trades in the reports and the brief | `npm start` |
+| `v2.5` | `f5d2605` | same code as v1.5, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
 
 History since the July push (`ac6d217`), newest first:
 ```
@@ -866,6 +870,8 @@ The immediate queue is the "Next, in order" list at the top. Behind it:
   account and showed `origin/main` one commit ahead (`ffa4fde`, README only).
 - **2026-10-08, night:** pushed the branch `user-time-zones`, opened pull request #3, merged it
   with a merge commit (`308b1bc`), tagged that commit `v1.4` + `v2.4` and pushed the tags.
+- **2026-10-08, night:** the same for `india-smart-money-in-reports`: pull request #4, merge
+  commit `f5d2605`, tags `v1.5` + `v2.5`.
 - **2026-10-08, evening:** fetched, merged `origin/main` (`ffa4fde`) into
   `hardening-email-reports`, ran `npm test`, pushed the branch and the tags `v1.3` + `v2.3`, and
   opened pull request #2 against `main`, then merged it with a merge commit (`06006bf`). The
