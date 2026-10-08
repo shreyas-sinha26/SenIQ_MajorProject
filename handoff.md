@@ -65,6 +65,30 @@ rests on that — the strategy engine behind the app in this round, the Pro end-
 Google/GitHub sign-in end to end on the new sessions, and the alert narrative through the
 router. Indian prices now work through Yahoo; the Upstox token is still unused.
 
+### User time zones (2026-10-08, night) — branch `user-time-zones`, step 1 of 2, not merged
+Each user now has their own clock (`server/services/userTime.js`, migration `0029` — **written,
+not applied to the dev database; nothing here has run in a browser or sent an email**).
+- `users.time_zone` is an IANA name (`Asia/Kolkata`), never an offset. The browser sends its
+  zone once after sign-in (`time_zone_if_unset` — fills an empty setting only); Profile has a
+  selector. Until it is set, the zone is the user's market's (`home_market`, or worked out from
+  holdings), which is what everyone was on before.
+- On the user's clock now: the morning report (08:30), the daily brief (written when the
+  user's clock passes 05:30 — the job runs every 15 minutes — and dated with their local date),
+  and every per-user daily limit (5 real-time alerts, Ask questions, alert narratives, report
+  cards, the brief). The global Claude spend ceiling stays on the UTC day. The market
+  (`home_market`) still decides what a report covers.
+- `localDayStart` counts back from the wall clock, so on the two days a year clocks change a
+  limit can reset an hour off.
+- Left alone: Ask's prompt still says "Today (UTC)"; the 13F/congress/India polls keep their
+  own schedules.
+- **Step 2, not built:** the Pro end-of-day report at 20:00 on the user's clock, every day —
+  full report if one of their markets traded, a short "markets closed" report if there is new
+  news about their holdings, nothing otherwise. `REPORT_EMAIL.EVENING` and
+  `report_sends.outcome` are already in place for it. Whether a market traded is to be read
+  from the price feed's last-session date. **Annas asked to keep a per-exchange holiday
+  calendar in mind** as a fallback or for labelling ("closed for Diwali") — not built.
+- Dropped by Annas: quiet hours for alerts (`ALERT_BUDGET.QUIET_*` stays off).
+
 ### India smart money (2026-10-08, evening) — committed; NSE refuses a client that identifies itself
 The Indian side of the Institutions and Congress tabs. **Off by default** (`INDIA_SMART_MONEY=1`
 turns it on; it is set in the local `.env`). Migration `0027` is applied on the dev database.

@@ -64,7 +64,8 @@ async function loadPrevPacket(userId, date) {
  */
 async function generateBriefForUser(userId, { force = false, now = new Date() } = {}) {
   const { query, queryOne, execute } = require('../db');
-  const date = now.toISOString().slice(0, 10);
+  const { userLocalDate, userDayStart } = require('./userTime');
+  const date = await userLocalDate(userId, now); // the user's own date, not the server's
 
   if (!force) {
     const existing = await queryOne(`SELECT ${BRIEF_COLS} FROM daily_briefs WHERE user_id = $1 AND brief_date = $2`, [userId, date]);
@@ -75,14 +76,17 @@ async function generateBriefForUser(userId, { force = false, now = new Date() } 
   const packet = await buildGroundingPacket(userId, prev, now);
 
   // ── Guardrails: decide whether Claude is allowed for this run ──
-  const dayStart = `${date} 00:00:00+00`;
+  // The user's limit counts from their own midnight; the global spend ceiling is one
+  // figure for everyone, so it stays on the UTC day.
+  const userDay = (await userDayStart(userId, now)).toISOString();
+  const utcDay = `${now.toISOString().slice(0, 10)} 00:00:00+00`;
   const callRow = await queryOne(
     "SELECT count(*) c FROM claude_calls WHERE user_id = $1 AND kind = 'daily_brief' AND created_at >= $2",
-    [userId, dayStart]
+    [userId, userDay]
   );
   const spendRow = await queryOne(
     'SELECT COALESCE(sum(cost_usd),0) s FROM claude_calls WHERE created_at >= $1',
-    [dayStart]
+    [utcDay]
   );
   const guard = guardCheck({
     flagOn: FEATURES.CLAUDE_REPORTS,
@@ -119,20 +123,35 @@ async function generateBriefForUser(userId, { force = false, now = new Date() } 
   return { ...saved, guard: guard.reason, cached: false };
 }
 
-/** Cron entry: generate today's brief for every user with a portfolio. */
+// Pure: is it time to write this user's brief? Inside the window that opens at
+// REPORTS.LOCAL_TIME on their own clock.
+function briefDue(clock) {
+  const start = REPORTS.LOCAL_TIME.HOUR * 60 + REPORTS.LOCAL_TIME.MINUTE;
+  return clock.minutes >= start && clock.minutes < start + REPORTS.LOCAL_WINDOW_MINUTES;
+}
+
+/**
+ * Cron entry (every few minutes): write today's brief for each user whose own morning has
+ * come and who does not have one yet. A user's brief is written once per local day —
+ * generateBriefForUser returns the stored one after that.
+ */
 async function generateDailyBriefs(now = new Date()) {
   const { query } = require('../db');
+  const { userZone, localClock } = require('./userTime');
   const users = await query('SELECT DISTINCT user_id FROM portfolio');
-  let claude = 0, fallback = 0;
+  let due = 0, claude = 0, fallback = 0;
   for (const { user_id } of users) {
     try {
+      if (!briefDue(localClock(now, (await userZone(user_id)).timeZone))) continue;
       const b = await generateBriefForUser(user_id, { now });
+      if (b.cached) continue;
+      due++;
       if (b.writer === 'claude') claude++; else fallback++;
     } catch (err) {
       console.error(`Daily brief failed for user ${user_id}:`, err.message);
     }
   }
-  return { users: users.length, claude, fallback };
+  return { users: users.length, due, claude, fallback };
 }
 
 async function getLatestBrief(userId) {
@@ -140,4 +159,4 @@ async function getLatestBrief(userId) {
   return queryOne(`SELECT ${BRIEF_COLS} FROM daily_briefs WHERE user_id = $1 ORDER BY daily_briefs.brief_date DESC LIMIT 1`, [userId]);
 }
 
-module.exports = { generateBriefForUser, generateDailyBriefs, getLatestBrief, guardCheck, estimateCost };
+module.exports = { generateBriefForUser, generateDailyBriefs, briefDue, getLatestBrief, guardCheck, estimateCost };

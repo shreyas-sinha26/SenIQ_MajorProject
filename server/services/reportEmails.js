@@ -2,12 +2,13 @@
  * Report emails — the scheduled read (config.REPORT_EMAIL).
  *
  *   Free       → weekly summary (Sunday evening, local time)
- *   Plus / Pro → the daily brief (weekday mornings, before the user's market opens)
+ *   Plus / Pro → the daily brief (weekday mornings)
  *
  * Who gets one: a verified address, report emails switched on, at least one holding.
- * When: decided per user from their market's local clock — users.home_market, or the
- * market most of their stocks trade in. The job runs every few minutes; a report is
- * claimed in report_sends before it is sent, so it goes out once per local day.
+ * When: decided per user from their own clock (userTime.js — users.time_zone, or their
+ * market's zone until that is known). The job runs every few minutes; a report is claimed
+ * in report_sends before it is sent, so it goes out once per local day. The user's MARKET
+ * (home_market, or where most of their stocks trade) still decides what the report covers.
  *
  * The report is a PDF attachment (reportPdf.js); the email body is one line saying what is
  * attached. The daily report is drawn from the same brief the app shows
@@ -17,38 +18,7 @@
  */
 
 const { REPORT_EMAIL } = require('../config');
-const { UNIVERSE } = require('../data/universe');
-
-const COUNTRY_BY_TICKER = new Map(UNIVERSE.map((c) => [c.ticker, c.country]));
-
-// ── Pure: which market is this portfolio mostly in? ──
-// Stocks only (crypto and commodities trade everywhere). A stored choice always wins.
-function guessMarket(holdings, stored = null) {
-  if (stored && REPORT_EMAIL.MARKETS[stored]) return stored;
-  let india = 0, us = 0;
-  for (const h of holdings || []) {
-    if (h.asset_class && h.asset_class !== 'equity') continue;
-    const exchange = String(h.exchange || '').toUpperCase();
-    const country = COUNTRY_BY_TICKER.get(h.ticker);
-    if (REPORT_EMAIL.IN_EXCHANGES.includes(exchange) || (!exchange && country === 'IN')) india++;
-    else us++;
-  }
-  if (india === us) return REPORT_EMAIL.DEFAULT_MARKET;
-  return india > us ? 'IN' : 'US';
-}
-
-// ── Pure: the wall clock in a time zone → { date:'YYYY-MM-DD', weekday:0–6, minutes } ──
-function localClock(now, timeZone) {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
-    timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', weekday: 'short',
-  }).formatToParts(now).map((p) => [p.type, p.value]));
-  return {
-    date: `${parts.year}-${parts.month}-${parts.day}`,
-    weekday: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(parts.weekday),
-    minutes: Number(parts.hour) * 60 + Number(parts.minute),
-  };
-}
+const { guessMarket, localClock, zoneFor } = require('./userTime');
 
 // ── Pure: which report, if any, is this user due right now? → 'daily' | 'weekly' | null ──
 function dueReport(tier, clock) {
@@ -179,7 +149,7 @@ async function runReportEmails(deps = {}) {
     if (!emailEnabledFn()) return summary;
     const { query, queryOne, execute } = require('../db');
     const users = await query(
-      `SELECT u.id, u.email, u.name, u.subscription_tier, u.home_market
+      `SELECT u.id, u.email, u.name, u.subscription_tier, u.home_market, u.time_zone
          FROM users u
         WHERE u.email_verified AND u.email_reports
           AND EXISTS (SELECT 1 FROM portfolio p WHERE p.user_id = u.id)`);
@@ -191,7 +161,7 @@ async function runReportEmails(deps = {}) {
       try {
         const holdings = await query('SELECT ticker, exchange, asset_class FROM portfolio WHERE user_id = $1', [user.id]);
         const market = guessMarket(holdings, user.home_market);
-        const clock = localClock(now, REPORT_EMAIL.MARKETS[market].timeZone);
+        const clock = localClock(now, zoneFor(user, holdings).timeZone);
         const kind = dueReport(user.subscription_tier, clock);
         if (!kind) continue;
 

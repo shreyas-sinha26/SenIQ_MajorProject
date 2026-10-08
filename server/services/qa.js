@@ -339,10 +339,12 @@ async function answerQuestion(userId, rawQuestion, rawHistory = [], { client, da
   if (!question) return { error: 'empty_question' };
   const history = sanitizeHistory(rawHistory);
 
+  // The question limit counts from the user's own midnight; the global ceiling from midnight UTC.
   const dayStart = `${new Date().toISOString().slice(0, 10)} 00:00:00+00`;
+  const userDay = (await require('./userTime').userDayStart(userId)).toISOString();
   const askedRow = await queryOne(
     "SELECT count(*) c FROM claude_calls WHERE user_id = $1 AND kind = 'qa' AND created_at >= $2",
-    [userId, dayStart]
+    [userId, userDay]
   );
   const used = Number(askedRow.c);
   const quota = (u) => ({ used: u, limit: dailyLimit, remaining: Math.max(0, dailyLimit - u) });
@@ -380,7 +382,7 @@ async function answerQuestion(userId, rawQuestion, rawHistory = [], { client, da
   let answer, writer, toolsUsed = [], evidence = [];
   const traced = { usage: null, cost_usd: 0, model: null, stop_reason: null, rounds: 0, error: null };
   // The guard above read the count without a lock; the reservation is the check that holds.
-  const reservedId = guard.allow && holdings.length ? await reserveQuestion(userId, dayStart, dailyLimit) : null;
+  const reservedId = guard.allow && holdings.length ? await reserveQuestion(userId, userDay, dailyLimit) : null;
   if (guard.allow && holdings.length && reservedId == null) {
     guard.allow = false;
     guard.reason = 'user_quota_exceeded';
