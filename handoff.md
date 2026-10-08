@@ -298,7 +298,8 @@ Two migrations share the number `0016`. This is harmless; do not rename an appli
 | `node scripts/retag_commodities.js [--write --backup <file>]` | Remove stored commodity tags the resolver would no longer give |
 | `node scripts/retag_roundups.js [--write --backup <file>]` | Remove stored company tags from roundup stories and re-grade them |
 | `node scripts/reread_companies.js [--tuning] [--write --backup <file>]` | Re-read stored multi-company stories per company (needs `FINBERT_CLASSIFY=1`) |
-| `node scripts/sentiment_label_sheet.js <file>` | Write a sheet of (story, company) pairs to hand-label |
+| `node scripts/sentiment_label_sheet.js <file> [--exclude <earlier.csv>] [--whole-store]` | Write a sheet of (story, company) pairs to hand-label |
+| `.venv/bin/python training/train_target_sentiment.py [--base <folder>]` | Fine-tune FinBERT on SEntFiN to read for one company (experimental; needs `training/data/SEntFiN.csv`) |
 | `node scripts/score_sentiment_labels.js <file>` | Score each way of reading against the hand labels |
 | `node scripts/refresh_executives.js [--write]` | Re-check US executives against FMP (about 100 of 250 daily calls) |
 | `node eval/ask/run.js --check` | Free, offline check of the Ask eval set |
@@ -429,16 +430,57 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
     rule-tuning, but they have now been used to choose between these, so they flatter the
     choice a little; fresh labels would be needed for a clean figure. No further tuning is
     planned.
+  - **Final refinement pass (2026-10-09) and the fresh test — read this before quoting any
+    figure.** Four ideas were tried on sheet 1 (now the tuning set), then everything was
+    scored once on a second sheet Annas labelled afterwards
+    (`samples/sentiment-labels-2-2026-10-08.csv`, 101 pairs from stories never printed
+    during development):
+
+    | Reading | Sheet 1 match / opposite / confidence on matches | Sheet 2 (fresh) |
+    |---|---|---|
+    | Whole text | 54 / 11 / 56% | 66 / 5 / 67% |
+    | FinBERT per company | 56 / 8 / 57% | 69 / 5 / 69% |
+    | + local model, shared clauses only (the design before this pass) | 65 / 3 / 67% | 66 / 3 / 67% |
+    | **+ local model on every story, agreement = confidence (shipped)** | 66 / 3 / 72% | 66 / 3 / 74% |
+    | … with "not about" removing the tag | 72 / 3 / 75% | 70 / 3 / 76% |
+    | Fine-tuned FinBERT + local model | 69 / 1 / 75% | 62 / 2 / 69% |
+
+    - **The 54 → 65 gain in matches did not repeat.** On fresh stories nothing matched
+      clearly more labels than the whole-text reading. What repeated on both sheets: fewer
+      opposite-direction readings, and more confidence (a reading's weight in the ticker
+      score) on matching readings.
+    - **Shipped:** the local model is asked about every company of every new story
+      (`TARGETED.LLM.SCOPE.ollama = 'all'`) and `targetedSentiment.combine` turns its
+      agreement with FinBERT into confidence (`TARGETED.AGREE`: both agree 0.9, one neutral
+      0.5, opposite directions → neutral at 0.3). In a shared clause the model's label
+      stands; elsewhere FinBERT's. "Not about" → neutral at 0.3, tag kept (its "not about"
+      was right 8 of 12 times on sheet 1, about 4 of 6 on sheet 2).
+    - **Tried and dropped:** worked examples in the model's prompt (more "not about"
+      answers, no more accurate, 2.5× slower); a wider neutral band for FinBERT (fewer
+      matches); `Xenova/distilroberta-finetuned-financial-news-sentiment-analysis` as the
+      base model (59 against 56 on sheet 1 — within noise, not tried on sheet 2).
+    - **Fine-tuned FinBERT: built, not adopted.** `training/train_target_sentiment.py`
+      trains ProsusAI/finbert on SEntFiN (`"<company> | <headline>"` → that company's
+      label; 14,371 pairs). Held-out SEntFiN accuracy 65% → 88% (multi-entity headlines
+      56% → 88%). On Annas's stories it helped on sheet 1 and hurt on sheet 2, so
+      `FINBERT_TARGET_MODEL` is **unset**. The app can load it (`finbertClassifier.
+      classifyTargets`, FinBERT as its fallback). The model is on disk in `models/`
+      (gitignored, about 1.4 GB with the base weights) and the Python environment in
+      `.venv/` (259 MB); both can be deleted.
+    - Stored readings were written under the earlier design; only new stories get the
+      agreement confidence. `reread_companies.js` would bring stored ones in line (about
+      900 local-model calls). Not run.
+    - No more tuning is planned. Both sheets are now used; any further change needs new
+      labels.
   - **Who reads what, and the fallbacks.** FinBERT reads every new story, multi-company
     ones included, and is the default reading for everything; the word list stands in only
     if FinBERT is off or fails. In a multi-company story FinBERT also gives each company its
-    own reading. The local model only replaces the readings of companies that share a
-    clause, and only when it answers.
+    own reading. The local model's label replaces FinBERT's only for companies that share
+    a clause; everywhere else it only sets the confidence, and only when it answers.
   - Needs `ollama serve` running with `qwen2.5:7b-instruct-q4_0` pulled. **FinBERT is the
     fallback when it is not** *(checked 2026-10-08 with Ollama stopped)*: the call fails at
     once, one warning is logged, and every company keeps FinBERT's per-company reading. No
     tag is removed and the pipeline run carries on.
-  - Single-company stories never reach the model: FinBERT alone matched 21–22 of 35 there.
   - **Stored stories re-read (2026-10-08):** `reread_companies.js --write` updated 257
     readings on 140 multi-company stories (226 by the local model, none removed). Old rows:
     `samples/company-readings-before-2026-10-08.json`. The roundup clean-up was run after it (above).
@@ -546,7 +588,8 @@ Changes made by hand to the dev database on 2026-10-08, with backups in `samples
 | Account 36 rebalanced; marked verified by hand | none |
 
 `samples/` also holds a sample report PDF built from account 36, and
-`sentiment-labels-2026-10-08.csv`: the 100 hand-labelled (story, company) pairs (§8).
+`sentiment-labels-2026-10-08.csv` and `sentiment-labels-2-2026-10-08.csv`: the two
+hand-labelled sheets of (story, company) pairs (§8).
 
 ---
 

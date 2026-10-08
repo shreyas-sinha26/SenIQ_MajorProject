@@ -15,7 +15,7 @@ const { FEATURES, SMART_MONEY, INDIA_SMART_MONEY } = require('./config');
 const { gatherArticles } = require('./services/ingest');
 const { loadIndex } = require('./services/entityResolver');
 const { analyzeSentiment } = require('./services/sentiment');
-const { classifyBatch, isEnabled: finbertEnabled } = require('./services/finbertClassifier');
+const { classifyBatch, classifyTargets, targetEnabled, isEnabled: finbertEnabled } = require('./services/finbertClassifier');
 const { classifyArticle, isRoundup, assignClusters } = require('./services/newsRelevance');
 const { readCompanies, settle } = require('./services/targetedSentiment');
 const { upsertEvents } = require('./services/events');
@@ -57,7 +57,10 @@ async function classifyArticles(articles, held = [], known = new Set()) {
   const perCompany = await readCompanies(articles.map((a, i) => ({
     title: a.title, summary: a.summary || '', whole: finbert[i],
     tickers: isRoundup(a.title, inHeadline[i]) ? [] : resolved[i].tickers,
-  })), { companiesIn, classify: classifyBatch, nameOf: resolver.nameByTicker });
+  })), {
+    companiesIn, classify: classifyBatch, nameOf: resolver.nameByTicker,
+    ...(targetEnabled() ? { classifyTarget: classifyTargets, surface: resolver.surface } : {}),
+  });
 
   const enriched = articles.map((a, i) => {
     let sentiment;
