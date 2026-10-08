@@ -79,8 +79,8 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
    Since then `v1.8` / `v2.8` added per-company sentiment: nothing for him to change, and the
    new `COMPANY_SENTIMENT_LLM` switch is off unless set.
    `README.md` was garbled by his commit `ffa4fde` (316 bytes of random characters) and was
-   restored on 2026-10-08 to the last good version (`9121338`, 2026-08-25); ask him not to
-   re-apply that commit.
+   restored on 2026-10-08 from the last good version (`9121338`), then brought up to date;
+   ask him not to re-apply that commit.
 2. **India smart money:** keep running `node scripts/india_smart_money.js poll` (60 insider
    filings per run) to drain the backlog and catch each evening's deal file. Before any
    hosting, settle NSE's terms or find a licensed source.
@@ -638,4 +638,4 @@ per-company sentiment, the local-model step and the labelling scripts. Tagged `v
 | `RAG_PLAN.md` | Ask, retrieval and signals plan (agreed 2026-10-07); India filings spike notes | Partly built |
 | `IPO_PLAN.md` | Sentiment for IPOs and small/mid-caps, where 13F and congress data are blind | Plan only, nothing built |
 | `DEPLOY.md` | Render + Neon + Cloudflare steps | Ready, not executed |
-| `README.md` | Project overview, features, setup on Windows | Restored 2026-10-08 to the 2026-08-25 text; describes the project as of then (nothing after OAuth: no sessions, reports emails, FinBERT, per-company sentiment) |
+| `README.md` | Project overview, features, setup (macOS and Windows), known limits | Yes — rewritten 2026-10-08 against this handoff, up to `v1.8` / `v2.8` |
