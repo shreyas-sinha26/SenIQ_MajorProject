@@ -199,6 +199,44 @@ check('both kinds of report draw as a PDF', async () => {
   }
 });
 
+section('Indian deals and insider trades in a report:');
+const { indiaSmartMoneyRows } = require('../server/services/reportPdf');
+const { deterministicBrief } = require('../server/services/briefWriter');
+const INDIA_SM = {
+  congress: [], institutions: [],
+  india_deals: [
+    { client: 'GOLDMAN SACHS BANK EUROPE SE', investor: 'Goldman Sachs', deal: 'bulk', action: 'sell', ticker: 'RELIANCE', shares: 3217800, value_inr: 96147864, date: '2026-10-07' },
+    { client: 'SOME FUND LLP', investor: null, deal: 'block', action: 'buy', ticker: 'RELIANCE', shares: 7000000, value_inr: 9803500000, date: '2026-10-07' },
+  ],
+  india_insiders: [
+    { person: 'Bajaj Holdings & Investment Limited', category: 'Promoters', action: 'buy', ticker: 'BAJAJFINSV', shares: 2090050, value_inr: 3700224520, traded: '2026-10-05', disclosed: '2026-10-07' },
+  ],
+};
+check('the table\'s rows: deals first, a followed-list investor by its short name, rupees in crore', () => {
+  assert.deepStrictEqual(indiaSmartMoneyRows(INDIA_SM), [
+    { who: 'Goldman Sachs', kind: 'Bulk deal', what: 'sell', ticker: 'RELIANCE', size: '₹9.6 Cr', when: '7 Oct 2026' },
+    { who: 'SOME FUND LLP', kind: 'Block deal', what: 'buy', ticker: 'RELIANCE', size: '₹980 Cr', when: '7 Oct 2026' },
+    { who: 'Bajaj Holdings & Investment Limited', kind: 'Insider · Promoters', what: 'buy', ticker: 'BAJAJFINSV', size: '₹370 Cr', when: '7 Oct 2026' },
+  ]);
+  assert.deepStrictEqual(indiaSmartMoneyRows({ congress: [{ politician: 'x' }] }), []);
+  assert.deepStrictEqual(indiaSmartMoneyRows(null), []);
+});
+check('a report with only Indian rows, only US rows, or both still draws', async () => {
+  const base = await E.buildEveningReport(USER, LABELS, depsFor(EVENING_IST));
+  const us = { congress: [{ date: '2026-06-15', action: 'sell', ticker: 'NVDA', politician: 'A Member' }], institutions: [] };
+  const sizes = [];
+  for (const smartMoney of [null, INDIA_SM, us, { ...us, ...INDIA_SM, congress: us.congress }]) {
+    const pdf = await buildReportPdf({ ...base, smartMoney });
+    assert.ok(pdf.slice(0, 5).toString() === '%PDF-');
+    sizes.push(pdf.length);
+  }
+  assert.ok(sizes[1] > sizes[0] && sizes[3] > sizes[2], 'the Indian table adds to the page');
+});
+check('the brief\'s fallback text mentions them', () => {
+  const packet = { most_important: null, top_events: [], changed: { has_prior: false }, portfolio: { top_holdings: [] }, smart_money: INDIA_SM };
+  assert.ok(/Smart money: 2 bulk or block deal\(s\) on RELIANCE; insider trade\(s\) disclosed on BAJAJFINSV\./.test(deterministicBrief(packet).narrative));
+});
+
 section('when it is due:');
 const at = (iso, tz) => localClock(new Date(iso), tz);
 check('Pro gets it from 20:00 on their own clock, every day of the week', () => {

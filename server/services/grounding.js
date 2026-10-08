@@ -126,9 +126,54 @@ async function smartMoneyContext(userId) {
       LIMIT 3`,
     [userId]
   );
+  const india = await indiaSmartMoneyContext(userId);
   return {
     congress: congress.map((c) => ({ politician: c.politician, action: c.transaction_type, ticker: c.ticker, date: c.transaction_date })),
     institutions: institutions.map((r) => ({ name: r.name, ticker: r.ticker, change: r.change_type })),
+    ...india,
+  };
+}
+
+// The Indian side: NSE bulk/block deals in the user's Indian holdings, and the insider
+// trades worth a line — the same rule that decides an alert (smartMoney/nseInsiders.js
+// insiderAlertable), without its 7-day limit. Most insider rows are employee trusts and
+// stock options; those stay on the tab. Dates are selected as text (see reports.js).
+const HELD_INDIAN = `SELECT p.ticker FROM portfolio p LEFT JOIN companies c ON c.ticker = p.ticker
+                      WHERE p.user_id = $1
+                        AND (upper(coalesce(p.exchange, '')) IN ('NSE', 'BSE')
+                             OR (coalesce(p.exchange, '') = '' AND c.country = 'IN'))`;
+async function indiaSmartMoneyContext(userId) {
+  const { query } = require('../db');
+  const { INDIA_SMART_MONEY } = require('../config');
+  const { INVESTOR_BY_SLUG } = require('../data/indiaInvestors');
+  const { ROWS, DEAL_DAYS, INSIDER_DAYS } = INDIA_SMART_MONEY.REPORT;
+  const deals = await query(
+    `SELECT deal_type, deal_date::text AS deal_date, ticker, client_name, investor_slug, side, quantity, value
+       FROM india_deals
+      WHERE ticker IN (${HELD_INDIAN}) AND deal_date >= current_date - $2::int
+      ORDER BY deal_date DESC, value DESC LIMIT $3`,
+    [userId, DEAL_DAYS, ROWS]
+  );
+  const insiders = await query(
+    `SELECT ticker, person, category, side, quantity, value, trade_from::text AS trade_from, disclosed_at::text AS disclosed_at
+       FROM india_insider_trades
+      WHERE ticker IN (${HELD_INDIAN})
+        AND side IN ('buy', 'sell') AND mode ~* '^market'
+        AND category ~* 'promoter|director|key manager|kmp'
+        AND (security_type IS NULL OR security_type ~* 'equity')
+        AND value >= $2 AND disclosed_at >= current_date - $3::int
+      ORDER BY disclosed_at DESC, value DESC LIMIT $4`,
+    [userId, INDIA_SMART_MONEY.INSIDER_ALERT_MIN_INR, INSIDER_DAYS, ROWS]
+  );
+  return {
+    india_deals: deals.map((d) => ({
+      client: d.client_name, investor: d.investor_slug && INVESTOR_BY_SLUG[d.investor_slug] ? INVESTOR_BY_SLUG[d.investor_slug].name : null,
+      deal: d.deal_type, action: d.side, ticker: d.ticker, shares: Number(d.quantity), value_inr: Number(d.value), date: d.deal_date,
+    })),
+    india_insiders: insiders.map((t) => ({
+      person: t.person, category: t.category, action: t.side, ticker: t.ticker,
+      shares: t.quantity == null ? null : Number(t.quantity), value_inr: Number(t.value), traded: t.trade_from, disclosed: t.disclosed_at,
+    })),
   };
 }
 
@@ -195,4 +240,4 @@ async function buildQAContext(userId, raw = null) {
   };
 }
 
-module.exports = { smartMoneyContext, buildGroundingPacket, buildQAContext, buildDiff, clamp, topHoldings };
+module.exports = { smartMoneyContext, indiaSmartMoneyContext, buildGroundingPacket, buildQAContext, buildDiff, clamp, topHoldings };

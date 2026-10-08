@@ -62,6 +62,9 @@ function deterministicNarrative(packet) {
   const smBits = [];
   if (sm.congress && sm.congress.length) smBits.push(`${sm.congress.length} recent congressional trade(s) in your names`);
   if (sm.institutions && sm.institutions.length) smBits.push(`institutional moves on ${sm.institutions.map((i) => i.ticker).join(', ')}`);
+  const uniq = (rows) => [...new Set(rows.map((r) => r.ticker))].join(', ');
+  if (sm.india_deals && sm.india_deals.length) smBits.push(`${sm.india_deals.length} bulk or block deal(s) on ${uniq(sm.india_deals)}`);
+  if (sm.india_insiders && sm.india_insiders.length) smBits.push(`insider trade(s) disclosed on ${uniq(sm.india_insiders)}`);
   if (smBits.length) lines.push(`Smart money: ${smBits.join('; ')}.`);
 
   return lines.join(' ');
