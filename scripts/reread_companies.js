@@ -30,14 +30,14 @@ async function main() {
   const backupPath = args.includes('--backup') ? args[args.indexOf('--backup') + 1] : null;
   if (write && tuning) throw new Error('--tuning is for dry runs only');
   const db = require('../server/db');
-  const { classifyBatch, isEnabled } = require('../server/services/finbertClassifier');
+  const { classifyBatch, classifyTargets, targetEnabled, isEnabled } = require('../server/services/finbertClassifier');
   const { buildResolver, universeRows } = require('../server/services/entityResolver');
   const { isRoundup } = require('../server/services/newsRelevance');
   const { readCompanies } = require('../server/services/targetedSentiment');
   try {
     if (!isEnabled()) throw new Error('FinBERT is off — set FINBERT_CLASSIFY=1 in .env first');
     const { companies, executives } = universeRows();
-    const { resolve, nameByTicker } = buildResolver(companies, executives);
+    const { resolve, nameByTicker, surface } = buildResolver(companies, executives);
     const held = (await db.query('SELECT DISTINCT ticker, company_name FROM portfolio'))
       .map((h) => ({ ticker: h.ticker, name: h.company_name }));
     const companiesIn = (text) => resolve(text, '', held).tickers;
@@ -66,7 +66,8 @@ async function main() {
         };
       });
 
-    const read = await readCompanies(stories, { companiesIn, classify: classifyBatch, nameOf: nameByTicker });
+    const read = await readCompanies(stories, { companiesIn, classify: classifyBatch, nameOf: nameByTicker,
+      ...(targetEnabled() ? { classifyTarget: classifyTargets, surface } : {}) });
     const changes = []; // { row, to: reading | null (remove) }
     stories.forEach((s, i) => {
       if (!read[i]) return;

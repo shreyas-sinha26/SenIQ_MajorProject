@@ -115,9 +115,16 @@ const FINBERT = {
   // local = run the model in this process (no token, no cost, a few hundred MB of memory);
   // hosted = Hugging Face's Inference API (HF_API_TOKEN; a tiny free allowance).
   MODE: process.env.FINBERT_MODE === 'hosted' ? 'hosted' : 'local',
-  LOCAL_MODEL: 'Xenova/finbert',   // the ONNX build of ProsusAI/finbert
+  // The ONNX build of ProsusAI/finbert. FINBERT_LOCAL_MODEL swaps in another model of the same
+  // kind (a Hugging Face id, or a folder on disk) — for trials; the labels must be the same three.
+  LOCAL_MODEL: process.env.FINBERT_LOCAL_MODEL || 'Xenova/finbert',
   LOCAL_DTYPE: 'q8',               // 8-bit weights: ~110 MB on disk, downloaded on first use
   HOSTED_MODEL: 'ProsusAI/finbert',
+  // Optional: a FinBERT fine-tuned to read a text FOR ONE COMPANY (training/
+  // train_target_sentiment.py). FINBERT_TARGET_MODEL is its folder; when set and present,
+  // every company named in a story is read by it instead of by FinBERT on fragments.
+  TARGET_MODEL: process.env.FINBERT_TARGET_MODEL || '',
+  TARGET_SEP: ' | ',               // "<company as the text names it> | <text>" — as in training
   BATCH: 16,                       // texts per pass through the local model
   MAX_CHARS: 1500,                 // the model reads at most 512 tokens
   RETRY_MINUTES: 10,               // after a failure, how long the word list stands in
@@ -132,14 +139,17 @@ const TARGETED = {
   // Words where a sentence turns ("…weighed on markets, while Nike advanced"): a unit ends here.
   CLAUSE_BREAKS: ['while', 'whereas', 'but', 'although', 'though', 'even as'],
   LLM: {
-    // Which companies the model is asked about (COMPANY_SENTIMENT_SCOPE overrides, for trials):
+    // Which companies the model is asked about, per provider (COMPANY_SENTIMENT_SCOPE overrides):
     //   shared — only those in a clause with another company (the fewest calls)
     //   multi  — every company of a story naming two or more
-    //   all    — also the company of a single-company story
-    SCOPE: ['shared', 'multi', 'all'].includes(process.env.COMPANY_SENTIMENT_SCOPE) ? process.env.COMPANY_SENTIMENT_SCOPE : 'shared',
-    // Whether a "not about" answer removes the company's tag. The local model is wrong too
-    // often for that (3 right of 8 on the hand labels; Haiku 8 of 12), and a wrong removal
-    // hides the story from the company altogether — so its answer is stored as neutral.
+    //   all    — every company of every story FinBERT read
+    // The local model is free, so it reads everything and its answer is weighed against
+    // FinBERT's (AGREE below). Paid calls stay on the clauses FinBERT cannot split.
+    SCOPE: { claude: 'shared', ollama: 'all' },
+    SCOPE_OVERRIDE: ['shared', 'multi', 'all'].includes(process.env.COMPANY_SENTIMENT_SCOPE) ? process.env.COMPANY_SENTIMENT_SCOPE : null,
+    // Whether a "not about" answer removes the company's tag. A wrong removal hides the story
+    // from the company altogether, and the local model's answer is right about two times in
+    // three — so its answer is stored as a neutral reading at the lowest confidence instead.
     REMOVE_NOT_ABOUT: { claude: true, ollama: false },
     MODEL: 'claude-haiku-4-5',   // same model as the brief and alert narrative
     // The local model for COMPANY_SENTIMENT_LLM=ollama. Not OLLAMA_MODEL: that one writes
@@ -151,8 +161,17 @@ const TARGETED = {
     MAX_CALLS_PER_DAY: 300,      // paid calls only: one per hard story; REPORTS.GLOBAL_DAILY_USD_CEILING also applies
     // A label → a score on FinBERT's scale (0.5 = neutral), so the history stays on one scale.
     SCORE: { positive: 0.9, neutral: 0.5, negative: 0.1 },
-    CONFIDENCE: 0.8,
+    CONFIDENCE: 0.8,             // a model reading with no FinBERT reading to weigh it against
   },
+  // Two readers, one reading. FinBERT is decisive and sometimes wrong; the language model is
+  // cautious. Where both read a company, how far they agree is the reading's confidence —
+  // and confidence is its weight in the ticker's score (sentimentScoring.acuteWeight).
+  //   BOTH  — same label from both
+  //   ONE   — one says neutral, the other takes a side
+  //   CLASH — positive against negative: stored as neutral
+  // In a clause naming several companies FinBERT cannot tell them apart, so the model's
+  // label is the reading there; everywhere else FinBERT's is.
+  AGREE: { BOTH: 0.9, ONE: 0.5, CLASH: 0.3 },
 };
 
 // ─── Sentiment v2 windows (Phase 2a) ─────────────────────────

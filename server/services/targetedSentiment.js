@@ -3,8 +3,7 @@
  *
  * FinBERT gives one reading for a whole text. A story that names several companies then
  * hands every one of them the same reading, whatever it says about each: in "Wall Street
- * slips as chip stocks weigh, while Nike advanced" Nike read negative. Two steps fix that,
- * and both only ever run on a story that names two or more companies:
+ * slips as chip stocks weigh, while Nike advanced" Nike read negative. Two steps fix that:
  *
  *   1. Own sentences (no new model). The text is cut into units — sentences, and clauses at
  *      a contrast word ("while", "but"…). Each company is read from the units that name it,
@@ -15,8 +14,15 @@
  *      companies ("Meta surges on plans to rival Amazon, Microsoft"). One call per story
  *      asks for each company's reading, or "not about" when the company is only the speaker
  *      or a comparison — that tag is then dropped (Claude) or stored as neutral (the local
- *      model, whose "not about" is not reliable enough to remove a tag on). TARGETED.LLM.SCOPE
- *      can widen the question to every company of a multi-company story, or to every story. Off unless FEATURES.COMPANY_SENTIMENT_LLM
+ *      model, whose "not about" is not reliable enough to remove a tag on).
+ *
+ *   Step 1 has a better form when the company-aware FinBERT is installed (FINBERT.TARGET_MODEL,
+ *   trained by training/train_target_sentiment.py): that model reads the whole text once for
+ *   each company named, single-company stories included, and no fragments are cut.
+ *
+ *   The local model is free, so it is asked about every company of every story FinBERT read
+ *   (TARGETED.LLM.SCOPE), single-company stories included, and its answer is weighed against
+ *   FinBERT's: agreement becomes the reading's confidence (combine, TARGETED.AGREE). Off unless FEATURES.COMPANY_SENTIMENT_LLM
  *      is set: 'claude' (needs a model key; capped per day; every call logged to
  *      claude_calls) or 'ollama' (the local model in TARGETED.LLM.OLLAMA_MODEL; free).
  *      Without it, or when a call fails, step 1's reading stands.
@@ -27,6 +33,11 @@
 
 const { FEATURES, TARGETED, REPORTS, FINBERT } = require('../config');
 const { subjectTickers } = require('./newsRelevance');
+
+// Who the model is asked about: a trial override, else the provider's own default.
+function defaultScope() {
+  return TARGETED.LLM.SCOPE_OVERRIDE || TARGETED.LLM.SCOPE[FEATURES.COMPANY_SENTIMENT_LLM] || 'shared';
+}
 
 // ── Step 1: units, and which units belong to which company (pure) ──
 const CLAUSE_RE = new RegExp(`\\s*;\\s+|,?\\s+(?:${TARGETED.CLAUSE_BREAKS.join('|')})\\s+`, 'i');
@@ -49,9 +60,11 @@ function splitUnits(title = '', summary = '') {
  *          shared   = companies that sit in a unit with another company;
  *          ask      = the companies step 2 is asked about.
  */
-function planStory(title, summary, tickers, companiesIn, scope = TARGETED.LLM.SCOPE) {
+function planStory(title, summary, tickers, companiesIn, scope = defaultScope(), singles = false) {
   const named = [...new Set(tickers)].filter((t) => t && t !== '__MARKET__');
-  if (named.length === 1 && scope === 'all') return { texts: { [named[0]]: null }, shared: [], ask: named };
+  // A single-company story has a plan only when something reads it per company: the model
+  // (scope 'all') or the company-aware FinBERT (`singles`).
+  if (named.length === 1 && (scope === 'all' || singles)) return { texts: { [named[0]]: null }, shared: [], ask: scope === 'all' ? named : [] };
   if (named.length < 2) return null;
   const units = splitUnits(title, summary).map((text) => ({ text, names: companiesIn(text).filter((t) => named.includes(t)) }));
   const own = Object.fromEntries(named.map((t) => [t, units.filter((u) => u.names.includes(t))]));
@@ -98,8 +111,23 @@ function parseReply(text, tickers) {
 }
 
 // A label → a reading on the same scale FinBERT's scores sit on.
-function fromLabel(label) {
-  return { label, score: TARGETED.LLM.SCORE[label], confidence: TARGETED.LLM.CONFIDENCE, model: 'llm' };
+function fromLabel(label, confidence = TARGETED.LLM.CONFIDENCE) {
+  return { label, score: TARGETED.LLM.SCORE[label], confidence, model: 'llm' };
+}
+
+/**
+ * Pure: FinBERT's reading of a company and the model's label for it → the reading stored.
+ * How far the two agree becomes the confidence (TARGETED.AGREE). `shared` = the company sits
+ * in a clause with another, where FinBERT cannot tell them apart: the model's label stands.
+ * Elsewhere FinBERT's stands, unless the two point in opposite directions — then neither is
+ * trusted and the reading is neutral.
+ */
+function combine(finbert, label, shared) {
+  const { BOTH, ONE, CLASH } = TARGETED.AGREE;
+  if (label === finbert.label) return shared ? fromLabel(label, BOTH) : { ...finbert, confidence: BOTH };
+  const clash = label !== 'neutral' && finbert.label !== 'neutral';
+  if (shared) return fromLabel(label, clash ? CLASH : ONE);
+  return clash ? fromLabel('neutral', CLASH) : { ...finbert, confidence: ONE };
 }
 
 async function askModel(story, tickers, nameOf) {
@@ -147,7 +175,8 @@ async function logCall(usage) {
  * Read each company of each story.
  * @param stories  [{ title, summary, tickers, whole }] — `whole` is the story's FinBERT
  *                 reading; a story without one (not new, or FinBERT unavailable) is skipped.
- * @param deps     { companiesIn, classify (texts → readings|null), nameOf, scope,
+ * @param deps     { companiesIn, classify (texts → readings|null), classifyTarget + surface
+ *                 (the company-aware model, optional), nameOf, scope, combine,
  *                 removeNotAbout, budget, ask, log } — the last three default to the real
  *                 model; tests pass stand-ins.
  * @returns an array aligned to `stories`: null (leave the story as it is) or
@@ -155,19 +184,31 @@ async function logCall(usage) {
  */
 async function readCompanies(stories, deps) {
   const { companiesIn, classify, nameOf = {} } = deps;
-  const plans = stories.map((s) => (s.whole && s.whole.model === 'finbert' ? planStory(s.title, s.summary, s.tickers, companiesIn, deps.scope) : null));
+  const wholeText = (s) => `${s.title} ${s.summary || ''}`.trim();
+  const plan = (singles) => stories.map((s) => (s.whole && s.whole.model === 'finbert' ? planStory(s.title, s.summary, s.tickers, companiesIn, deps.scope, singles) : null));
 
-  // Step 1: one FinBERT pass over every company text that differs from its story's whole text.
-  const jobs = [];
-  plans.forEach((p, i) => p && Object.entries(p.texts).forEach(([t, text]) => { if (text) jobs.push({ i, t, text }); }));
-  const read = jobs.length ? await classify(jobs.map((j) => j.text.slice(0, FINBERT.MAX_CHARS))) : [];
-  if (!read) return stories.map(() => null); // FinBERT stopped mid-run: whole-text readings stand
+  // Step 1, with the company-aware model when there is one: it reads the whole text once
+  // for each company named, single-company stories included.
+  let plans = null; let jobs = []; let read = null;
+  if (deps.classifyTarget) {
+    plans = plan(true);
+    plans.forEach((p, i) => p && Object.keys(p.texts).forEach((t) => jobs.push({ i, t })));
+    read = jobs.length ? await deps.classifyTarget(jobs.map((j) => ({ entity: deps.surface(j.t, wholeText(stories[j.i])), text: wholeText(stories[j.i]) }))) : [];
+  }
+  if (!read) {
+    // Without it: one FinBERT pass over every company text that differs from its story's whole text.
+    plans = plan(false); jobs = [];
+    plans.forEach((p, i) => p && Object.entries(p.texts).forEach(([t, text]) => { if (text) jobs.push({ i, t, text }); }));
+    read = jobs.length ? await classify(jobs.map((j) => j.text.slice(0, FINBERT.MAX_CHARS))) : [];
+    if (!read) return stories.map(() => null); // FinBERT stopped mid-run: whole-text readings stand
+  }
   const out = plans.map((p, i) => (p ? { readings: Object.fromEntries(Object.keys(p.texts).map((t) => [t, stories[i].whole])), notAbout: [] } : null));
   jobs.forEach((j, k) => { out[j.i].readings[j.t] = read[k]; });
 
   // Step 2: the stories with companies to ask the model about (TARGETED.LLM.SCOPE).
   const hard = plans.map((p, i) => ({ p, i })).filter(({ p }) => p && p.ask.length);
   const remove = deps.removeNotAbout != null ? deps.removeNotAbout : !!TARGETED.LLM.REMOVE_NOT_ABOUT[FEATURES.COMPANY_SENTIMENT_LLM];
+  const agree = deps.combine !== 'replace'; // 'replace' = the model's label as it is (the first design; kept for comparison)
   let left = hard.length ? await (deps.budget || llmBudget)() : 0;
   for (const { p, i } of hard) {
     if (left <= 0) break;
@@ -176,9 +217,11 @@ async function readCompanies(stories, deps) {
       const { text, usage } = await (deps.ask || askModel)(stories[i], p.ask, nameOf);
       if (usage) await (deps.log || logCall)(usage);
       for (const [t, label] of Object.entries(parseReply(text, p.ask))) {
-        if (label !== 'not_about') out[i].readings[t] = fromLabel(label);
-        else if (remove) { out[i].notAbout.push(t); delete out[i].readings[t]; }
-        else out[i].readings[t] = fromLabel('neutral'); // kept, but it moves nothing
+        if (label === 'not_about') {
+          if (remove) { out[i].notAbout.push(t); delete out[i].readings[t]; }
+          else out[i].readings[t] = fromLabel('neutral', TARGETED.AGREE.CLASH); // kept, but it moves nothing
+        } else if (agree) out[i].readings[t] = combine(out[i].readings[t], label, p.shared.includes(t));
+        else out[i].readings[t] = fromLabel(label);
       }
     } catch (err) {
       console.warn(`   ⚠️  Per-company reading: the model call failed, keeping FinBERT's readings for the rest of this run: ${err.message}`);
@@ -200,4 +243,4 @@ function settle(title, tickers, inHeadline, perCompany) {
   return { tickers: tickers.filter((t) => !perCompany.notAbout.includes(t)), readings: perCompany.readings };
 }
 
-module.exports = { settle, splitUnits, planStory, parseReply, fromLabel, buildPrompt, readCompanies, SYSTEM_PROMPT };
+module.exports = { settle, combine, askModel, llmBudget, splitUnits, planStory, parseReply, fromLabel, buildPrompt, readCompanies, SYSTEM_PROMPT };

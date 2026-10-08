@@ -83,6 +83,15 @@ check('a reply with the wrong number of results is treated as a failure, not mis
   assert.strictEqual(await F.classifyBatch(['a', 'b'], { runFn: async () => [probs(0.9, 0.05, 0.05)], now: T0 }), null);
   F.resetForTests();
 });
+check('the company-aware model is asked "<company> | <text>" and is off unless a folder is set', async () => {
+  const sent = [];
+  const out = await F.classifyTargets([{ entity: 'Kotak Bank', text: 'Kotak Bank rose 3%' }], { runFn: async (t) => { sent.push(...t); return [probs(0.9, 0.05, 0.05)]; } });
+  assert.deepStrictEqual(sent, ['Kotak Bank | Kotak Bank rose 3%']);
+  assert.deepStrictEqual(out, [{ label: 'positive', score: 0.93, confidence: 0.9, model: 'finbert-target' }]);
+  assert.strictEqual(await F.classifyTargets([{ entity: 'A', text: 'b' }], { runFn: async () => { throw new Error('missing'); } }), null);
+  assert.strictEqual(F.targetEnabled(), false);
+  assert.strictEqual(await F.classifyTargets([{ entity: 'A', text: 'b' }]), null);
+});
 check('local is the default mode and needs no token', () => {
   assert.strictEqual(FINBERT.MODE, 'local');
   assert.strictEqual(F.isEnabled(), true);

@@ -94,7 +94,7 @@ const META = {
 check('the model\'s answer replaces the shared companies\' readings; "not about" drops the tag', async () => {
   const asked = [];
   const [r] = await T.readCompanies([META], {
-    companiesIn, classify: fakeFinbert, budget: async () => 5, log: async () => {}, scope: 'shared', removeNotAbout: true,
+    companiesIn, classify: fakeFinbert, budget: async () => 5, log: async () => {}, scope: 'shared', removeNotAbout: true, combine: 'replace',
     ask: async (story, tickers) => { asked.push(tickers.slice().sort()); return { text: 'Here you go: {"HDFCBANK": "positive", "ICICIBANK": "Positive", "KOTAKBANK": "not about"}', usage: { input: 200, output: 30 } }; },
   });
   assert.deepStrictEqual(asked, [['HDFCBANK', 'ICICIBANK', 'KOTAKBANK']]);
@@ -108,7 +108,7 @@ check('the local model\'s "not about" keeps the tag, as a neutral reading', asyn
     ask: async () => ({ text: '{"HDFCBANK": "positive", "KOTAKBANK": "not_about"}', usage: null }),
   });
   assert.deepStrictEqual(r.notAbout, []);
-  assert.deepStrictEqual(r.readings.KOTAKBANK, { label: 'neutral', score: 0.5, confidence: 0.8, model: 'llm' });
+  assert.deepStrictEqual(r.readings.KOTAKBANK, { label: 'neutral', score: 0.5, confidence: 0.3, model: 'llm' });
   assert.deepStrictEqual(TARGETED.LLM.REMOVE_NOT_ABOUT, { claude: true, ollama: false });
 });
 check('scope decides who the model is asked about', async () => {
@@ -133,6 +133,50 @@ check('the daily cap stops the calls, and every call made is logged', async () =
     ask: async () => { calls++; return { text: '{}', usage: { input: 1, output: 1 } }; },
   });
   assert.deepStrictEqual([calls, logged], [2, 2]);
+});
+
+section('two readers, one reading:');
+check('agreement is the confidence; FinBERT\'s score stands outside a shared clause', () => {
+  const f = reading('positive', 0.96);
+  assert.deepStrictEqual(T.combine(f, 'positive', false), { ...f, confidence: 0.9 });
+  assert.deepStrictEqual(T.combine(f, 'neutral', false), { ...f, confidence: 0.5 });
+  assert.deepStrictEqual(T.combine(reading('neutral', 0.5), 'negative', false), { ...reading('neutral', 0.5), confidence: 0.5 });
+});
+check('positive against negative is stored as neutral, at the lowest confidence', () => {
+  assert.deepStrictEqual(T.combine(reading('positive', 0.96), 'negative', false), { label: 'neutral', score: 0.5, confidence: 0.3, model: 'llm' });
+});
+check('in a shared clause the model\'s label is the reading, and FinBERT only sets its confidence', () => {
+  assert.deepStrictEqual(T.combine(reading('positive', 0.96), 'positive', true), { label: 'positive', score: 0.9, confidence: 0.9, model: 'llm' });
+  assert.deepStrictEqual(T.combine(reading('positive', 0.96), 'negative', true), { label: 'negative', score: 0.1, confidence: 0.3, model: 'llm' });
+  assert.deepStrictEqual(T.combine(reading('positive', 0.96), 'neutral', true), { label: 'neutral', score: 0.5, confidence: 0.5, model: 'llm' });
+  assert.deepStrictEqual(TARGETED.AGREE, { BOTH: 0.9, ONE: 0.5, CLASH: 0.3 });
+});
+check('asked about every story, a single-company story is weighed the same way', async () => {
+  const one = { title: 'Nike advanced on strong sales', summary: '', tickers: ['NKE'], whole: reading('positive', 0.95) };
+  const run = (text) => T.readCompanies([one], { companiesIn, classify: fakeFinbert, budget: async () => 5, scope: 'all', removeNotAbout: false, ask: async () => ({ text, usage: null }) });
+  assert.deepStrictEqual((await run('{"NKE": "positive"}'))[0].readings.NKE, { ...one.whole, confidence: 0.9 });
+  assert.deepStrictEqual((await run('{"NKE": "negative"}'))[0].readings.NKE.label, 'neutral');
+  assert.deepStrictEqual((await run('{"NKE": "not_about"}'))[0].readings.NKE, { label: 'neutral', score: 0.5, confidence: 0.3, model: 'llm' });
+  assert.deepStrictEqual((await run('junk'))[0].readings.NKE, one.whole); // no answer: FinBERT as it was
+  assert.deepStrictEqual(TARGETED.LLM.SCOPE, { claude: 'shared', ollama: 'all' });
+});
+
+section('the company-aware FinBERT (optional):');
+check('it reads the whole text once per company, single-company stories included', async () => {
+  const seen = [];
+  const classifyTarget = async (items) => { seen.push(...items); return items.map((it) => ({ ...reading(/Nike/.test(it.entity) ? 'positive' : 'negative', /Nike/.test(it.entity) ? 0.9 : 0.1), model: 'finbert-target' })); };
+  const surface = (t) => ({ NKE: 'Nike', AMD: 'AMD', NVDA: 'Nvidia' })[t];
+  const one = { title: 'Nike advanced on strong sales', summary: '', tickers: ['NKE'], whole: reading('positive', 0.95) };
+  const out = await T.readCompanies([{ ...WALL, tickers: ['AMD', 'NVDA', 'NKE'], whole: reading('negative', 0.19) }, one],
+    { companiesIn, classify: fakeFinbert, classifyTarget, surface, budget: async () => 0, scope: 'shared' });
+  assert.deepStrictEqual(seen.map((s) => s.entity), ['AMD', 'Nvidia', 'Nike', 'Nike']);
+  assert.ok(seen.every((s, i) => s.text === (i < 3 ? `${WALL.title} ${WALL.summary}` : one.title)));
+  assert.deepStrictEqual([out[0].readings.NKE.label, out[0].readings.AMD.label, out[1].readings.NKE.model], ['positive', 'negative', 'finbert-target']);
+});
+check('when it fails, FinBERT reads the fragments as before', async () => {
+  const [r] = await T.readCompanies([{ ...WALL, tickers: ['AMD', 'NVDA', 'NKE'], whole: reading('negative', 0.19) }],
+    { companiesIn, classify: fakeFinbert, classifyTarget: async () => null, surface: (t) => t, budget: async () => 0, scope: 'shared' });
+  assert.deepStrictEqual([r.readings.NKE.label, r.readings.NKE.model], ['positive', 'finbert']);
 });
 
 section('what is stored:');

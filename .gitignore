@@ -59,3 +59,7 @@ strategy-service/
 
 # ─── Eval run outputs (answers, tool results, judge verdicts) ─
 eval/ask/runs/
+
+# Sentiment model training: downloaded data and model weights
+training/data/
+models/
