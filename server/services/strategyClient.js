@@ -1,10 +1,8 @@
 /**
- * Phase 8+ — strategy-service client + request helpers shared by the
- * key-authenticated transports (routes/mcp.js and routes/v1.js).
- *
- * Same contract as the copies in routes/strategies.js / routes/paper.js
- * (kept separate there to leave the web routes untouched): transport failure
- * normalizes to 503 "engine offline", service-level 4xx passes detail through.
+ * Phase 8+ — strategy-service client + request helpers, shared by the web routes
+ * (routes/strategies.js, routes/paper.js) and the key-authenticated transports
+ * (routes/mcp.js, routes/v1.js): transport failure normalizes to 503 "engine
+ * offline", service-level 4xx passes detail through.
  */
 const { STRATEGY_SERVICE } = require('../config');
 
@@ -61,4 +59,30 @@ const iso = (d) => {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 };
 
-module.exports = { callService, flattenDetail, cleanSymbols, iso, MAX_WATCH_SYMBOLS, WARMUP_DAYS };
+// Replay a paper deployment (a paper_deployments row) from its deploy date to now, or to
+// the day it was stopped. Replay-from-inception: indicators warm up on pre-deploy history,
+// but `trade_from` stops any signal trading before the deployment existed.
+async function replayPaper(row) {
+  const { seniqDataIfNeeded } = require('./signalHistory'); // lazy: signalHistory needs the DB
+  const deployed = new Date(row.deployed_at);
+  const start = new Date(deployed);
+  start.setDate(start.getDate() - WARMUP_DAYS);
+  const end = row.status === 'stopped' && row.stopped_at ? new Date(row.stopped_at) : new Date();
+
+  return callService('/api/backtest', {
+    method: 'POST',
+    body: {
+      ...(row.kind === 'custom'
+        ? { custom: row.spec, seniq_data: await seniqDataIfNeeded(row.spec, row.symbol) }
+        : { strategy: row.strategy_name, params: row.params || {} }),
+      symbol: row.symbol,
+      exchange: row.exchange,
+      start_date: iso(start),
+      end_date: iso(end),
+      trade_from: iso(deployed),
+      initial_cash: String(row.initial_cash),
+    },
+  });
+}
+
+module.exports = { callService, flattenDetail, cleanSymbols, iso, replayPaper, MAX_WATCH_SYMBOLS, WARMUP_DAYS };

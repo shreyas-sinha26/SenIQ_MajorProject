@@ -1,3 +1,5 @@
+const { safeFetch } = require('./safeFetch');
+
 const URL_REGEX = /^https?:\/\/.+/i;
 
 function isUrl(text) {
@@ -18,18 +20,20 @@ function stripHtml(html) {
     .trim();
 }
 
+// The URL comes from a user, so it goes through safeFetch: public addresses only, checked
+// again on every redirect, and a capped body.
 async function scrapeArticle(url) {
-  const res = await fetch(url, {
+  const res = await safeFetch(url.trim(), {
     headers: {
       'User-Agent': 'Mozilla/5.0 (compatible; SenIQ/1.0)',
       'Accept': 'text/html,application/xhtml+xml'
     },
-    signal: AbortSignal.timeout(10000)
+    timeoutMs: 10000,
   });
 
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-  const html = await res.text();
+  const html = res.text;
 
   const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
   const title = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';

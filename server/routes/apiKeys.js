@@ -6,7 +6,7 @@
  * still see and clean up their keys. The plaintext key is returned exactly
  * once, from POST — after that only the display prefix exists.
  */
-const express = require('express');
+const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne } = require('../db');
 const { authMiddleware } = require('./auth');
 const { attachTier, requireTier } = require('../middleware/tier');
@@ -14,7 +14,7 @@ const { generateKey } = require('../services/apiKeys');
 
 const MAX_ACTIVE_KEYS = 5;
 
-const router = express.Router();
+const router = asyncRouter();
 router.use(authMiddleware, attachTier);
 
 function rowToJson(r) {

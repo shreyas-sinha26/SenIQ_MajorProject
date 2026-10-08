@@ -12,7 +12,7 @@
 const crypto = require('crypto');
 const { query, execute } = require('../db');
 const { SMART_MONEY } = require('../config');
-const { fetchWithTimeout } = require('./ingest/util');
+const { safeFetch } = require('./safeFetch');
 
 function sign(secret, body) {
   return 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex');
@@ -27,23 +27,24 @@ async function deliverOne(hook, event) {
   const body = JSON.stringify({ type: event.type, event, delivered_at: new Date().toISOString() });
   let status = 0;
   try {
-    const res = await fetchWithTimeout(
-      hook.url,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-SenIQ-Signature': sign(hook.secret, body),
-          'X-SenIQ-Event': event.type,
-          'User-Agent': 'SenIQ-Webhook/1.0',
-        },
-        body,
+    // The URL is user-registered: public addresses only, no redirects followed (a signed
+    // payload should land where it was addressed), and the reply is not read.
+    const res = await safeFetch(hook.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-SenIQ-Signature': sign(hook.secret, body),
+        'X-SenIQ-Event': event.type,
+        'User-Agent': 'SenIQ-Webhook/1.0',
       },
-      SMART_MONEY.WEBHOOK_TIMEOUT_MS
-    );
+      body,
+      timeoutMs: SMART_MONEY.WEBHOOK_TIMEOUT_MS,
+      maxBytes: 1024,
+      maxRedirects: 0,
+    });
     status = res.status;
   } catch {
-    status = 0; // network error / timeout
+    status = 0; // network error / timeout / address not allowed
   }
 
   const ok = status >= 200 && status < 300;

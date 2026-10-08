@@ -9,7 +9,7 @@
  * The guardrails (the user is firm: never let the Claude key run a bill):
  *   - server-scheduled only — generateDailyBriefs() runs from cron; the manual route hits
  *     the SAME per-user quota, so there is no loopable on-demand "generate" path.
- *   - per-user daily quota — checked BEFORE any Claude call (count of today's claude_calls).
+ *   - per-user daily quota — checked BEFORE any Claude call (count of today's daily_brief calls).
  *   - global daily spend kill-switch — stop calling Claude past the day's USD ceiling.
  *   - hard output-token cap per call (in briefWriter) + a trimmed/clamped packet.
  *   - every Claude call logged with tokens + estimated cost.
@@ -21,7 +21,10 @@ const { REPORTS, FEATURES } = require('../config');
 const { buildGroundingPacket } = require('./grounding');
 const { writeBrief } = require('./briefWriter');
 
+// What a call cost. A router reports the exact charge (usage.cost_usd); otherwise it is
+// estimated from token counts at config pricing.
 function estimateCost(usage) {
+  if (usage.cost_usd > 0) return usage.cost_usd;
   return (usage.input / 1e6) * REPORTS.PRICE_PER_MTOK.input + (usage.output / 1e6) * REPORTS.PRICE_PER_MTOK.output;
 }
 
@@ -69,7 +72,7 @@ async function generateBriefForUser(userId, { force = false, now = new Date() } 
   // ── Guardrails: decide whether Claude is allowed for this run ──
   const dayStart = `${date} 00:00:00+00`;
   const callRow = await queryOne(
-    'SELECT count(*) c FROM claude_calls WHERE user_id = $1 AND created_at >= $2',
+    "SELECT count(*) c FROM claude_calls WHERE user_id = $1 AND kind = 'daily_brief' AND created_at >= $2",
     [userId, dayStart]
   );
   const spendRow = await queryOne(
@@ -78,7 +81,7 @@ async function generateBriefForUser(userId, { force = false, now = new Date() } 
   );
   const guard = guardCheck({
     flagOn: FEATURES.CLAUDE_REPORTS,
-    hasKey: !!process.env.ANTHROPIC_API_KEY,
+    hasKey: require('./llmClient').llmConfigured(),
     userCallsToday: Number(callRow.c),
     quota: REPORTS.PER_USER_DAILY_QUOTA,
     globalSpendToday: Number(spendRow.s),

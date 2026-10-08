@@ -186,7 +186,7 @@ check('tool call → result fed back → final answer; usage summed', async () =
   const r = await runAgent('why is my portfolio down?', [], { ...ctx, holdings }, client);
   assert.strictEqual(r.answer, 'AAPL cost you 1.2 pts.');
   assert.deepStrictEqual(r.toolsUsed, ['get_attribution']);
-  assert.deepStrictEqual(r.usage, { input: 1200, billable_input: 1200, output: 120, cache_read: 0 });
+  assert.deepStrictEqual(r.usage, { input: 1200, billable_input: 1200, output: 120, cache_read: 0, cost_usd: 0 });
   const second = client.calls[1].messages;
   assert.strictEqual(second[second.length - 1].content[0].type, 'tool_result');
   assert.strictEqual(second[second.length - 1].content[0].tool_use_id, 'tu_get_attribution');

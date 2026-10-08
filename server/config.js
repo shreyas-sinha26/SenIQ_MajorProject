@@ -84,7 +84,9 @@ const FEATURES = {
   X_INGEST: false,       // deferred — interface stubbed only
   FINBERT_CLASSIFY: process.env.FINBERT_CLASSIFY === '1', // HF Inference API batch classifier (needs HF_API_TOKEN)
   SMART_MONEY: true,     // Phase 3: 13F (EDGAR) + Congress tabs + instant filing alerts
-  CLAUDE_REPORTS: false,
+  // Claude writes the daily brief, Ask answers and the Pro alert narrative. Off unless
+  // CLAUDE_REPORTS=1 — a key alone never starts spending.
+  CLAUDE_REPORTS: process.env.CLAUDE_REPORTS === '1',
   // v2 feature set: Strategy Builder / Your Strategies / Backtest / Paper Trade + the MCP
   // server, public REST API (/v1), API keys and /docs. Off = v1 (portfolio → AI Workspace).
   STRATEGIES: process.env.FEATURES_STRATEGIES === '1',
@@ -396,6 +398,41 @@ const ALERT_NARRATIVE = {
   MAX_WORDS: 250,
 };
 
+// ─── Model access for the analyst voice (services/llmClient.js) ──
+// Claude is reached either directly (ANTHROPIC_API_KEY) or through an OpenAI-compatible
+// router (AIROUTER_API_KEY — AIRouter by default, credits topped up in INR). The router
+// names models "provider/model"; its Haiku 4.5 is priced the same as REPORTS.PRICE_PER_MTOK.
+const LLM = {
+  ROUTER: {
+    API_KEY: process.env.AIROUTER_API_KEY || '',
+    BASE_URL: (process.env.AIROUTER_BASE_URL || 'https://api.airouter.in/v1').replace(/\/$/, ''),
+    MODEL: process.env.AIROUTER_MODEL || 'anthropic/claude-haiku-4.5',
+    TIMEOUT_MS: 60000,
+  },
+};
+
+// ─── Report emails (scheduled summaries) ─────────────────────
+// Anything that can't wait is an alert; reports are the calm, scheduled read.
+//   Free       → a weekly summary, Sunday evening.
+//   Plus / Pro → the daily brief on weekday mornings, before the user's market opens.
+// "The user's market" is users.home_market, or worked out from what they hold. The job runs
+// every few minutes and sends to whoever is inside their send window and has not had that
+// day's report (report_sends), so a restart or a late start still delivers once.
+const REPORT_EMAIL = {
+  CRON: '*/15 * * * *',
+  DAILY: { HOUR: 8, MINUTE: 30, WEEKDAYS: [1, 2, 3, 4, 5] },  // local time, Mon–Fri
+  WEEKLY: { HOUR: 18, MINUTE: 0, WEEKDAY: 0 },                // local time, Sunday
+  SEND_WINDOW_MINUTES: 180,     // how long after the send time a late report still goes out
+  MARKETS: {
+    IN: { label: 'India', timeZone: 'Asia/Kolkata' },
+    US: { label: 'United States', timeZone: 'America/New_York' },
+  },
+  DEFAULT_MARKET: 'US',
+  IN_EXCHANGES: ['NSE', 'BSE'],
+  MAX_EVENTS: 4,                // events listed in a report
+  SUBJECT_PREFIX: '[SenIQ]',
+};
+
 // ─── Company filings (primary sources) ───────────────────────
 // SEC 8-Ks for held US-listed stocks. Lazy and bounded: only tickers someone holds, a few per
 // poll, a few filings each, and each request spaced by SMART_MONEY.SEC_RATE_DELAY_MS.
@@ -458,6 +495,7 @@ const SMART_MONEY = {
   CONGRESS_TRADES_URL: process.env.CONGRESS_TRADES_URL || '',
   WEBHOOK_TIMEOUT_MS: 6000,
   WEBHOOK_MAX_FAILURES: 10,      // auto-disable a webhook after this many consecutive fails
+  MAX_WEBHOOKS_PER_USER: 5,
 };
 
 // ─── Strategy service (Phase 7) ──────────────────────────────
@@ -493,13 +531,26 @@ const OAUTH = {
 };
 
 // ─── Transactional email (Phase 5 reset/verify; Phase 9 reuses this) ──
-// Resend (https://resend.com) — one HTTPS POST, no SDK. Without a key the app
-// still works: password-reset links are returned in dev responses instead of
-// emailed, and verification emails are skipped.
+// Two ways to send, picked by what is configured:
+//   Resend (https://resend.com) — one HTTPS POST. Needs a verified sending domain to reach
+//     anyone but the account owner. Used whenever RESEND_API_KEY is set.
+//   SMTP — any mailbox that accepts an app password (Gmail: ~500 emails/day, sent from
+//     that address). The no-domain option for demos and a few test users.
+// With neither, the app still works: password-reset links are returned in dev responses
+// instead of emailed, and verification + alert emails are skipped.
 const EMAIL = {
   RESEND_API_KEY: process.env.RESEND_API_KEY || '',
-  FROM: process.env.EMAIL_FROM || 'SenIQ <onboarding@resend.dev>',
-  get enabled() { return !!this.RESEND_API_KEY; },
+  SMTP: {
+    HOST: process.env.SMTP_HOST || '',
+    PORT: Number(process.env.SMTP_PORT) || 587,
+    USER: process.env.SMTP_USER || '',
+    PASS: (process.env.SMTP_PASS || '').replace(/\s+/g, ''), // Google shows app passwords in spaced groups
+    get enabled() { return !!(this.HOST && this.USER && this.PASS); },
+  },
+  FROM: process.env.EMAIL_FROM || (process.env.SMTP_USER ? `SenIQ <${process.env.SMTP_USER}>` : 'SenIQ <onboarding@resend.dev>'),
+  get provider() { return this.RESEND_API_KEY ? 'resend' : (this.SMTP.enabled ? 'smtp' : null); },
+  get enabled() { return !!this.provider; },
+  SMTP_TIMEOUT_MS: 15000,
 };
 
 // ─── Auth endpoint rate limits (Phase 5 hardening) ───────────
@@ -509,6 +560,8 @@ const AUTH_LIMITS = {
   LOGIN:  { limit: 20, windowMs: 10 * 60 * 1000 },  // login + signup attempts
   RESET:  { limit: 5,  windowMs: 15 * 60 * 1000 },  // forgot-password requests
   TOKEN_TTL_MIN: { RESET: 30, VERIFY: 60 * 24 },    // emailed link lifetimes
+  MIN_PASSWORD_CHARS: 8,
+  MAX_PASSWORD_CHARS: 72,                            // bcrypt reads only the first 72 bytes
 };
 
-module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES };
+module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };

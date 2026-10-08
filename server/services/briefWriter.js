@@ -104,8 +104,7 @@ function parseClaudeOutput(text) {
 }
 
 async function claudeBrief(packet) {
-  const Anthropic = require('@anthropic-ai/sdk');
-  const client = new Anthropic(); // reads ANTHROPIC_API_KEY from env
+  const client = require('./llmClient').getClient(); // Anthropic directly, or the router
   const resp = await client.messages.create({
     model: REPORTS.MODEL,
     max_tokens: REPORTS.MAX_OUTPUT_TOKENS,
@@ -122,7 +121,7 @@ async function claudeBrief(packet) {
     model: REPORTS.MODEL,
     headline,
     narrative,
-    usage: { input: resp.usage.input_tokens || 0, output: resp.usage.output_tokens || 0 },
+    usage: { input: resp.usage.input_tokens || 0, output: resp.usage.output_tokens || 0, cost_usd: resp.usage.cost_usd || 0 },
   };
 }
 

@@ -195,4 +195,4 @@ async function buildQAContext(userId, raw = null) {
   };
 }
 
-module.exports = { buildGroundingPacket, buildQAContext, buildDiff, clamp };
+module.exports = { buildGroundingPacket, buildQAContext, buildDiff, clamp, topHoldings };

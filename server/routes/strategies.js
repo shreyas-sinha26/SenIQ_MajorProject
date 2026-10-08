@@ -10,48 +10,23 @@
  * user so Free users can browse strategies (the tier table gives Free
  * "list + descriptions").
  */
-const express = require('express');
+const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne, execute } = require('../db');
 const { authMiddleware } = require('./auth');
 const { attachTier, requireTier } = require('../middleware/tier');
 const { STRATEGY_SERVICE } = require('../config');
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
 
-const { saveStrategy, MAX_SAVED_STRATEGIES } = require('../services/strategyStore');
+const { saveStrategy, strategyToJson, MAX_SAVED_STRATEGIES } = require('../services/strategyStore');
+const { callService, flattenDetail, cleanSymbols } = require('../services/strategyClient');
+const { userRateLimit, LIMITS } = require('../middleware/rateLimit');
 const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../services/strategySignals');
-const MAX_WATCH_SYMBOLS = 5;
 
-const router = express.Router();
+const router = asyncRouter();
 router.use(authMiddleware, attachTier);
 
-function serviceHeaders() {
-  const h = { 'Content-Type': 'application/json' };
-  if (STRATEGY_SERVICE.SECRET) h['X-Service-Secret'] = STRATEGY_SERVICE.SECRET;
-  return h;
-}
-
-// Calls the service and normalizes transport failures to 503. Service-level
-// errors (400/404 param problems) pass through with their detail so the UI
-// can show the real reason.
-async function callService(path, { method = 'GET', body, timeoutMs } = {}) {
-  const url = `${STRATEGY_SERVICE.URL}${path}`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs || STRATEGY_SERVICE.TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      method,
-      headers: serviceHeaders(),
-      body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
-    const data = await res.json().catch(() => ({}));
-    return { status: res.status, data };
-  } catch (err) {
-    return { status: 503, data: { detail: 'strategy engine is offline' }, transportError: err.message };
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// Runs on the engine are bounded per user (API keys have their own hourly budget).
+const engineLimit = userRateLimit(LIMITS.ENGINE);
 
 // GET /api/strategies/seniq-presets — ready-made specs that use SenIQ signals (any tier).
 router.get('/seniq-presets', (req, res) => res.json({ presets: listPresets() }));
@@ -66,7 +41,7 @@ router.post('/seniq-presets/:id', (req, res) => {
 
 // POST /api/strategies/compare — the same Builder spec backtested with and without its
 // SenIQ conditions (Plus; two engine backtests).
-router.post('/compare', requireTier('plus'), async (req, res) => {
+router.post('/compare', requireTier('plus'), engineLimit, async (req, res) => {
   const out = await compareWithoutSeniq(req.body || {});
   if (out.ok) return res.json(out.data);
   res.status(out.status).json({ error: out.error });
@@ -97,7 +72,7 @@ router.post('/validate', async (req, res) => {
 
 // POST /api/strategies/backtest — run one backtest (Plus+). Either a registry
 // strategy (`strategy` + `params`) or a Builder spec (`custom`).
-router.post('/backtest', requireTier('plus'), async (req, res) => {
+router.post('/backtest', requireTier('plus'), engineLimit, async (req, res) => {
   const { strategy, custom, params, symbol, exchange, start_date, end_date, initial_cash } = req.body || {};
   if ((!strategy && !custom) || !symbol || !start_date || !end_date) {
     return res.status(400).json({ error: 'strategy (or custom), symbol, start_date and end_date are required' });
@@ -123,17 +98,14 @@ router.post('/backtest', requireTier('plus'), async (req, res) => {
   if (out.status === 200) return res.json(out.data);
   if (out.status === 400 || out.status === 404 || out.status === 422) {
     // 422 = FastAPI/pydantic validation; its detail is an array of field errors.
-    const detail = Array.isArray(out.data.detail)
-      ? out.data.detail.map((d) => `${(d.loc || []).join('.')}: ${d.msg}`).join('; ')
-      : out.data.detail;
-    return res.status(out.status === 422 ? 400 : out.status).json({ error: detail || 'invalid backtest request' });
+    return res.status(out.status === 422 ? 400 : out.status).json({ error: flattenDetail(out.data) || 'invalid backtest request' });
   }
   return res.status(503).json({ error: 'Strategy engine is offline — try again later.' });
 });
 
 // POST /api/strategies/walk-forward — out-of-sample robustness check (Plus).
 // Same body as /backtest plus n_splits (2–12) and scheme (anchored | rolling).
-router.post('/walk-forward', requireTier('plus'), async (req, res) => {
+router.post('/walk-forward', requireTier('plus'), engineLimit, async (req, res) => {
   const { strategy, custom, params, symbol, exchange, start_date, end_date, n_splits, scheme } = req.body || {};
   if ((!strategy && !custom) || !symbol || !start_date || !end_date) {
     return res.status(400).json({ error: 'strategy (or custom), symbol, start_date and end_date are required' });
@@ -149,42 +121,18 @@ router.post('/walk-forward', requireTier('plus'), async (req, res) => {
   });
   if (out.status === 200) return res.json(out.data);
   if (out.status === 400 || out.status === 404 || out.status === 422) {
-    const detail = Array.isArray(out.data.detail)
-      ? out.data.detail.map((d) => `${(d.loc || []).join('.')}: ${d.msg}`).join('; ')
-      : out.data.detail;
-    return res.status(out.status === 422 ? 400 : out.status).json({ error: detail || 'invalid request' });
+    return res.status(out.status === 422 ? 400 : out.status).json({ error: flattenDetail(out.data) || 'invalid request' });
   }
   return res.status(503).json({ error: 'Strategy engine is offline — try again later.' });
 });
 
 // ─── Saved strategies (Your Strategies) — all Plus+ ─────────
 
-// Normalizes + bounds a client watchlist: [{symbol, exchange}], max 5.
-function cleanSymbols(raw) {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((s) => ({
-      symbol: String((s && s.symbol) || '').trim().toUpperCase().slice(0, 20),
-      exchange: String((s && s.exchange) || 'US').trim().toUpperCase().slice(0, 12),
-    }))
-    .filter((s) => /^[A-Z0-9.\-&]{1,20}$/.test(s.symbol))
-    .slice(0, MAX_WATCH_SYMBOLS);
-}
-
-function rowToJson(r) {
-  return {
-    id: r.id, name: r.name, kind: r.kind,
-    spec: r.spec, strategy_name: r.strategy_name, params: r.params,
-    symbols: r.symbols || [],
-    created_at: r.created_at, updated_at: r.updated_at,
-  };
-}
-
 // GET /api/strategies/saved — the user's saved strategies.
 router.get('/saved', requireTier('plus'), async (req, res) => {
   const rows = await query(
     'SELECT * FROM user_strategies WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
-  res.json({ strategies: rows.map(rowToJson), max: MAX_SAVED_STRATEGIES });
+  res.json({ strategies: rows.map(strategyToJson), max: MAX_SAVED_STRATEGIES });
 });
 
 // POST /api/strategies/saved — save a Builder spec or a configured preset.
@@ -207,7 +155,7 @@ router.put('/saved/:id', requireTier('plus'), async (req, res) => {
     `UPDATE user_strategies SET name = $1, symbols = $2, updated_at = now()
      WHERE id = $3 AND user_id = $4 RETURNING *`,
     [newName, JSON.stringify(newSymbols), req.params.id, req.user.id]);
-  res.json(rowToJson(updated));
+  res.json(strategyToJson(updated));
 });
 
 // DELETE /api/strategies/saved/:id

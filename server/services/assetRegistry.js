@@ -86,6 +86,14 @@ function resolveAsset(symbol, declaredClass) {
   return { ticker, assetClass, name: null, coingeckoId: null };
 }
 
+// A symbol as exchanges write them: letters and digits, with . - & ^ = inside (BRK.B,
+// M&M, BAJAJ-AUTO, ^NSEI, GC=F). Holdings feed shared news queries and are drawn into
+// pages, so anything else is refused at the door. Pure.
+const TICKER_PATTERN = /^[A-Z0-9^][A-Z0-9.\-&^=]{0,19}$/;
+function isValidTicker(symbol) {
+  return typeof symbol === 'string' && TICKER_PATTERN.test(symbol);
+}
+
 function isLaunchAssetClass(assetClass) {
   return LAUNCH_ASSET_CLASSES.includes(assetClass);
 }
@@ -96,6 +104,7 @@ module.exports = {
   NON_EQUITY_ASSETS,
   NON_EQUITY_ALIASES,
   resolveAsset,
+  isValidTicker,
   coingeckoIdFor,
   isLaunchAssetClass,
 };

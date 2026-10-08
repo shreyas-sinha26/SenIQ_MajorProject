@@ -6,16 +6,19 @@
  *   deploy (they need the public HTTPS domain for the payment webhook). On localhost we flip
  *   the tier directly to simulate a completed purchase, so all gating is testable now.
  *   ⚠️ Replace this body with a real Checkout-session create + webhook-driven tier update
- *   before going live — do NOT ship the direct flip to production.
+ *   before going live. Until then the direct flip is refused in production for everyone
+ *   but an admin, so a deployed copy can't hand out paid plans for free.
  */
 
-const express = require('express');
+const { asyncRouter } = require('../middleware/asyncRouter');
 const { queryOne } = require('../db');
 const { authMiddleware } = require('./auth');
 const { attachTier } = require('../middleware/tier');
 const { TIERS, PRICING } = require('../config');
 
-const router = express.Router();
+const isProd = process.env.NODE_ENV === 'production';
+
+const router = asyncRouter();
 
 // GET /api/billing/plans — the three plans + their prices/capabilities + the caller's tier.
 router.get('/plans', authMiddleware, attachTier, async (req, res) => {
@@ -24,10 +27,13 @@ router.get('/plans', authMiddleware, attachTier, async (req, res) => {
 });
 
 // POST /api/billing/checkout — { tier, period } — simulated purchase (see file header).
-router.post('/checkout', authMiddleware, async (req, res) => {
+router.post('/checkout', authMiddleware, attachTier, async (req, res) => {
   try {
     const { tier, period } = req.body || {};
     if (!TIERS[tier]) return res.status(400).json({ error: 'Invalid tier' });
+    if (isProd && !req.isAdmin) {
+      return res.status(501).json({ error: 'Paid plans are not open yet — payments are still being set up.' });
+    }
     const p = period === 'annual' ? 'annual' : 'monthly';
     const updated = await queryOne(
       `UPDATE users SET subscription_tier = $1, subscription_period = $2, subscription_updated_at = now()
