@@ -577,6 +577,10 @@ const INDIA_SMART_MONEY = {
   ALERT_MAX_AGE_DAYS: 7,         // an older deal/disclosure fetched late is stored, never alerted
   INSIDER_ALERT_MIN_INR: 1e7,    // ₹1 crore — smaller insider trades are stored but do not alert
   LIST_WINDOW: 500,              // newest rows a list route looks at before filtering
+  // What the reports and the brief carry (grounding.smartMoneyContext): deals in the user's
+  // Indian holdings, and insider trades that pass the alert rule (promoter, director or key
+  // manager; open market; INSIDER_ALERT_MIN_INR or more). Everything else stays on the tabs.
+  REPORT: { ROWS: 3, DEAL_DAYS: 7, INSIDER_DAYS: 90 },
 };
 
 // ─── Strategy service (Phase 7) ──────────────────────────────
