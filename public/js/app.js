@@ -1450,8 +1450,9 @@ function showReportSchedule(p) {
   const when = r.kind === 'daily' ? `The daily brief, weekdays at ${r.time}` : `A weekly summary, Sundays at ${r.time}`;
   // The time is on the user's own clock; say which, and whether it was set or guessed.
   const zone = r.time_zone_source === 'user' ? `your time (${zoneLabel(r.time_zone)})` : `${r.market_label} time`;
+  const evening = r.evening_time ? ` An end-of-day report every evening at ${r.evening_time}, when there is something to report.` : '';
   document.getElementById('email-reports-hint').textContent =
-    `${when} ${zone}${r.kind === 'weekly' ? '. Plus and Pro get the daily brief.' : '.'}`;
+    `${when} ${zone}${r.kind === 'weekly' ? '. Plus and Pro get the daily brief.' : '.'}${evening}`;
   const hint = document.getElementById('email-timezone-hint');
   if (hint) hint.textContent = r.time_zone_source === 'user'
     ? 'Reports arrive, and daily limits reset, on this clock.'

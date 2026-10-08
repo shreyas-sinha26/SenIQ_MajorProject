@@ -65,9 +65,12 @@ rests on that — the strategy engine behind the app in this round, the Pro end-
 Google/GitHub sign-in end to end on the new sessions, and the alert narrative through the
 router. Indian prices now work through Yahoo; the Upstox token is still unused.
 
-### User time zones (2026-10-08, night) — branch `user-time-zones`, step 1 of 2, not merged
-Each user now has their own clock (`server/services/userTime.js`, migration `0029` — **written,
-not applied to the dev database; nothing here has run in a browser or sent an email**).
+### User time zones and the end-of-day report (2026-10-08, night) — branch `user-time-zones`, pull request open, not merged
+Each user now has their own clock (`server/services/userTime.js`, migration `0029`, applied on
+the dev database). Checked in a browser with the throwaway account: the browser's zone is
+stored after sign-in, the Profile selector saves, an offset such as `+05:30` is refused, and
+`time_zone_if_unset` does not replace a chosen zone. **No report email has been sent from this
+code, and the 15-minute jobs have not been watched through a real morning or evening.**
 - `users.time_zone` is an IANA name (`Asia/Kolkata`), never an offset. The browser sends its
   zone once after sign-in (`time_zone_if_unset` — fills an empty setting only); Profile has a
   selector. Until it is set, the zone is the user's market's (`home_market`, or worked out from
@@ -81,12 +84,25 @@ not applied to the dev database; nothing here has run in a browser or sent an em
   limit can reset an hour off.
 - Left alone: Ask's prompt still says "Today (UTC)"; the 13F/congress/India polls keep their
   own schedules.
-- **Step 2, not built:** the Pro end-of-day report at 20:00 on the user's clock, every day —
-  full report if one of their markets traded, a short "markets closed" report if there is new
-  news about their holdings, nothing otherwise. `REPORT_EMAIL.EVENING` and
-  `report_sends.outcome` are already in place for it. Whether a market traded is to be read
-  from the price feed's last-session date. **Annas asked to keep a per-exchange holiday
-  calendar in mind** as a fallback or for labelling ("closed for Diwali") — not built.
+- **End-of-day report (Pro)** — `eveningReport.js`, `marketSessions.js`. Due from 20:00 on the
+  user's clock, every day (`REPORT_EMAIL.EVENING`); Pro still gets the 08:30 brief. One of
+  three outcomes: **full** if one of the user's markets completed a session in the last 24
+  hours (crypto always counts); **closed** — a shorter report with no moves — if nothing traded
+  but a new story about their holdings earned a card; **skip** otherwise (`report_sends.outcome
+  = 'skipped'`, decided once per day). Written by code; no model call.
+- "Today's move" is each holding's last COMPLETED session, read from Yahoo's daily bars
+  (`range=10d&interval=1d`): at 20:00 in Kolkata that is the day's NSE session and the New York
+  session that closed overnight; a session still trading is not counted and is said so. One
+  Yahoo request per stock or commodity holding per report, cached 5 minutes. A failed read
+  falls back to the ordinary quote.
+- **No holiday calendar:** a shut market has no bar for the day, so its last session is simply
+  older. **Annas asked to keep a per-exchange calendar in mind** — it would let the report say
+  WHY a market was shut ("closed for Diwali") and guard against the feed being wrong. Not built.
+- Tried once on real data (demo account 36, 2026-10-08 evening, live Yahoo, no email): outcome
+  full, −0.75%, India 8 Oct + US 7 Oct + crypto, 3 cards, 3-page PDF. Not exercised live: the
+  closed and skip outcomes, a session in progress, an actual send, the Pro hint in Profile.
+- Not in the evening report: India deals and insider trades (its smart-money section is the
+  US one from the grounding packet); a per-user choice of hour.
 - Dropped by Annas: quiet hours for alerts (`ALERT_BUDGET.QUIET_*` stays off).
 
 ### India smart money (2026-10-08, evening) — committed; NSE refuses a client that identifies itself

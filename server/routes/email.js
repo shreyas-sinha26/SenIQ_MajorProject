@@ -106,6 +106,9 @@ async function preferences(userId) {
       time: `${String(at.HOUR).padStart(2, '0')}:${String(at.MINUTE).padStart(2, '0')}`,
       time_zone: zone.timeZone,
       time_zone_source: zone.source,                  // 'user' = their own setting, 'market' = guessed
+      // Pro also gets the end-of-day report, every evening on the same clock.
+      evening_time: REPORT_EMAIL.EVENING.TIERS.includes(u.subscription_tier)
+        ? `${String(REPORT_EMAIL.EVENING.HOUR).padStart(2, '0')}:${String(REPORT_EMAIL.EVENING.MINUTE).padStart(2, '0')}` : null,
     },
   };
 }
