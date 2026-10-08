@@ -14,9 +14,16 @@ key, real embeddings, or the real strategy engine behind the app.
 commits and tagged on those commits, tags pushed: **#3** (user time zones + the Pro end-of-day
 report) = `308b1bc` = **`v1.4` / `v2.4`**; **#4** (India deals and insider trades in the reports
 and the brief) = `f5d2605` = **`v1.5` / `v2.5`**; **#5** (local FinBERT sentiment) = `7af294a` = **`v1.6` / `v2.6`**.
-`npm test` is green on `7af294a`. The dev
-database is on migration **0029**. The branches `user-time-zones` and
-`india-smart-money-in-reports` still exist, on GitHub and locally. See the first section below.
+`npm test` is green on `7af294a`. The dev database is on migration **0029**.
+**Every merged branch has been deleted**, on GitHub and locally (`hardening-email-reports`,
+`user-time-zones`, `india-smart-money-in-reports`, `local-finbert`); only `main` and the open
+`commodity-company-names` remain. See the sections below, newest first.
+- **The working folder may not be on `main`.** A separate session (the "Senco Gold" fix) works
+  in the same folder and switched it to `commodity-company-names`, which is based on
+  `5847545` — before the re-score script and the last handoff commits. When it is done: merge
+  or rebase it onto `main`, switch the folder back to `main` and pull.
+- Local `.env` now has `CLAUDE_REPORTS=0`, `INDIA_SMART_MONEY=1`, `FINBERT_CLASSIFY=1` and
+  Annas's own `NSE_USER_AGENT`. None of these are the defaults.
 
 **Where things stood before that (2026-10-08, evening):** everything is on `main` on GitHub.
 Pull request #2 (branch `hardening-email-reports`) was **merged with a merge commit
@@ -110,6 +117,14 @@ router. Indian prices now work through Yahoo; the Upstox token is still unused.
 - **Seen, not fixed:** a story FinBERT reads as neutral just below the middle (0.46) is still
   worded "Reads negative" on the news row — the impact score's direction has no neutral band
   (`impactScoring.dirLabel`).
+- **Is it better than the word list? Not measured.** The case for it: it reads sentences
+  rather than counting words, it can return "neutral" (360 of 1,222 readings moved to or from
+  neutral in the re-score), and its confidence is the model's own probability. There is **no
+  accuracy figure** — nobody has hand-labelled stories to score the two against — and no
+  evidence yet that its readings are followed by price moves more often (too few graded
+  outcomes). Do not quote an accuracy number in the report. Offered to Annas, not started:
+  hand-label about 100 stored stories as positive / neutral / negative and score both methods
+  against the labels.
 - **Limits:** FinBERT reads the tone of the whole text, not per company — in the trial a
   "market wrap" naming Kotak Bank read negative for Kotak because the market fell. Switching
   scorers changes the scale of the sentiment history; re-scoring what is stored is what keeps
@@ -944,6 +959,9 @@ The immediate queue is the "Next, in order" list at the top. Behind it:
 - **2026-10-08, night:** the same for `local-finbert`: pull request #5, merge commit `7af294a`,
   tags `v1.6` + `v2.6`. Done from a second checkout (`git worktree`), because another session
   had switched the main folder to its own branch `commodity-company-names`.
+- **2026-10-08, night:** deleted the merged branches `local-finbert`, `user-time-zones` and
+  `india-smart-money-in-reports` on GitHub and locally (each checked as contained in `main`
+  first).
 - **2026-10-08, evening:** fetched, merged `origin/main` (`ffa4fde`) into
   `hardening-email-reports`, ran `npm test`, pushed the branch and the tags `v1.3` + `v2.3`, and
   opened pull request #2 against `main`, then merged it with a merge commit (`06006bf`). The
