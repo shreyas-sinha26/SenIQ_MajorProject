@@ -10,18 +10,21 @@ in `RAG_PLAN.md`; the matching engine edits live only in the gitignored `strateg
 Every commit passes `npm test` on its own. Nothing in the merge has run with a real model
 key, real embeddings, or the real strategy engine behind the app.
 
-**Where things stand (end of 2026-10-08, evening):** everything is committed on the branch
-`hardening-email-reports` and **pushed to GitHub, with a pull request open against `main`
-(not merged)**. On top of the three earlier commits (`be98ba8`, `b5e47f3`, `2187d91`) and their
-handoff (`f892281`): India smart money (`e268975`, `00bf075`, `44f0151`), the DATE-column fix
-(`de41aa7`), the afternoon session in one commit (`2d151be` — it could not be split by topic
-safely: the topics share `app.js`, `config.js` and the tests), and a merge of `origin/main`
-(`cbf1115`, Shreyas's README commit `ffa4fde`). **Tags `v1.3` and `v2.3` sit on `cbf1115`**
-(same code; v2 = `FEATURES_STRATEGIES=1`), pushed. `npm test` is green on `cbf1115` (448
-checks). The working tree is clean except `samples/` and `.github/` (both untracked, not
-pushed — see §8). The dev database is on migration **0028**.
+**Where things stand (end of 2026-10-08, evening):** everything is on `main` on GitHub.
+Pull request #2 (branch `hardening-email-reports`) was **merged with a merge commit
+(`06006bf`)**. It brought in the three earlier commits (`be98ba8`, `b5e47f3`, `2187d91`) and
+their handoff (`f892281`), India smart money (`e268975`, `00bf075`, `44f0151`), the DATE-column
+fix (`de41aa7`), the afternoon session in one commit (`2d151be` — it could not be split by
+topic safely: the topics share `app.js`, `config.js` and the tests), and a merge of
+`origin/main` (`cbf1115`, Shreyas's README commit `ffa4fde`). **Tags `v1.3` and `v2.3` sit on
+`cbf1115`** (same code; v2 = `FEATURES_STRATEGIES=1`), pushed and reachable from `main`.
+`npm test` is green on `cbf1115` (448 checks). The remote branch `hardening-email-reports` still
+exists. The working tree is clean except `samples/` and `.github/` (both untracked, not pushed —
+see §8). The dev database is on migration **0028**.
 - **`README.md` on `main` is garbled** since `ffa4fde` (316 bytes of random characters ending
-  in `[cite: 1]`). It came in with the merge unchanged; tell Shreyas.
+  in `[cite: 1]`). Not fixed; tell Shreyas.
+- **Everyone has to sign in again** once this code is deployed (server-side sessions), and
+  part of Shreyas's OAuth callback is rewritten — he should know before he pulls.
 - Not done for these tags: neither v1 nor v2 was clicked through in a browser as a whole; the
   strategy engine was not run behind this code.
 
@@ -39,10 +42,8 @@ now one card-rewrite call per Plus/Pro daily report email. `CLAUDE_REPORTS=0` + 
 all of that off (and Ask with it).
 
 **Next, in order:**
-1. **Tell Shreyas, then merge the pull request** — with a merge commit, not a squash, so the
-   tagged commit `cbf1115` keeps its hash. The sign-in change rewrites part of his OAuth
-   callback (`server/routes/oauth.js`) and every client must sign in again. Also tell him the
-   README on `main` is garbled.
+1. **Tell Shreyas** that `main` moved: the sign-in change rewrites part of his OAuth callback
+   (`server/routes/oauth.js`), every client must sign in again, and the README needs restoring.
 2. India smart money: keep running `node scripts/india_smart_money.js poll` to drain the
    insider-filing backlog (60 filings a run) and to catch each evening's deal file; before any
    hosting, settle NSE's terms or a licensed source (see the India section below).
@@ -437,8 +438,7 @@ d08fe98 Ask v2 — tool-calling agent, news search (RAG), saved conversations
 Still local only: `.github/` (CI workflow — see §8), `strategy-service/` (gitignored), and the whole
 2026-10-07 session (merged in pull request #1 — see the table above).
 `v1.2`/`v2.2` pass `npm test` but have **not been clicked through in the browser** yet.
-`v1.3`/`v2.3` (2026-10-08) are on the branch `hardening-email-reports`, reachable from `main`
-once its pull request is merged with a merge commit. Rule for the next version: one commit, two
+`v1.3`/`v2.3` (2026-10-08) came into `main` through pull request #2 (merge commit `06006bf`). Rule for the next version: one commit, two
 annotated tags (`v1.N` = strategies off, `v2.N` = the same code with `FEATURES_STRATEGIES=1`).
 
 **Why one branch, not two:** strategy commits are interleaved in history (since `ecb9c83`),
@@ -809,7 +809,8 @@ The immediate queue is the "Next, in order" list at the top. Behind it:
   account and showed `origin/main` one commit ahead (`ffa4fde`, README only).
 - **2026-10-08, evening:** fetched, merged `origin/main` (`ffa4fde`) into
   `hardening-email-reports`, ran `npm test`, pushed the branch and the tags `v1.3` + `v2.3`, and
-  opened a pull request against `main`. Not merged. `samples/` (a sample report PDF built from
+  opened pull request #2 against `main`, then merged it with a merge commit (`06006bf`). The
+  remote branch was kept. `samples/` (a sample report PDF built from
   the demo account and a backup of removed ticker tags) and `.github/` were left out.
 - Next time: **fetch first**, merge (not rebase) if teammates pushed, run `npm test`, then
   push the branch and open a pull request, as was done for #1.
