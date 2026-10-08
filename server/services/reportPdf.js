@@ -16,7 +16,7 @@
  *              events:[{title, source, last_seen, exposure_pct, direction, impact_score}],
  *              moreEvents, holdings:[{ticker, name, exposure_pct, sentiment_label,
  *              sentiment_acute, z}], changed:{has_prior, new_events, sentiment_swings},
- *              smartMoney:{congress, institutions}, alertCount, note,
+ *              smartMoney:{congress, institutions, india_deals, india_insiders}, alertCount, note,
  *              insights: reportInsights.buildReportInsights() | null }
  */
 
@@ -66,6 +66,31 @@ function vsNormal(z) {
   const v = Number(z);
   if (Math.abs(v) < 0.5) return 'In its usual range';
   return `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}σ ${v > 0 ? 'above' : 'below'} usual`;
+}
+
+// Rupees in crore (1e7) and lakh (1e5), the units Indian readers use.
+function inr(n) {
+  const v = Number(n);
+  if (n == null || !Number.isFinite(v)) return '—';
+  if (v >= 1e7) return `₹${(v / 1e7).toFixed(v >= 1e9 ? 0 : 1)} Cr`;
+  if (v >= 1e5) return `₹${(v / 1e5).toFixed(1)} L`;
+  return `₹${Math.round(v).toLocaleString('en-IN')}`;
+}
+
+// The Indian smart-money table's rows: deals first, then insider trades. Pure — also what
+// the tests read. A deal by a followed-list investor shows that name; others the client's.
+function indiaSmartMoneyRows(sm) {
+  const s = sm || {};
+  return [
+    ...(s.india_deals || []).slice(0, 6).map((d) => ({
+      who: clean(d.investor || d.client), kind: d.deal === 'block' ? 'Block deal' : 'Bulk deal',
+      what: d.action === 'sell' ? 'sell' : 'buy', ticker: clean(d.ticker), size: inr(d.value_inr), when: shortDate(d.date),
+    })),
+    ...(s.india_insiders || []).slice(0, 6).map((t) => ({
+      who: clean(t.person), kind: clean(`Insider · ${t.category || 'insider'}`),
+      what: t.action === 'sell' ? 'sell' : 'buy', ticker: clean(t.ticker), size: inr(t.value_inr), when: shortDate(t.disclosed),
+    })),
+  ];
 }
 
 // The figures in the strip under the lead. Pure — also what the tests read.
@@ -459,6 +484,29 @@ function buildReportPdf(report) {
       });
     }
 
+    // ── The Indian side: NSE deals and insider trades (not delayed by weeks like the above) ──
+    const inRows = indiaSmartMoneyRows(sm);
+    if (inRows.length) {
+      section('Large trades and insider trades in your Indian stocks',
+        'NSE publishes bulk and block deals the same evening. Insider trades are disclosed by the company, usually within two trading days.');
+      const cols = [
+        { label: 'Who', width: CONTENT_W - 78 - 44 - 82 - 64 - 68 },
+        { label: 'Source', width: 78 },
+        { label: 'Action', width: 44 },
+        { label: 'Ticker', width: 82 },
+        { label: 'Size', width: 64 },
+        { label: 'Date', width: 68 },
+      ];
+      table(cols, inRows, () => 22, (row, xs) => {
+        write(row.who, xs[0], y + 7, 'medium', 9, C.ink, { width: cols[0].width - 12, height: 11, ellipsis: true });
+        write(row.kind, xs[1], y + 7, 'regular', 8.5, C.muted, { width: cols[1].width - 8, height: 11, ellipsis: true });
+        write(row.what[0].toUpperCase() + row.what.slice(1), xs[2], y + 7, 'medium', 8.5, row.what === 'sell' ? C.negative : C.positive);
+        write(row.ticker, xs[3], y + 7, 'semibold', 9, C.ink, { width: cols[3].width - 8, height: 11, ellipsis: true });
+        write(row.size, xs[4], y + 7, 'regular', 8.5, C.text);
+        write(row.when || '—', xs[5], y + 7, 'regular', 8.5, C.muted);
+      });
+    }
+
     // ── How earlier readings held up ──
     const tr = ins && ins.trackRecord;
     if (tr) {
@@ -515,4 +563,4 @@ function buildReportPdf(report) {
   });
 }
 
-module.exports = { buildReportPdf, reportStats, insightStats, vsNormal };
+module.exports = { buildReportPdf, reportStats, insightStats, indiaSmartMoneyRows, vsNormal };

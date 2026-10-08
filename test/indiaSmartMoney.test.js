@@ -14,6 +14,7 @@ const state = {};
 function resetDb() {
   Object.assign(state, {
     deals: [], insiders: [], sync: new Set(), alerts: [], filings: new Map(), tracked: [],
+    contextCalls: [], contextDeals: [], contextInsiders: [],
     holders: {},      // ticker → [userId] holding it as an Indian stock
     followers: {},    // investor slug → [userId]
   });
@@ -44,6 +45,10 @@ async function run(sql, params = []) {
     const ids = new Set(params[0].flatMap((slug) => state.followers[slug] || []));
     return [...ids].map((user_id) => ({ user_id }));
   }
+  // grounding.smartMoneyContext — the US side is empty here; the India rows are what is under test.
+  if (/FROM congress_trades c/.test(q) || /FROM institution_holdings h/.test(q)) return [];
+  if (/FROM india_deals WHERE ticker IN/.test(q)) { state.contextCalls.push({ table: 'deals', sql: q, params }); return state.contextDeals; }
+  if (/FROM india_insider_trades WHERE ticker IN/.test(q)) { state.contextCalls.push({ table: 'insiders', sql: q, params }); return state.contextInsiders; }
   if (q.startsWith('SELECT count(*)::int AS n FROM alerts')) return [{ n: 0 }];
   if (q.startsWith('INSERT INTO alerts')) { state.alerts.push({ user_id: params[0], ticker: params[1], type: params[2], message: params[3], delivery: params[4] }); return []; }
   if (q.startsWith('SELECT * FROM webhooks')) return [];
@@ -461,6 +466,33 @@ check('a refused list, a refused file and an ordinary failure', async () => {
   assert.deepStrictEqual(calls, ['1', '2']);
   assert.deepStrictEqual(r2.errors, ['INFY 1: timeout', 'INFY 2: NSE replied 403']);
   assert.strictEqual(state.filings.size, 0); // neither is marked read, so both are retried next run
+});
+
+section('what reports and the brief carry:');
+check('deals in held Indian stocks and insider trades that pass the alert rule, dated as stored', async () => {
+  resetDb();
+  state.contextDeals = [{ deal_type: 'bulk', deal_date: '2026-10-07', ticker: 'RELIANCE', client_name: 'GOLDMAN SACHS BANK EUROPE SE', investor_slug: 'goldman-sachs', side: 'sell', quantity: '3217800', value: '96147864' },
+    { deal_type: 'block', deal_date: '2026-10-07', ticker: 'RELIANCE', client_name: 'SOME FUND LLP', investor_slug: null, side: 'buy', quantity: '10', value: '100' }];
+  state.contextInsiders = [{ ticker: 'TRENT', person: 'TATA SONS', category: 'Promoter Group', side: 'sell', quantity: '1000', value: '500000000', trade_from: '2026-10-06', disclosed_at: '2026-10-08' }];
+  const { smartMoneyContext } = require('../server/services/grounding');
+  const r = await smartMoneyContext(9);
+  assert.deepStrictEqual(r, {
+    congress: [], institutions: [],
+    india_deals: [
+      { client: 'GOLDMAN SACHS BANK EUROPE SE', investor: 'Goldman Sachs', deal: 'bulk', action: 'sell', ticker: 'RELIANCE', shares: 3217800, value_inr: 96147864, date: '2026-10-07' },
+      { client: 'SOME FUND LLP', investor: null, deal: 'block', action: 'buy', ticker: 'RELIANCE', shares: 10, value_inr: 100, date: '2026-10-07' },
+    ],
+    india_insiders: [{ person: 'TATA SONS', category: 'Promoter Group', action: 'sell', ticker: 'TRENT', shares: 1000, value_inr: 500000000, traded: '2026-10-06', disclosed: '2026-10-08' }],
+  });
+  const [deals, insiders] = state.contextCalls;
+  const { ROWS, DEAL_DAYS, INSIDER_DAYS } = INDIA_SMART_MONEY.REPORT;
+  assert.deepStrictEqual(deals.params, [9, DEAL_DAYS, ROWS]);
+  assert.deepStrictEqual(insiders.params, [9, INDIA_SMART_MONEY.INSIDER_ALERT_MIN_INR, INSIDER_DAYS, ROWS]);
+  // The insider filter is the alert rule, and both read only the user's Indian holdings, with dates as text.
+  for (const part of ["side IN ('buy', 'sell')", "mode ~* '^market'", "category ~* 'promoter|director|key manager|kmp'", 'value >= $2'])
+    assert.ok(insiders.sql.includes(part), part);
+  for (const c of [deals, insiders]) assert.ok(/p\.user_id = \$1/.test(c.sql) && /IN \('NSE', 'BSE'\)/.test(c.sql));
+  assert.ok(/deal_date::text AS deal_date/.test(deals.sql) && /disclosed_at::text AS disclosed_at/.test(insiders.sql));
 });
 
 (async () => {

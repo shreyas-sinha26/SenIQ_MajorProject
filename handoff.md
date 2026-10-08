@@ -106,8 +106,18 @@ code, and the 15-minute jobs have not been watched through a real morning or eve
 - Tried once on real data (demo account 36, 2026-10-08 evening, live Yahoo, no email): outcome
   full, −0.75%, India 8 Oct + US 7 Oct + crypto, 3 cards, 3-page PDF. Not exercised live: the
   closed and skip outcomes, a session in progress, an actual send, the Pro hint in Profile.
-- Not in the evening report: India deals and insider trades (its smart-money section is the
-  US one from the grounding packet); a per-user choice of hour.
+- Not in the evening report: a per-user choice of hour.
+- **India deals and insider trades are in both reports and the brief** (branch
+  `india-smart-money-in-reports`, pull request open, not merged). `grounding.smartMoneyContext`
+  now also returns `india_deals` (bulk/block deals in the user's Indian holdings, last 7 days)
+  and `india_insiders` (last 90 days, only trades that pass the alert rule: promoter, director
+  or key manager, open market, ₹1 crore or more), 3 rows each (`INDIA_SMART_MONEY.REPORT`). The
+  PDF draws them as their own table with its own caption; the brief's fallback text names
+  them; the packet Claude gets for the brief carries them too (never run with a model).
+  Checked on the dev database: the queries run; a throwaway account holding ACEVECTOR got its
+  three real deals in a rendered report. **With today's data no stored insider trade passes
+  the rule, and the demo account (TCS, RELIANCE) has no rows** — large caps rarely see bulk
+  deals or promoter open-market trades, so this table will often be absent.
 - Dropped by Annas: quiet hours for alerts (`ALERT_BUDGET.QUIET_*` stays off).
 
 ### India smart money (2026-10-08, evening) — committed; NSE refuses a client that identifies itself
