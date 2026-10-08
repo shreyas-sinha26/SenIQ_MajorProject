@@ -10,7 +10,12 @@ in `RAG_PLAN.md`; the matching engine edits live only in the gitignored `strateg
 Every commit passes `npm test` on its own. Nothing in the merge has run with a real model
 key, real embeddings, or the real strategy engine behind the app.
 
-**Where things stand (end of 2026-10-08, evening):** everything is on `main` on GitHub.
+**Latest (2026-10-08, night):** pull request #3 (user time zones + the Pro end-of-day report)
+is merged into `main` with a merge commit (`308b1bc`), tagged **`v1.4` / `v2.4`** on that commit
+and pushed; `npm test` is green there (483 checks). The dev database is on migration **0029**.
+The remote and local branch `user-time-zones` still exist. See the first section below.
+
+**Where things stood before that (2026-10-08, evening):** everything is on `main` on GitHub.
 Pull request #2 (branch `hardening-email-reports`) was **merged with a merge commit
 (`06006bf`)**. It brought in the three earlier commits (`be98ba8`, `b5e47f3`, `2187d91`) and
 their handoff (`f892281`), India smart money (`e268975`, `00bf075`, `44f0151`), the DATE-column
@@ -20,7 +25,7 @@ topic safely: the topics share `app.js`, `config.js` and the tests), and a merge
 `cbf1115`** (same code; v2 = `FEATURES_STRATEGIES=1`), pushed and reachable from `main`.
 `npm test` is green on `cbf1115` (448 checks). The branch `hardening-email-reports` was deleted
 after the merge, on GitHub and locally. The working tree is clean except `samples/` and `.github/` (both untracked, not pushed —
-see §8). The dev database is on migration **0028**.
+see §8). The dev database was on migration **0028** at that point.
 - **`README.md` on `main` is garbled** since `ffa4fde` (316 bytes of random characters ending
   in `[cite: 1]`). Not fixed; tell Shreyas.
 - **Everyone has to sign in again** once this code is deployed (server-side sessions), and
@@ -65,7 +70,7 @@ rests on that — the strategy engine behind the app in this round, the Pro end-
 Google/GitHub sign-in end to end on the new sessions, and the alert narrative through the
 router. Indian prices now work through Yahoo; the Upstox token is still unused.
 
-### User time zones and the end-of-day report (2026-10-08, night) — branch `user-time-zones`, pull request open, not merged
+### User time zones and the end-of-day report (2026-10-08, night) — merged (pull request #3, `308b1bc`), tagged `v1.4` / `v2.4`
 Each user now has their own clock (`server/services/userTime.js`, migration `0029`, applied on
 the dev database). Checked in a browser with the throwaway account: the browser's zone is
 stored after sign-in, the Profile selector saves, an offset such as `+05:30` is refused, and
@@ -463,6 +468,8 @@ workflow file is rejected until the token has the `workflow` scope (see §8).
 | `v2.2` | `537612d` | same code as v1.2, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
 | `v1.3` | `cbf1115` | v1.2 + the October work: knowledge base, Ask grounding, alert quality, hardening and server-side sessions, report emails, INR prices, Analytics, feed ranking, India smart money | `npm start` |
 | `v2.3` | `cbf1115` | same code as v1.3, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
+| `v1.4` | `308b1bc` | v1.3 + user time zones (reports, brief and daily limits on the user's clock) and the Pro end-of-day report | `npm start` |
+| `v2.4` | `308b1bc` | same code as v1.4, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
 
 History since the July push (`ac6d217`), newest first:
 ```
@@ -847,6 +854,8 @@ The immediate queue is the "Next, in order" list at the top. Behind it:
 - **2026-10-08, later:** three commits on the local branch `hardening-email-reports`
   (`be98ba8`, `b5e47f3`, `2187d91`), not pushed at that point. `git fetch` worked with the current gh
   account and showed `origin/main` one commit ahead (`ffa4fde`, README only).
+- **2026-10-08, night:** pushed the branch `user-time-zones`, opened pull request #3, merged it
+  with a merge commit (`308b1bc`), tagged that commit `v1.4` + `v2.4` and pushed the tags.
 - **2026-10-08, evening:** fetched, merged `origin/main` (`ffa4fde`) into
   `hardening-email-reports`, ran `npm test`, pushed the branch and the tags `v1.3` + `v2.3`, and
   opened pull request #2 against `main`, then merged it with a merge commit (`06006bf`). The
