@@ -512,12 +512,17 @@ const INDIA_SMART_MONEY = {
   USER_AGENT: process.env.NSE_USER_AGENT || 'Mozilla/5.0 (compatible; SenIQ/1.0; admin@xynthis.com)',
   BULK_DEALS_URL: 'https://nsearchives.nseindia.com/content/equities/bulk.csv',
   BLOCK_DEALS_URL: 'https://nsearchives.nseindia.com/content/equities/block.csv',
+  // Insider trades. Since May 2026 NSE publishes them as filings: one whole-market list,
+  // each filing pointing to an XBRL file on FILINGS_HOST with the trades inside.
+  INSIDER_FILINGS_URL: 'https://www.nseindia.com/api/corporates-pit-gg?index=equities',
+  FILINGS_HOST: 'https://nsearchives.nseindia.com/',
+  INSIDER_MAX_FILINGS: 60,       // filings read per run, newest first — a backlog fills in over later runs
+  // The older per-symbol route. It stops at April 2026 and is kept only to load history
+  // by hand (scripts/india_smart_money.js history SYMBOL ...).
   INSIDER_URL: 'https://www.nseindia.com/api/corporates-pit',
   TIMEOUT_MS: 25000,             // the archive host is slow; a first probe timed out at 15s
   REQUEST_DELAY_MS: 1500,        // gap between two NSE requests
-  INSIDER_MAX_HELD: 25,          // held Indian tickers checked every run
-  INSIDER_ROTATING: 15,          // plus this many other universe names, least recently checked first
-  INSIDER_LOOKBACK_DAYS: 365,    // how far back one symbol's disclosures are kept — large caps can go months without one
+  INSIDER_LOOKBACK_DAYS: 365,    // how far back disclosures are kept — large caps can go months without one
   ALERT_MAX_AGE_DAYS: 7,         // an older deal/disclosure fetched late is stored, never alerted
   INSIDER_ALERT_MIN_INR: 1e7,    // ₹1 crore — smaller insider trades are stored but do not alert
   LIST_WINDOW: 500,              // newest rows a list route looks at before filtering

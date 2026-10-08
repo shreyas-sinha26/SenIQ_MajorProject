@@ -7,8 +7,8 @@
  * investor. Alerts are grouped to ONE per stock per run (a busy counter can print six bulk
  * deals in a day) and share the user's daily real-time limit.
  *
- * Backfill guard: the first deal file of each type, and the first fetch for each symbol's
- * insider trades, are stored silently. After that only records newer than
+ * Backfill guard: the first deal file of each type, the first run of the insider-filing
+ * poll, and a symbol's first appearance in it are stored silently. After that only records newer than
  * ALERT_MAX_AGE_DAYS can alert, so a late fetch never presents old trades as news.
  */
 
@@ -16,7 +16,7 @@ const { query, queryOne, execute } = require('../../db');
 const { FEATURES, INDIA_SMART_MONEY } = require('../../config');
 const { INVESTOR_BY_SLUG } = require('../../data/indiaInvestors');
 const { fetchDeals } = require('./nseDeals');
-const { fetchInsiderTrades, insiderAlertable } = require('./nseInsiders');
+const { fetchInsiderTrades, fetchInsiderFilings, fetchFilingTrades, insiderAlertable } = require('./nseInsiders');
 const { isBlocked } = require('./nse');
 const { notifyUsers } = require('./index');
 
@@ -138,28 +138,19 @@ async function pollIndiaDeals(opts = {}) {
 }
 
 // ─── Insider trades ───────────────────────────────────────────────────────────
-// Symbols for this run: every held Indian ticker (capped), then the universe names we
-// have gone longest without checking.
-async function insiderSymbols() {
-  const held = await query(
-    `SELECT DISTINCT p.ticker
+// Symbols we keep insider trades for: every active Indian stock in the universe plus
+// anything a user holds as an Indian stock.
+async function trackedIndianSymbols() {
+  const rows = await query(
+    `SELECT ticker FROM companies WHERE country = 'IN' AND is_active = true AND asset_class = 'equity'
+      UNION
+     SELECT p.ticker
        FROM portfolio p LEFT JOIN companies c ON c.ticker = p.ticker
       WHERE p.asset_class = 'equity'
         AND (upper(coalesce(p.exchange, '')) IN ('NSE', 'BSE')
-             OR (coalesce(p.exchange, '') = '' AND c.country = 'IN'))
-      ORDER BY p.ticker LIMIT $1`,
-    [INDIA_SMART_MONEY.INSIDER_MAX_HELD]
+             OR (coalesce(p.exchange, '') = '' AND c.country = 'IN'))`
   );
-  const heldTickers = held.map((r) => r.ticker);
-  const rotating = await query(
-    `SELECT c.ticker
-       FROM companies c LEFT JOIN india_insider_sync s ON s.ticker = c.ticker
-      WHERE c.country = 'IN' AND c.is_active = true AND c.asset_class = 'equity'
-        AND NOT (c.ticker = ANY($1))
-      ORDER BY s.last_synced_at ASC NULLS FIRST, c.ticker LIMIT $2`,
-    [heldTickers, INDIA_SMART_MONEY.INSIDER_ROTATING]
-  );
-  return [...heldTickers, ...rotating.map((r) => r.ticker)];
+  return rows.map((r) => r.ticker);
 }
 
 // One line for a stock's new alert-worthy insider trades, largest first. Pure.
@@ -172,11 +163,8 @@ function summarizeInsiders(ticker, trades) {
   return `🏛️ Insider trade${sorted.length > 1 ? 's' : ''} in ${ticker}: ${parts.join('; ')}${more}${disclosed}`;
 }
 
-async function pollInsidersFor(symbol, { fetch = fetchInsiderTrades, now = Date.now() } = {}) {
-  const trades = await fetch(symbol, now);
-  const synced = await queryOne('SELECT 1 AS x FROM india_insider_sync WHERE ticker = $1', [symbol]);
-  const isBaseline = !synced;
-
+// Store trades; returns the ones that were new.
+async function storeInsiderTrades(trades) {
   const fresh = [];
   for (const t of trades) {
     const row = await queryOne(
@@ -191,33 +179,106 @@ async function pollInsidersFor(symbol, { fetch = fetchInsiderTrades, now = Date.
     );
     if (row) fresh.push(t);
   }
-  await execute(
-    `INSERT INTO india_insider_sync (ticker, last_synced_at) VALUES ($1, now())
-     ON CONFLICT (ticker) DO UPDATE SET last_synced_at = now()`,
-    [symbol]
-  );
+  return fresh;
+}
 
-  let alerts = 0;
-  const notable = isBaseline ? [] : fresh.filter((t) => insiderAlertable(t, now));
-  if (notable.length) {
-    const recipients = await indiaRecipients(symbol);
-    if (recipients.length) {
-      const message = summarizeInsiders(symbol, notable);
-      const event = {
-        type: 'smart_money.india_insider_trade',
-        market: 'IN',
-        ticker: symbol,
-        trades: notable.map((t) => ({ person: t.person, category: t.category, side: t.side, mode: t.mode, quantity: t.quantity, value_inr: t.value, trade_from: t.trade_from, trade_to: t.trade_to, disclosed_at: t.disclosed_at })),
-        message,
-      };
-      alerts = await notifyUsers(recipients, { event, alertTicker: symbol, message });
-    }
+const markSynced = (symbol) => execute(
+  `INSERT INTO india_insider_sync (ticker, last_synced_at) VALUES ($1, now())
+   ON CONFLICT (ticker) DO UPDATE SET last_synced_at = now()`,
+  [symbol]
+);
+
+// One alert for a stock's notable new trades. Returns how many users were told.
+async function alertInsiders(symbol, notable) {
+  if (!notable.length) return 0;
+  const recipients = await indiaRecipients(symbol);
+  if (!recipients.length) return 0;
+  const message = summarizeInsiders(symbol, notable);
+  const event = {
+    type: 'smart_money.india_insider_trade',
+    market: 'IN',
+    ticker: symbol,
+    trades: notable.map((t) => ({ person: t.person, category: t.category, side: t.side, mode: t.mode, quantity: t.quantity, value_inr: t.value, trade_from: t.trade_from, trade_to: t.trade_to, disclosed_at: t.disclosed_at })),
+    message,
+  };
+  return notifyUsers(recipients, { event, alertTicker: symbol, message });
+}
+
+/**
+ * The daily insider poll: read NSE's list of filings (one request), keep the unread ones for
+ * symbols we track, and read up to INSIDER_MAX_FILINGS of them, newest first (one request
+ * each). The very first run, and a symbol's first appearance, are stored silently.
+ */
+async function pollIndiaInsiderFilings({ fetchList = fetchInsiderFilings, fetchTrades = fetchFilingTrades, now = Date.now(), noDelay = false } = {}) {
+  const out = { filings: 0, read: 0, pending: 0, inserted: 0, alerts: 0, errors: [] };
+  let listed;
+  try {
+    listed = await fetchList(now);
+  } catch (err) {
+    out.errors.push(`filings list: ${err.message}`);
+    if (isBlocked(err)) out.blocked = true;
+    return out;
   }
+
+  const tracked = await trackedIndianSymbols();
+  const trackedSet = new Set(tracked);
+  const mine = listed.filter((f) => trackedSet.has(f.ticker));
+  const seenRows = mine.length
+    ? await query('SELECT app_id FROM india_insider_filings WHERE app_id = ANY($1)', [mine.map((f) => f.app_id)])
+    : [];
+  const seen = new Set(seenRows.map((r) => r.app_id));
+  const unread = mine.filter((f) => !seen.has(f.app_id)).sort((a, b) => b.broadcast_at.localeCompare(a.broadcast_at));
+  const todo = unread.slice(0, INDIA_SMART_MONEY.INSIDER_MAX_FILINGS);
+  out.filings = mine.length;
+  out.pending = unread.length - todo.length;
+
+  const firstRun = (await queryOne('SELECT count(*)::int AS n FROM india_insider_filings')).n === 0;
+  const synced = new Set((await query('SELECT ticker FROM india_insider_sync')).map((r) => r.ticker));
+  const notableByTicker = new Map();
+
+  for (const filing of todo) {
+    try {
+      const fresh = await storeInsiderTrades(await fetchTrades(filing));
+      await execute(
+        `INSERT INTO india_insider_filings (app_id, ticker, broadcast_at, trades) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (app_id) DO NOTHING`,
+        [filing.app_id, filing.ticker, filing.broadcast_at, fresh.length]
+      );
+      out.read++;
+      out.inserted += fresh.length;
+      if (!firstRun && synced.has(filing.ticker)) {
+        const notable = fresh.filter((t) => insiderAlertable(t, now));
+        if (notable.length) notableByTicker.set(filing.ticker, [...(notableByTicker.get(filing.ticker) || []), ...notable]);
+      }
+    } catch (err) {
+      out.errors.push(`${filing.ticker} ${filing.app_id}: ${err.message}`);
+      if (isBlocked(err)) { out.blocked = true; break; } // refused — do not keep knocking
+    }
+    if (!noDelay) await sleep(INDIA_SMART_MONEY.REQUEST_DELAY_MS);
+  }
+
+  for (const [ticker, notable] of notableByTicker) out.alerts += await alertInsiders(ticker, notable);
+  // Every tracked symbol has now been looked at once; its later filings can alert.
+  if (!out.blocked) for (const t of tracked) if (!synced.has(t)) await markSynced(t);
+  return out;
+}
+
+// ─── The older per-symbol route (history up to April 2026; run by hand) ───────
+async function pollInsidersFor(symbol, { fetch = fetchInsiderTrades, now = Date.now() } = {}) {
+  const trades = await fetch(symbol, now);
+  const synced = await queryOne('SELECT 1 AS x FROM india_insider_sync WHERE ticker = $1', [symbol]);
+  const isBaseline = !synced;
+
+  const fresh = await storeInsiderTrades(trades);
+  await markSynced(symbol);
+
+  const notable = isBaseline ? [] : fresh.filter((t) => insiderAlertable(t, now));
+  const alerts = await alertInsiders(symbol, notable);
   return { inserted: fresh.length, alerts, baseline: isBaseline };
 }
 
 async function pollIndiaInsiders(opts = {}) {
-  const symbols = opts.symbols || await insiderSymbols();
+  const symbols = opts.symbols || [];
   const out = { symbols: symbols.length, checked: 0, inserted: 0, alerts: 0, errors: [] };
   for (const symbol of symbols) {
     try {
@@ -243,9 +304,9 @@ async function pollIndiaSmartMoney(opts = {}) {
   try {
     const deals = await pollIndiaDeals(opts);
     // Refused on the deal files → the insider route would be refused too.
-    const insiders = deals.blocked ? { skipped: 'blocked', errors: [] } : await pollIndiaInsiders(opts);
+    const insiders = deals.blocked ? { skipped: 'blocked', errors: [] } : await pollIndiaInsiderFilings(opts);
     const errors = [...deals.errors, ...insiders.errors];
-    console.log(`   🇮🇳 india smart-money: ${deals.inserted} deal(s), ${insiders.inserted || 0} insider trade(s) across ${insiders.checked || 0} symbol(s), ${deals.alerts + (insiders.alerts || 0)} alert(s)`);
+    console.log(`   🇮🇳 india smart-money: ${deals.inserted} deal(s), ${insiders.inserted || 0} insider trade(s) from ${insiders.read || 0} filing(s)${insiders.pending ? ` (${insiders.pending} older filing(s) left for later runs)` : ''}, ${deals.alerts + (insiders.alerts || 0)} alert(s)`);
     if (errors.length) console.warn(`   ⚠️  india smart-money: ${errors.length} request(s) failed — ${errors.slice(0, 3).join(' | ')}`);
     return { deals, insiders };
   } finally {
@@ -254,6 +315,6 @@ async function pollIndiaSmartMoney(opts = {}) {
 }
 
 module.exports = {
-  pollIndiaSmartMoney, pollIndiaDeals, pollIndiaInsiders, pollDealType, pollInsidersFor,
-  indiaRecipients, insiderSymbols, summarizeDeals, summarizeInsiders, fmtInr, fmtShares,
+  pollIndiaSmartMoney, pollIndiaDeals, pollIndiaInsiderFilings, pollIndiaInsiders, pollDealType, pollInsidersFor,
+  indiaRecipients, trackedIndianSymbols, summarizeDeals, summarizeInsiders, fmtInr, fmtShares,
 };

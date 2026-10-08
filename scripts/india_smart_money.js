@@ -7,9 +7,13 @@
  *       from the file name (bulk.csv / block.csv) unless --type is given. --dry-run parses
  *       and prints without touching the database.
  *
- *   node scripts/india_smart_money.js poll [SYMBOL ...]
- *       Run the daily poll once, now (needs INDIA_SMART_MONEY=1). With symbols, insider
- *       trades are fetched for those only.
+ *   node scripts/india_smart_money.js poll
+ *       Run the daily poll once, now (needs INDIA_SMART_MONEY=1): the deal files, then the
+ *       newest unread insider filings.
+ *
+ *   node scripts/india_smart_money.js history SYMBOL [SYMBOL ...]
+ *       Load insider trades from before May 2026 for the given symbols, from NSE's older
+ *       per-symbol route.
  *
  * Both follow the poller's rules: rows already stored are skipped, the first file of a type
  * is stored without alerts, and a deal older than a week never alerts.
@@ -48,19 +52,20 @@ async function main() {
     return;
   }
 
-  if (cmd === 'poll') {
+  if (cmd === 'poll' || cmd === 'history') {
+    if (cmd === 'history' && !args.length) throw new Error('usage: history SYMBOL [SYMBOL ...]');
     const db = require('../server/db');
     try {
       const India = require('../server/services/smartMoney/india');
-      const r = args.length
-        ? { deals: await India.pollIndiaDeals(), insiders: await India.pollIndiaInsiders({ symbols: args.map((s) => s.toUpperCase()) }) }
+      const r = cmd === 'history'
+        ? await India.pollIndiaInsiders({ symbols: args.map((s) => s.toUpperCase()) })
         : await India.pollIndiaSmartMoney();
       console.log(JSON.stringify(r, null, 2));
     } finally { await db.closePool(); }
     return;
   }
 
-  throw new Error('usage: india_smart_money.js import <file.csv> | poll [SYMBOL ...]');
+  throw new Error('usage: india_smart_money.js import <file.csv> | poll | history SYMBOL ...');
 }
 
 main().catch((err) => { console.error(err.message); process.exit(1); });

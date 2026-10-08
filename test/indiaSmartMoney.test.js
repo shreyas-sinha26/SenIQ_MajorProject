@@ -13,7 +13,7 @@ const assert = require('node:assert');
 const state = {};
 function resetDb() {
   Object.assign(state, {
-    deals: [], insiders: [], sync: new Set(), alerts: [],
+    deals: [], insiders: [], sync: new Set(), alerts: [], filings: new Map(), tracked: [],
     holders: {},      // ticker → [userId] holding it as an Indian stock
     followers: {},    // investor slug → [userId]
   });
@@ -27,6 +27,11 @@ async function run(sql, params = []) {
     state.deals.push({ source_id: params[0], deal_type: params[1], ticker: params[3] });
     return [{ id: state.deals.length }];
   }
+  if (q.startsWith("SELECT ticker FROM companies WHERE country = 'IN'")) return state.tracked.map((ticker) => ({ ticker }));
+  if (q.startsWith('SELECT app_id FROM india_insider_filings')) return params[0].filter((id) => state.filings.has(id)).map((app_id) => ({ app_id }));
+  if (q.startsWith('SELECT count(*)::int AS n FROM india_insider_filings')) return [{ n: state.filings.size }];
+  if (q.startsWith('INSERT INTO india_insider_filings')) { state.filings.set(params[0], { ticker: params[1], trades: params[3] }); return []; }
+  if (q.startsWith('SELECT ticker FROM india_insider_sync')) return [...state.sync].map((ticker) => ({ ticker }));
   if (q.startsWith('SELECT 1 AS x FROM india_insider_sync')) return state.sync.has(params[0]) ? [{ x: 1 }] : [];
   if (q.startsWith('INSERT INTO india_insider_sync')) { state.sync.add(params[0]); return []; }
   if (q.startsWith('INSERT INTO india_insider_trades')) {
@@ -55,7 +60,7 @@ require.cache[require.resolve('../server/db')] = {
 
 const { nseDate, nseNumber, csvFields, isBlocked } = require('../server/services/smartMoney/nse');
 const { parseDeals } = require('../server/services/smartMoney/nseDeals');
-const { normalizeInsider, insidersFrom, insiderAlertable } = require('../server/services/smartMoney/nseInsiders');
+const { normalizeInsider, insidersFrom, insiderAlertable, filingsFrom, parseFilingXml } = require('../server/services/smartMoney/nseInsiders');
 const { matchInvestor, INDIA_INVESTORS } = require('../server/data/indiaInvestors');
 const India = require('../server/services/smartMoney/india');
 const { INDIA_SMART_MONEY } = require('../server/config');
@@ -211,6 +216,75 @@ check('alert rule: promoter / director / key manager, open market, ≥ ₹1 cror
   assert.strictEqual(insiderAlertable(normalizeInsider(promoterBuy({ personCategory: 'Key Managerial Personnel' }), 'TRENT'), NOW), true);
 });
 
+// NSE's filing format from May 2026. The list row and the first file's facts are as NSE
+// served them for Infosys on 2026-09-28 (namespaces and header trimmed); the rest are made up.
+const LIST_ROW = {
+  appId: '3705', broadcastDateTime: '28-Sep-2026 15:34:55', companyName: 'Infosys Limited', regulation: 'Regulation 7 (2)',
+  symbol: 'INFY', typeOfSubmission: 'Original', prevAppId: null,
+  xmlFileName: 'https://nsearchives.nseindia.com/corporate/xbrl/IT_180_WebXMLFile_20260928_153455146.xml',
+};
+const fact = (ctx, name, value, attrs = '') => `<in-bse-co:${name} contextRef="${ctx}"${attrs}>${value}</in-bse-co:${name}>`;
+const disclosure = (ctx, o) => [
+  fact(ctx, 'TypeOfInstrument', o.instrument || 'Equity'), fact(ctx, 'CategoryOfPerson', o.category), fact(ctx, 'NameOfThePerson', o.person),
+  fact(ctx, 'SecuritiesHeldPriorToAcquisitionOrDisposalNumberOfSecurity', o.before, ' unitRef="shares" decimals="INF"'),
+  fact(ctx, 'SecuritiesHeldPriorToAcquisitionOrDisposalPercentageOfShareholding', o.pctBefore, ' unitRef="pure" decimals="INF"'),
+  fact(ctx, 'SecuritiesAcquiredOrDisposedNumberOfSecurity', o.qty, ' unitRef="shares" decimals="INF"'),
+  fact(ctx, 'SecuritiesAcquiredOrDisposedValueOfSecurity', o.value, ' unitRef="INR" decimals="0"'),
+  fact(ctx, 'SecuritiesAcquiredOrDisposedTransactionType', o.type),
+  fact(ctx, 'SecuritiesHeldPostAcquistionOrDisposalNumberOfSecurity', o.after, ' unitRef="shares" decimals="INF"'),
+  fact(ctx, 'SecuritiesHeldPostAcquistionOrDisposalPercentageOfShareholding', o.pctAfter, ' unitRef="pure" decimals="INF"'),
+  fact(ctx, 'DateOfAllotmentAdviceOrAcquisitionOfSharesOrSaleOfSharesSpecifyFromDate', o.from),
+  fact(ctx, 'DateOfAllotmentAdviceOrAcquisitionOfSharesOrSaleOfSharesSpecifyToDate', o.to || o.from),
+  fact(ctx, 'ModeOfAcquisitionOrDisposal', o.mode), fact(ctx, 'DateOfIntimationToCompany', o.intimated || o.from),
+].join('');
+const xbrl = (...parts) => `<?xml version="1.0" encoding="UTF-8"?><!--PIT V2.0 (30-04-2026)--><xbrli:xbrl>${fact('MainI', 'Symbol', 'INFY')}${fact('MainI', 'NameOfTheCompany', 'Infosys Limited')}${parts.join('')}</xbrli:xbrl>`;
+const INFY_XML = xbrl(disclosure('Disclosure1', {
+  category: 'Trust', person: 'Infosys Employee Benefits Trust', before: '7916695', pctBefore: '0.0019', qty: '1100', value: '1132340',
+  type: 'Sell', after: '7915595', pctAfter: '0.0019', from: '2026-09-23', mode: 'Off Market', intimated: '2026-09-24',
+}));
+const filingOf = (over = {}) => filingsFrom({ data: [{ ...LIST_ROW, ...over }] }, NOW)[0];
+
+section('insider filings (format from May 2026):');
+check('the list keeps originals inside the lookback that point at NSE\'s archive', () => {
+  assert.deepStrictEqual(filingOf(), { app_id: '3705', ticker: 'INFY', company: 'Infosys Limited', broadcast_at: '2026-09-28', xml: LIST_ROW.xmlFileName });
+  assert.strictEqual(filingOf({ typeOfSubmission: 'Revision' }), undefined);
+  assert.strictEqual(filingOf({ xmlFileName: 'https://example.com/x.xml' }), undefined);
+  assert.strictEqual(filingOf({ xmlFileName: 'https://nsearchives.nseindia.com.evil.test/x.xml' }), undefined);
+  assert.strictEqual(filingOf({ broadcastDateTime: '28-Sep-2024 15:34:55' }), undefined);
+  assert.strictEqual(filingOf({ appId: null }), undefined);
+  assert.deepStrictEqual(filingsFrom(null, NOW), []);
+  assert.deepStrictEqual(filingsFrom({ data: 'x' }, NOW), []);
+});
+check('a filing\'s XBRL becomes a trade; the holding is turned from a fraction into percent', () => {
+  const [t, ...more] = parseFilingXml(INFY_XML, filingOf());
+  assert.strictEqual(more.length, 0);
+  assert.deepStrictEqual({ ...t, source_id: undefined }, {
+    source_id: undefined, ticker: 'INFY', company: 'Infosys Limited', person: 'Infosys Employee Benefits Trust', category: 'Trust',
+    security_type: 'Equity Shares', mode: 'Off Market', side: 'sell', quantity: 1100, value: 1132340,
+    shares_before: 7916695, shares_after: 7915595, pct_before: 0.19, pct_after: 0.19,
+    trade_from: '2026-09-23', trade_to: '2026-09-23', intimated_at: '2026-09-24', disclosed_at: '2026-09-28',
+  });
+});
+check('several people in one filing, pledges, other instruments, and escaped names', () => {
+  const trades = parseFilingXml(xbrl(
+    disclosure('Disclosure1', { category: 'Promoter', person: 'K VISHWESHWAR REDDY', before: '1577350', pctBefore: '0.011', qty: '200000', value: '1777800000', type: 'Pledge', after: '1577350', pctAfter: '0.011', from: '2026-08-24', mode: 'Pledge Creation' }),
+    disclosure('Disclosure2', { category: 'Promoter Group', person: 'M &amp; M Holdings', instrument: 'Debentures', before: '0', pctBefore: '0', qty: '5000', value: '500000000', type: 'Buy', after: '5000', pctAfter: '0', from: '2026-08-25', mode: 'Market Purchase' }),
+    disclosure('Disclosure3', { category: 'Director', person: '-', before: '1', pctBefore: '0', qty: '1', value: '1', type: 'Buy', after: '2', pctAfter: '0', from: '2026-08-25', mode: 'Market Purchase' })
+  ), filingOf());
+  assert.deepStrictEqual(trades.map((t) => [t.person, t.side, t.security_type, t.pct_before]), [
+    ['K VISHWESHWAR REDDY', 'pledge', 'Equity Shares', 1.1],
+    ['M & M Holdings', 'buy', 'Debentures', 0],
+  ]);
+  assert.strictEqual(new Set(trades.map((t) => t.source_id)).size, 2);
+  assert.deepStrictEqual(parseFilingXml('<html>blocked</html>', filingOf()), []);
+  assert.deepStrictEqual(parseFilingXml(null, filingOf()), []);
+});
+check('a parsed filing trade goes through the same alert rule', () => {
+  const [t] = parseFilingXml(xbrl(disclosure('Disclosure1', { category: 'Promoter Group', person: 'Bajaj General Insurance Limited', before: '921000', pctBefore: '0.0001', qty: '259000', value: '297824834', type: 'Sell', after: '662000', pctAfter: '0.0001', from: '2026-10-06', mode: 'Market Sale' })), filingOf({ broadcastDateTime: '07-Oct-2026 16:13:06' }));
+  assert.strictEqual(insiderAlertable(t, NOW), true);
+  assert.strictEqual(insiderAlertable(parseFilingXml(INFY_XML, filingOf())[0], NOW), false); // a trust, off market, small, old
+});
+
 section('money and share counts:');
 check('rupees in crore and lakh', () => {
   assert.strictEqual(India.fmtInr(9803500000), '₹980 Cr');
@@ -316,6 +390,77 @@ check('a refusal stops the symbol loop; an ordinary failure does not', async () 
   assert.strictEqual(r.checked, 1);
   assert.strictEqual(r.blocked, true);
   assert.deepStrictEqual(r.errors, ['B: timeout', 'C: NSE replied 401']);
+});
+
+section('insider filings poller:');
+const promoterSale = (ctx, person, value) => disclosure(ctx, { category: 'Promoter Group', person, before: '900000', pctBefore: '0.01', qty: '1000', value, type: 'Sell', after: '899000', pctAfter: '0.01', from: '2026-10-06', mode: 'Market Sale' });
+const listed = (rows) => async (now) => filingsFrom({ data: rows }, now);
+const row = (appId, symbol, when = '07-Oct-2026 16:00:00') => ({ ...LIST_ROW, appId, symbol, broadcastDateTime: when, xmlFileName: `https://nsearchives.nseindia.com/corporate/xbrl/${appId}.xml` });
+const filesOf = (map, calls = []) => async (filing) => { calls.push(filing.app_id); if (map[filing.app_id] instanceof Error) throw map[filing.app_id]; return parseFilingXml(map[filing.app_id], filing); };
+check('the first run reads tracked symbols\' filings silently and marks every tracked symbol as seen', async () => {
+  resetDb();
+  state.tracked = ['INFY', 'TRENT', 'BEL'];
+  state.holders.TRENT = [1];
+  const calls = [];
+  const r = await India.pollIndiaInsiderFilings({
+    fetchList: listed([row('10', 'TRENT'), row('11', 'INFY', '28-Sep-2026 15:34:55'), row('12', 'SOMESMALLCAP')]),
+    fetchTrades: filesOf({ 10: xbrl(promoterSale('Disclosure1', 'TATA SONS', '500000000')), 11: INFY_XML }, calls), now: NOW, noDelay: true,
+  });
+  assert.deepStrictEqual(calls, ['10', '11']); // newest first; the untracked small cap is never fetched
+  assert.deepStrictEqual(r, { filings: 2, read: 2, pending: 0, inserted: 2, alerts: 0, errors: [] });
+  assert.deepStrictEqual([...state.sync].sort(), ['BEL', 'INFY', 'TRENT']);
+  assert.strictEqual(state.alerts.length, 0);
+});
+check('later runs read only unread filings and send one alert per stock', async () => {
+  const calls = [];
+  const r = await India.pollIndiaInsiderFilings({
+    fetchList: listed([row('10', 'TRENT'), row('11', 'INFY', '28-Sep-2026 15:34:55'), row('20', 'TRENT', '08-Oct-2026 10:00:00'), row('21', 'TRENT', '08-Oct-2026 11:00:00'), row('22', 'BEL', '08-Oct-2026 12:00:00')]),
+    fetchTrades: filesOf({
+      20: xbrl(promoterSale('Disclosure1', 'TATA SONS', '500000000')),
+      21: xbrl(promoterSale('Disclosure1', 'TATA INVESTMENT', '20000000'), promoterSale('Disclosure2', 'SMALL HOLDER', '5000')),
+      22: xbrl(promoterSale('Disclosure1', 'GOVT OF INDIA', '900000000')),
+    }, calls), now: NOW, noDelay: true,
+  });
+  assert.deepStrictEqual(calls.sort(), ['20', '21', '22']);
+  assert.strictEqual(r.inserted, 4);
+  assert.strictEqual(r.alerts, 1); // TRENT's holder; nobody holds BEL
+  assert.strictEqual(state.alerts.length, 1);
+  assert.strictEqual(state.alerts[0].message, '🏛️ Insider trades in TRENT: TATA SONS (Promoter Group) sold 1,000 shares (₹50.0 Cr); TATA INVESTMENT (Promoter Group) sold 1,000 shares (₹2.0 Cr), disclosed 2026-10-08');
+});
+check('a symbol that appears for the first time is stored silently, then alerts from the next run', async () => {
+  state.tracked.push('NEWCO');
+  state.holders.NEWCO = [5];
+  const before = state.alerts.length;
+  const run = (appId) => India.pollIndiaInsiderFilings({ fetchList: listed([row(appId, 'NEWCO', '08-Oct-2026 13:00:00')]), fetchTrades: filesOf({ [appId]: xbrl(promoterSale('Disclosure1', `FOUNDER ${appId}`, '300000000')) }), now: NOW, noDelay: true });
+  assert.strictEqual((await run('30')).alerts, 0);
+  assert.strictEqual((await run('31')).alerts, 1);
+  assert.strictEqual(state.alerts.length, before + 1);
+});
+check('at most INSIDER_MAX_FILINGS are read in a run; the rest wait', async () => {
+  resetDb();
+  state.tracked = ['INFY'];
+  const many = Array.from({ length: INDIA_SMART_MONEY.INSIDER_MAX_FILINGS + 5 }, (_, i) => row(String(1000 + i), 'INFY'));
+  const r = await India.pollIndiaInsiderFilings({ fetchList: listed(many), fetchTrades: async () => [], now: NOW, noDelay: true });
+  assert.strictEqual(r.read, INDIA_SMART_MONEY.INSIDER_MAX_FILINGS);
+  assert.strictEqual(r.pending, 5);
+  const r2 = await India.pollIndiaInsiderFilings({ fetchList: listed(many), fetchTrades: async () => [], now: NOW, noDelay: true });
+  assert.strictEqual(r2.read, 5); // a filing with no trades is still not fetched twice
+});
+check('a refused list, a refused file and an ordinary failure', async () => {
+  resetDb();
+  state.tracked = ['INFY'];
+  const refused = Object.assign(new Error('NSE replied 403'), { status: 403 });
+  const r = await India.pollIndiaInsiderFilings({ fetchList: async () => { throw refused; }, now: NOW, noDelay: true });
+  assert.deepStrictEqual([r.blocked, r.errors], [true, ['filings list: NSE replied 403']]);
+  assert.strictEqual(state.sync.size, 0);
+  const calls = [];
+  const r2 = await India.pollIndiaInsiderFilings({
+    fetchList: listed([row('1', 'INFY', '08-Oct-2026 10:00:00'), row('2', 'INFY', '07-Oct-2026 10:00:00'), row('3', 'INFY', '06-Oct-2026 10:00:00')]),
+    fetchTrades: filesOf({ 1: new Error('timeout'), 2: refused, 3: INFY_XML }, calls), now: NOW, noDelay: true,
+  });
+  assert.deepStrictEqual(calls, ['1', '2']);
+  assert.deepStrictEqual(r2.errors, ['INFY 1: timeout', 'INFY 2: NSE replied 403']);
+  assert.strictEqual(state.filings.size, 0); // neither is marked read, so both are retried next run
 });
 
 (async () => {
