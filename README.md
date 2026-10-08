@@ -1,8 +1,9 @@
 # SenIQ
 
-**Sentiment-driven market intelligence.** Build a multi-asset portfolio, and SenIQ pulls
-news + social + macro signals, scores sentiment, tracks where smart money (institutions +
-politicians) is moving, and surfaces **what actually matters to _your_ holdings**.
+**Sentiment-driven market intelligence.** Build a portfolio of US stocks, Indian stocks,
+crypto and commodities, and SenIQ reads the news, scores sentiment, tracks where smart money
+(institutions, politicians, insiders) is moving, and surfaces **what actually matters to
+_your_ holdings**.
 
 > **North Star — Portfolio Impact Scoring.** The differentiator isn't raw sentiment
 > ("Tesla is negative"); it's exposure-weighted impact: _"this event affects 18% of your
@@ -12,123 +13,202 @@ politicians) is moving, and surfaces **what actually matters to _your_ holdings*
 
 ---
 
-## Features (Phases 0–3.5 + 5 + 6 + Engine E1–E6, shipped)
+## Two versions, one codebase
 
-- **Multi-asset portfolio** — equities / crypto / commodities with quantity + cost basis →
-  exposure weights. **Live price + day-change shown next to each holding:** crypto via
-  CoinGecko (no key), US equities + commodities via FMP (`FMP_API_KEY`) — or Finnhub
-  (`FINNHUB_API_KEY`) for unthrottled real-time equity quotes; commodities (incl. oil) and
-  Indian stocks fall back to yfinance via the strategy service.
-- **Sentiment engine v2** — decay-weighted acute score + momentum + 90-day z-score baseline,
-  computed on read. Multi-source ingest (GDELT + Indian RSS + Reddit). Optional **FinBERT**
-  classifier via the Hugging Face Inference API; keyword lexicon by default.
-- **Portfolio Impact Scoring** — per-event, exposure-weighted impact ranking + a per-user feed.
-- **Smart money** — 13F filings via free **SEC EDGAR** (10 seeded funds) + **live Congress
-  trades** (Financial Modeling Prep, both chambers — see `CONGRESS_TRADES_URL`), follows,
-  signed outbound webhooks, and a **search bar** on both Institutions and Congress.
-- **News relevance & de-spam** — a 3-bucket feed (Holdings / Markets / World), event
-  clustering (one card per story), and materiality-gated alerts.
-- **Tiers & billing (Phase 6)** — Free / Plus / Pro with real gating (holdings cap, smart-money
-  teaser, impact-feed depth, AI Workspace), a Plans/upgrade page (Stripe/Razorpay stubbed until
-  deploy), and an **admin tier switcher** to preview every tier live (`is_admin` + `ADMIN_*`).
-- **OAuth & account recovery (Phase 5)** — **Sign in with Google / GitHub** (buttons appear once the
-  provider keys are set; identities link to password accounts by verified email), **password reset**
-  via emailed one-time links (Resend; dev builds show the link without a key), optional email
-  verification, and per-IP rate limits on the credential endpoints.
+A feature switch (`FEATURES_STRATEGIES=1`) turns on the v2 pages. With it off, the v2 routes
+return 404 and the v2 pages are hidden.
 
-**Intelligence engine (E1–E6):**
-- **E1 — entity resolution + durable events** — a curated company universe (~US 100 / Nifty 50 /
-  top crypto) resolves names, executives, and sector themes; stories become *remembered* events
-  that articles attach to across runs.
-- **E2 — event typing + 6-factor impact** — `exposure × relevance × severity × novelty ×
-  confidence × recency`.
-- **E3 — alert budgets + outcome logging** — top few realtime/day, rest digest; per-ticker
-  cooldown; auto-logged 1–3 day price outcomes for future supervised tuning.
-- **E4 — smart onboarding** — adding a holding gives an instant company brief + silent backfill
-  + a "monitoring since" watermark (no alert blast for old news).
-- **E5 — daily brief** — Claude (Haiku) writes a brief grounded entirely in your holdings, led by
-  what changed since yesterday. Server-scheduled, behind a flag, with hard cost guardrails.
-- **E6 — Ask anything** — natural-language portfolio Q&A grounded strictly on engine data.
+| | Pages |
+|---|---|
+| **v1** | Dashboard, Portfolio, Intelligence (news, Institutions, Congress), Analytics, AI Workspace (daily brief + Ask) |
+| **v2** | v1 + Strategy Builder, Your Strategies, Backtest, Paper Trade, MCP server, public REST API (`/v1`), API keys |
 
-**In progress — Strategies (Phase 7) + MCP (Phase 8):** a visual **strategy builder** (pick
-EMA/RSI/MACD…), **backtesting**, and **paper trading** for US stocks + crypto (+ India), reusing
-the zeuniq Python engine as a separate service, plus an **MCP server** exposing SenIQ signals to
-agents. Strategies sit in the sidebar (Builder / Your Strategies / Backtest / Paper Trade) as
-scaffolds today. Design + decisions in [`STRATEGY_PLAN.md`](STRATEGY_PLAN.md).
+Releases are tagged in pairs on the same commit: `v1.N` is that commit run with strategies
+off, `v2.N` with them on. The latest is `v1.8` / `v2.8`.
 
-See [`PLAN.md`](PLAN.md) (product roadmap), [`ENGINE_PLAN.md`](ENGINE_PLAN.md) (engine track),
-[`STRATEGY_PLAN.md`](STRATEGY_PLAN.md) (strategies/MCP), [`IPO_PLAN.md`](IPO_PLAN.md) (IPO +
-small/mid-cap sentiment optimization), and [`handoff.md`](handoff.md) for build notes.
+---
+
+## Features
+
+### Portfolio and prices
+- **Multi-asset portfolio** — quantity and cost basis per holding, converted to USD before
+  exposure weights are computed.
+- **Live prices** — crypto from CoinGecko (no key), US stocks from Finnhub (Yahoo as
+  fallback), Indian stocks from Yahoo in INR, commodities from Yahoo futures (FMP as fallback).
+- **Smart onboarding** — adding a holding returns a company brief and backfills its impact
+  silently; a holding only alerts on events after it was added.
+
+### News and sentiment
+- **Sources** — Finnhub company news, GDELT, and four Indian RSS feeds (Economic Times, Mint,
+  Moneycontrol, Business Standard). Reddit ingest is built but needs credentials.
+- **Entity resolution** — a curated universe of 186 instruments (100 US, 57 India, 25 crypto,
+  4 commodities) and 192 executives decides which companies a story names.
+- **Relevance and de-spam** — every story is graded Holdings / Markets / World / noise, and
+  the same story from several outlets becomes one card.
+- **Sentiment reading** — **FinBERT**, a finance-trained model, runs locally and reads each
+  new story (`FINBERT_CLASSIFY=1`); a keyword list is the default and the fallback.
+- **Per-company sentiment** — a story naming several companies is read once per company, from
+  the sentences that name it, so "the market fell, while Nike advanced" is not negative for
+  Nike. An optional language model (a local Ollama model, or Claude Haiku) reads a clause
+  that names two or more companies. Market wraps and "stocks to watch" lists are treated as
+  market stories, not as news about each company they list.
+- **Sentiment per ticker** — computed on read: an acute score over 24–72 hours with a 7-day
+  half-life, momentum (this week against last), and a z-score against the ticker's own
+  90-day normal. Sources are weighted by credibility.
+
+### Impact, alerts and outcomes
+- **Portfolio impact** — for each holding,
+  `exposure × relevance × severity × novelty × confidence × recency`, ranked per user.
+- **Durable events** — one event per story cluster, typed (M&A, legal, earnings, guidance,
+  rating, macro…).
+- **Alert budgets** — one alert per story per user; at most 5 real-time alerts a day (2 of
+  them market-wide), the rest filed as a digest.
+- **Outcome logging** — each event's features and the price 1 and 3 days later are stored
+  for later tuning.
+
+### Smart money
+- **US** — 13F filings of 10 seeded funds straight from SEC EDGAR, and congressional trades
+  from Financial Modeling Prep.
+- **India** (opt-in, `INDIA_SMART_MONEY=1`) — NSE bulk and block deals, SEBI insider-trading
+  disclosures, and 16 curated investors to follow.
+- **Follows and webhooks** — follow funds, politicians or investors; Pro can register signed
+  outbound webhooks.
+
+### AI Workspace
+- **Daily brief** — led by what changed since yesterday and the most important event,
+  grounded only in the user's own holdings.
+- **Ask** — a tool-calling agent with saved conversations. It answers about the user's
+  holdings, market news and general finance education, and each answer is checked against
+  its evidence.
+- Both use Claude Haiku and fall back to code-written text when the model is off or fails.
+  Nothing calls a paid model unless `CLAUDE_REPORTS=1`; there are per-user daily quotas, a
+  global daily spend ceiling, and a log of every call with its cost.
+
+### Reports and email
+- **Report emails** as PDF attachments, on each user's own clock: a weekly summary (Free),
+  the daily brief on weekday mornings (Plus, Pro), and an end-of-day report (Pro).
+- **Alert emails** — standard for Plus, with a short written explanation for Pro.
+- Every email has an unsubscribe link and is logged.
+
+### Accounts, tiers and security
+- **Sign-in** — email and password, or Google / GitHub (the buttons appear once the provider
+  keys are set). Email verification and password reset by emailed one-time link.
+- **Server-side sessions** — a random id in an HttpOnly cookie, with idle and absolute limits.
+- **Tiers** — Free / Plus / Pro, gating holdings count, impact-feed depth, Ask questions per
+  day, real-time alerts, smart money and API access. An admin account can switch tiers to
+  preview each one. **Checkout is a development stub**: no payment provider is wired.
+- **Request safety** — per-user rate limits, a same-origin guard on `/api`, a
+  Content-Security-Policy, and guarded fetching of user-supplied URLs.
+
+### v2: strategies, MCP and the public API
+- **Strategy Builder** — mixes technical factors (EMA, RSI, MACD) with SenIQ factors
+  (sentiment, smart money) in one strategy.
+- **Backtest and paper trading** — with a buy-and-hold benchmark and a walk-forward check.
+- **MCP server (`/mcp`) and REST API (`/v1`)** — the same data tools and strategy actions,
+  for Pro API keys, with one shared rate budget per key.
+- These pages need a separate strategy engine that is **not in this repository**. Without it
+  every strategy route answers "engine offline".
 
 ---
 
 ## Tech stack
 
-- **Backend:** Node.js (≥18) + Express, `node-cron` pipeline
+- **Backend:** Node.js (≥ 18) + Express, `node-cron` for the pipeline and scheduled jobs
 - **Database:** PostgreSQL (migrations run automatically on boot)
-- **Frontend:** vanilla HTML / CSS / JS SPA (served from `public/`)
-- **ML:** FinBERT via the Hugging Face Inference API (`@huggingface/inference`, optional)
-- **LLM:** Claude (Anthropic) for the daily brief + portfolio Q&A (optional, flag-gated)
+- **Frontend:** vanilla HTML / CSS / JS single-page app, served from `public/`
+- **Sentiment model:** FinBERT, run in-process with `@huggingface/transformers` (optional)
+- **Language models:** Claude Haiku for the brief, Ask and alert explanations (optional,
+  flag-gated), directly or through an OpenAI-compatible router; a local Ollama model for
+  per-company sentiment (optional)
 
 ---
 
-## Getting started (Windows)
+## Getting started
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) ≥ 18
-- [PostgreSQL](https://www.postgresql.org/download/windows/) (16/17/18). Note the **port** —
-  a default PostgreSQL 18 install on Windows often uses **5433**, older versions 5432.
+- [PostgreSQL](https://www.postgresql.org/download/) 15 or later. Note the **port**: a
+  default PostgreSQL 18 install on Windows often uses **5433**, older versions 5432.
 
 ### 1. Install dependencies
-```powershell
+```bash
 npm install
 ```
 
 ### 2. Create the database
-Using `psql` (adjust the path/port to your install):
+macOS / Linux:
+```bash
+createdb seniq
+```
+Windows (adjust the path and port to your install):
 ```powershell
 & "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -p 5433 -c "CREATE DATABASE seniq;"
 ```
 
-### 3. Configure environment
-Copy the template and fill in your values:
-```powershell
-Copy-Item .env.example .env
+### 3. Configure the environment
+Copy the template and fill in your values (`Copy-Item .env.example .env` on Windows):
+```bash
+cp .env.example .env
 ```
-At minimum set `DATABASE_URL` (with your Postgres password and port) and `JWT_SECRET`.
-Optional API keys (all degrade gracefully — see inline comments in `.env.example`):
+At minimum set `DATABASE_URL` and `JWT_SECRET`. Everything else is optional and degrades
+gracefully; `.env.example` documents every variable. The main ones:
 
 | Variable | Purpose | Without it |
 |---|---|---|
-| `FMP_API_KEY` | Live US-equity + commodity (gold) prices, congress data ([free](https://financialmodelingprep.com)) | Those prices show N/A; crypto still prices free |
-| `FINNHUB_API_KEY` | Unthrottled real-time US-equity prices ([free](https://finnhub.io), preferred over FMP) | Falls back to FMP (cached, rate-limited) |
-| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | Reddit social ingest | Skipped; GDELT + RSS still feed news |
-| `FINBERT_CLASSIFY=1` | Use the FinBERT classifier (HF Inference API) | Keyword lexicon (default) |
-| `HF_API_TOKEN` | Hugging Face token for FinBERT | FinBERT disabled; lexicon used |
-| `SEC_USER_AGENT` | SEC EDGAR contact (real email) | Default UA used |
-| `CONGRESS_TRADES_URL` | Live congress-trade data | Bundled sample (`data/congress_sample.json`) |
-| `ANTHROPIC_API_KEY` | Claude — daily brief (E5) + Q&A (E6) | Free deterministic writer |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Seed an admin account (tier switcher, set any user's tier) | No admin account seeded |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | "Sign in with Google" (callback `<APP_URL>/api/auth/oauth/google/callback`) | Button hidden; email/password only |
+| `FINNHUB_API_KEY` | US prices and company news ([free](https://finnhub.io)) | US prices fall back to Yahoo; no Finnhub news |
+| `FMP_API_KEY` | Commodity price fallback, executives refresh ([free](https://financialmodelingprep.com)) | Yahoo only |
+| `FINBERT_CLASSIFY=1` | FinBERT reads each new story, locally (first run downloads about 110 MB) | Keyword list |
+| `COMPANY_SENTIMENT_LLM` | `ollama` or `1`: a language model reads multi-company clauses | FinBERT's per-company reading |
+| `CLAUDE_REPORTS=1` + `ANTHROPIC_API_KEY` or `AIROUTER_API_KEY` | Claude writes the brief, Ask answers and alert explanations | Code-written text |
+| `INDIA_SMART_MONEY=1` + `NSE_USER_AGENT` | India deals and insider trades | US smart money only |
+| `CONGRESS_TRADES_URL` | Live congressional trades | Bundled sample data |
+| `SEC_USER_AGENT` | Contact address for SEC EDGAR requests | Default user agent |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | "Sign in with Google" (callback `<APP_URL>/api/auth/oauth/google/callback`) | Button hidden |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | "Sign in with GitHub" | Button hidden |
-| `RESEND_API_KEY` / `EMAIL_FROM` | Emails password-reset + verification links ([free](https://resend.com)) | Dev builds show the reset link inline; verification skipped |
+| `RESEND_API_KEY` or `SMTP_*`, `EMAIL_FROM` | Sending email (alerts, reports, password reset) | Dev builds show reset links inline; no email sent |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Seed an admin account (tier switcher) | No admin account |
+| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | Reddit ingest | Skipped |
+| `FEATURES_STRATEGIES=1` + `STRATEGY_SERVICE_*` | The v2 pages | v1 only |
 
 ### 4. Run
-```powershell
+```bash
 npm start        # production
 npm run dev      # auto-reload (node --watch)
 ```
-Migrations apply on boot. Open **http://localhost:3000**, sign up, and add holdings.
+Migrations apply on boot. Open **http://localhost:3000** for the landing page or
+**http://localhost:3000/app** for the app (set `PORT` to change it), sign up, and add
+holdings. Every boot runs the news pipeline once, then every 10 minutes.
+
+### 5. Test
+```bash
+npm test
+```
+The tests run offline: no database, no API calls, no model downloads.
 
 ---
 
-## Notes
+## Notes and known limits
 
-- **macOS → Windows:** native modules don't transfer across platforms. If you copied
-  `node_modules` from another OS and hit a `sharp` load error, run a clean `npm install` on
-  Windows (it pulls the correct platform binaries automatically).
-- **Indian equities** have no free price source — they show N/A and rely on normalized
-  equal-share exposure for scoring (a deliberate decision).
+- **Sentiment history is short.** It is only as long as the app has been recording, so the
+  "90-day normal" rests on less than that until the store fills.
+- **No accuracy figure is claimed for sentiment.** Readings have been checked against one
+  small hand-labelled set only; treat them as a signal, not a measurement.
+- **Nothing is hosted.** `DEPLOY.md` and `render.yaml` describe a deployment that has not
+  been carried out.
+- **Payments are not wired.** Upgrading a tier works only through the development stub.
+- **macOS ↔ Windows:** native modules don't transfer across platforms. If you copied
+  `node_modules` from another OS and hit a `sharp` load error, run a clean `npm install`.
+
+## More documentation
+
+- [`handoff.md`](handoff.md) — the current state of the project, in detail: how each part
+  works, what has and has not been proven, and open work
+- [`PLAN.md`](PLAN.md) — the original product plan
+- [`ENGINE_PLAN.md`](ENGINE_PLAN.md) — the intelligence engine
+- [`STRATEGY_PLAN.md`](STRATEGY_PLAN.md) — strategies, MCP and the API
+- [`RAG_PLAN.md`](RAG_PLAN.md) — Ask, retrieval and signals
+- [`IPO_PLAN.md`](IPO_PLAN.md) — sentiment for IPOs and small/mid-caps (plan only)
+- [`DEPLOY.md`](DEPLOY.md) — deployment steps (not yet executed)
 
 ## License
 
