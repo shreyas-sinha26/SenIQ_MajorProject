@@ -16,7 +16,8 @@ const { gatherArticles } = require('./services/ingest');
 const { loadIndex } = require('./services/entityResolver');
 const { analyzeSentiment } = require('./services/sentiment');
 const { classifyBatch, isEnabled: finbertEnabled } = require('./services/finbertClassifier');
-const { classifyArticle, assignClusters } = require('./services/newsRelevance');
+const { classifyArticle, isRoundup, assignClusters } = require('./services/newsRelevance');
+const { readCompanies, settle } = require('./services/targetedSentiment');
 const { upsertEvents } = require('./services/events');
 const { generateAlerts } = require('./services/materiality');
 const { recomputeImpacts } = require('./services/impactScoring');
@@ -47,11 +48,18 @@ async function classifyArticles(articles, held = [], known = new Set()) {
     if (read) fresh.forEach((i, k) => { finbert[i] = read[k]; });
   }
   const resolver = await loadIndex(); // curated-universe entity resolver (cached)
+  const companiesIn = (text) => resolver.resolve(text, '', held).tickers;
+
+  const resolved = articles.map((a) => resolver.resolve(a.title, a.summary || '', held));
+  const inHeadline = articles.map((a) => companiesIn(a.title));
+  // One reading is one tone for the whole text. A story naming several companies is read
+  // again per company (targetedSentiment); a roundup is about none of them and is left out.
+  const perCompany = await readCompanies(articles.map((a, i) => ({
+    title: a.title, summary: a.summary || '', whole: finbert[i],
+    tickers: isRoundup(a.title, inHeadline[i]) ? [] : resolved[i].tickers,
+  })), { companiesIn, classify: classifyBatch, nameOf: resolver.nameByTicker });
 
   const enriched = articles.map((a, i) => {
-    const resolved = resolver.resolve(a.title, a.summary || '', held);
-    const matched = resolved.tickers;
-
     let sentiment;
     if (finbert && finbert[i]) {
       sentiment = finbert[i];
@@ -60,14 +68,17 @@ async function classifyArticles(articles, held = [], known = new Set()) {
       sentiment = { label: s.label, score: s.score, confidence: s.confidence, model: 'lexicon' };
     }
 
+    // The companies the story is stored against, each with its own reading where it has one.
+    const { tickers: matched, readings } = settle(a.title, resolved[i].tickers, inHeadline[i], perCompany[i]);
+
     // Phase 3.5: grade relevance (holding / market / world / none).
-    const rel = classifyArticle(a, matched);
+    const rel = classifyArticle(a, matched, { aboutMarket: resolved[i].tickers.length > 0 && matched.length === 0 });
     // Macro tag drives broad portfolio impact: a market/world event (or a macro-sourced
     // article) applies across portfolios, not just to a named ticker.
     if ((rel.tier === 'market' || rel.tier === 'world' || a.platform === 'macro') && !matched.includes('__MARKET__')) {
       matched.push('__MARKET__');
     }
-    return { ...a, matchedTickers: matched, sentiment, relevance: rel, sectors: resolved.sectors };
+    return { ...a, matchedTickers: matched, sentiment, readings, relevance: rel, sectors: resolved[i].sectors };
   });
 
   // Cluster duplicates across the whole batch (stemmed-headline similarity) so the
@@ -122,6 +133,7 @@ async function runNewsPipeline() {
       if (a.sentiment.model === 'finbert') newByFinbert++;
       if (a.relevance.isRelevant) relevantCount++;
       for (const ticker of a.matchedTickers) {
+        const r = a.readings[ticker] || a.sentiment; // the company's own reading, else the story's
         await execute(
           `INSERT INTO article_sentiments (article_id, ticker, sentiment_label, sentiment_score, confidence, model)
            VALUES ($1, $2, $3, $4, $5, $6)
@@ -130,7 +142,7 @@ async function runNewsPipeline() {
                          sentiment_score = EXCLUDED.sentiment_score,
                          confidence      = EXCLUDED.confidence,
                          model           = EXCLUDED.model`,
-          [inserted.id, ticker, a.sentiment.label, a.sentiment.score, a.sentiment.confidence || 0, a.sentiment.model || 'lexicon']
+          [inserted.id, ticker, r.label, r.score, r.confidence || 0, r.model || 'lexicon']
         );
       }
     }
