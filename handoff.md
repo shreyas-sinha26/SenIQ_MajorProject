@@ -2,13 +2,17 @@
 
 **Current state in one paragraph:** v1 (Dashboard → Portfolio → Intelligence → Analytics →
 AI Workspace) and v2 (+ Strategy Builder, Your Strategies, Backtest, Paper Trade, MCP, public
-API) run from **one codebase** on `main`, split by a feature switch. Tags `v1.0`–`v2.2` mark
-the state up to `a66a164`. **The 2026-10-07/08 work is merged into `main`** (pull request #1,
-merge commit `ac88e2a`, six commits, not yet tagged). It covers the company knowledge base,
-alert quality and email safeguards, the v2/MCP round, and the Ask, retrieval and signals work
-in `RAG_PLAN.md`; the matching engine edits live only in the gitignored `strategy-service/`.
-Every commit passes `npm test` on its own. Nothing in the merge has run with a real model
-key, real embeddings, or the real strategy engine behind the app.
+API) run from **one codebase** on `main`, split by a feature switch. Tags run from `v1.0` to
+**`v1.7` / `v2.7`** (the newest, on `898314c`); each `v2.x` is the same commit as its `v1.x`
+with strategies switched on, and the table in §8 lists them all. **All the 2026-10-07/08
+work is merged into `main` and pushed** through pull requests #1–#5 and #7 (#6 was replaced
+by #7); no pull request is open and no branch other than `main` exists. Pull request #1
+(merge commit `ac88e2a`: the company knowledge base, alert quality and email safeguards, the
+v2/MCP round, and the Ask, retrieval and signals work in `RAG_PLAN.md`) has no tag of its
+own; `v1.3` / `v2.3` is the first tag that contains it. The matching engine edits live only
+in the gitignored `strategy-service/`. When #1 was merged, nothing in it had run with a real
+model key, real embeddings, or the real strategy engine behind the app; the sections below
+say what has been run for real since (FinBERT locally, the India smart-money poll).
 
 **Latest (2026-10-08, night):** two more pull requests are merged into `main` with merge
 commits and tagged on those commits, tags pushed: **#3** (user time zones + the Pro end-of-day
