@@ -19,6 +19,8 @@
  *     in "Tata Motors PV" — so a group or parent name doesn't claim its sibling's news
  *   - a short name followed by "securities", "institutional", "AMC"… is that group's
  *     brokerage or fund arm giving an opinion, not the company itself
+ *   - a commodity word inside a company's name ("Senco Gold", "Oil India", "Silver Lake")
+ *     is the company, not the commodity
  *   - executive full names                      : whole-phrase, case-insensitive (so
  *     "Achin Gupta" does not fire on "Sachin Gupta"); executive ALIASES (surnames like
  *     "Musk") whole-word and case-sensitive. Former executives still resolve.
@@ -69,11 +71,52 @@ const titleCase = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 // say "Oil rises…" far more often than "oil prices" or "crude oil", so a bare headline word
 // is accepted here — but only to confirm an alias that matched somewhere in the article.
 const COMMODITY_HEADLINE = {
-  WTI: /\b(oil|crude|brent|opec)\b/i,
-  NG: /\b(natural gas|natgas|lng|gas prices)\b/i,
-  XAU: /\b(gold|bullion)\b/i,
-  XAG: /\bsilver\b/i,
+  WTI: /\b(oil|crude|brent|opec)\b/gi,
+  NG: /\b(natural gas|natgas|lng|gas prices)\b/gi,
+  XAU: /\b(gold|bullion)\b/gi,
+  XAG: /\bsilver\b/gi,
 };
+// Companies whose NAME contains a commodity word. "Senco Gold jumps 8%" is a jeweller's
+// results, not the gold price, so the word inside one of these names never tags the
+// commodity. Most of them are outside the universe — they are listed only to be ruled out.
+const COMMODITY_COMPANY_NAMES = [
+  'Senco Gold', 'Sky Gold', 'Deccan Gold', 'Barrick Gold', 'Gold Fields', 'Harmony Gold', 'Kinross Gold',
+  'Royal Gold', 'Eldorado Gold', 'Gold Road',
+  'Silver Lake', 'Silver Touch', 'Pan American Silver', 'First Majestic Silver',
+  'Oil India', 'Indian Oil', 'Oil and Natural Gas Corp', 'Oil & Natural Gas Corp', 'Hindustan Oil Exploration',
+  'Marathon Oil', 'Murphy Oil', 'Imperial Oil', 'Gulf Oil', 'Standard Oil', 'Petronet LNG',
+];
+const COMMODITY_COMPANY_RE = new RegExp(`\\b(?:${COMMODITY_COMPANY_NAMES.map(escapeRegex).join('|')})`, 'gi');
+const CORPORATE_SUFFIX = /^\s+(ltd|limited|inc|corp|corporation|plc|llc)\b/i;
+// Capitalised words that sit in front of a commodity without making a company name
+// ("Spot Gold slips", "Why Gold is rising", "India Gold demand falls").
+const NOT_A_NAME = new Set([
+  'a', 'an', 'the', 'and', 'but', 'or', 'as', 'if', 'while', 'after', 'before', 'for', 'on', 'in', 'with', 'at',
+  'why', 'how', 'what', 'when', 'where', 'will', 'is', 'are', 'was', 'can', 'could', 'should', 'did', 'does', 'has',
+  'buy', 'sell', 'hold', 'today', 'now', 'this', 'that', 'here', 'more', 'most', 'all',
+  'spot', 'comex', 'record', 'physical', 'digital', 'sovereign', 'paper', 'global', 'domestic', 'local',
+  'cheap', 'cheaper', 'costly', 'costlier', 'higher', 'lower', 'pure', 'safe', 'haven', 'safe-haven',
+  'brent', 'crude', 'shale', 'heavy', 'light', 'sweet', 'white', 'yellow',
+  'india', 'indian', 'china', 'chinese', 'russia', 'russian', 'saudi', 'iran', 'iranian', 'iraq', 'iraqi',
+  'venezuela', 'venezuelan', 'dubai', 'gulf', 'american', 'european', 'asian', 'london', 'york', 'delhi', 'mumbai',
+]);
+
+// True when the commodity word at [s, e) of `text` is part of a company's name: inside a
+// known name, followed by "Ltd"/"Inc"…, or — in a sentence-case line, where a capital
+// mid-sentence means a proper noun — a Capitalised word right after another one ("Senco Gold
+// jumps"). All-caps words in front ("MCX Gold", "RBI Gold reserves") are left alone, and so
+// are Title Case Headlines, where every word is capitalised and the capitals say nothing.
+function inCompanyName(text, s, e) {
+  for (const m of text.matchAll(COMMODITY_COMPANY_RE)) {
+    if (m.index < e && s < m.index + m[0].length) return true;
+  }
+  if (!/^[A-Z][a-z]/.test(text.slice(s, e))) return false;
+  const after = text.slice(e);
+  if (CORPORATE_SUFFIX.test(after)) return true;
+  const before = /([A-Za-z][A-Za-z'’&-]*)\s+$/.exec(text.slice(0, s));
+  return !!before && /^[A-Z][a-z]/.test(before[1]) && !NOT_A_NAME.has(before[1].toLowerCase())
+    && /^(['’]s)?\s+[a-z]/.test(after);
+}
 
 // Flatten the curated universe into the row shapes the resolver/seeder use.
 function universeRows() {
@@ -132,6 +175,10 @@ function buildResolver(companies, executives) {
   // sentiment. A story about a commodity names it in the headline — by alias, or by the
   // plain word in COMMODITY_HEADLINE.
   const headlineOnly = new Set(companies.filter((c) => c.asset_class === 'commodity').map((c) => c.ticker));
+  const isCommodity = (tks) => [...tks].every((t) => headlineOnly.has(t));
+  // The plain commodity word in the headline, outside any company name.
+  const headlineNames = (t, title) => !!COMMODITY_HEADLINE[t] && [...title.matchAll(COMMODITY_HEADLINE[t])]
+    .some((m) => !inCompanyName(title, m.index, m.index + m[0].length));
 
   for (const c of companies) {
     sectorByTicker.set(c.ticker, c.sector || null);
@@ -178,6 +225,7 @@ function buildResolver(companies, executives) {
     const spans = []; // { s, e, tks } for each long-alias occurrence
     for (const [alias, tks] of longAliases) {
       for (let i = lower.indexOf(alias); i !== -1; i = lower.indexOf(alias, i + 1)) {
+        if (isCommodity(tks) && inCompanyName(original, i, i + alias.length)) continue;
         spans.push({ s: i, e: i + alias.length, tks });
       }
     }
@@ -192,6 +240,7 @@ function buildResolver(companies, executives) {
       for (const m of lower.matchAll(re)) {
         if (shadowed(m.index, m.index + m[0].length, tks)) continue;
         if (ARM_SUFFIX.test(lower.slice(m.index + m[0].length))) continue;
+        if (isCommodity(tks) && inCompanyName(original, m.index, m.index + m[0].length)) continue;
         tks.forEach((t) => tickers.add(t));
         break;
       }
@@ -234,7 +283,7 @@ function buildResolver(companies, executives) {
       const inHeadline = companiesIn(String(title));
       for (const t of [...tickers]) {
         if (!headlineOnly.has(t) || inHeadline.has(t)) continue;
-        if (!(COMMODITY_HEADLINE[t] && COMMODITY_HEADLINE[t].test(title))) tickers.delete(t);
+        if (!headlineNames(t, String(title))) tickers.delete(t);
       }
     }
     // Executives → their company (key-person events with no ticker in the headline).
