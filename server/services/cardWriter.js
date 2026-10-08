@@ -189,9 +189,11 @@ async function writeCardsForUser(userId, tier, cards) {
   const { queryOne, execute } = require('../db');
   const { guardCheck, estimateCost } = require('./reports');
 
+  // The user's limit counts from their own midnight; the global ceiling from midnight UTC.
   const dayStart = `${new Date().toISOString().slice(0, 10)} 00:00:00+00`;
+  const userDay = (await require('./userTime').userDayStart(userId)).toISOString();
   const madeRow = await queryOne(
-    "SELECT count(*) c FROM claude_calls WHERE user_id = $1 AND kind = 'report_cards' AND created_at >= $2", [userId, dayStart]);
+    "SELECT count(*) c FROM claude_calls WHERE user_id = $1 AND kind = 'report_cards' AND created_at >= $2", [userId, userDay]);
   const spendRow = await queryOne('SELECT COALESCE(sum(cost_usd),0) s FROM claude_calls WHERE created_at >= $1', [dayStart]);
   const guard = guardCheck({
     flagOn: FEATURES.CLAUDE_REPORTS,
