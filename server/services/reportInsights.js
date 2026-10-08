@@ -203,7 +203,7 @@ function explainCard(card, ctx = {}) {
 // The line the report opens with, from the cards' needs_attention flags (explainCard).
 // Sector and market stories, and thinly backed ones, are background.
 function verdictFor(cards, kind = 'daily') {
-  const when = kind === 'weekly' ? 'this week' : 'today';
+  const when = kind === 'weekly' ? 'this week' : kind === 'evening' ? 'tonight' : 'today';
   const check = (cards || []).filter((c) => c.needs_attention);
   if (!check.length) {
     return {
@@ -325,8 +325,11 @@ function coverageNote(countsByTicker, tickers) {
 /**
  * Assemble every insight for one user. Read-only; prices come from the cached quote
  * service. market = 'IN' | 'US' sets the currency amounts are shown in.
+ * For the end-of-day report: changeByTicker = { TICKER: % } replaces a holding's quoted move
+ * with its last completed session's, and `since` (ms) keeps only stories seen from then on
+ * as cards.
  */
-async function buildReportInsights(userId, { market = 'US', kind = 'daily', maxCards = REPORT_EMAIL.CARDS.MAX, now = Date.now() } = {}) {
+async function buildReportInsights(userId, { market = 'US', kind = 'daily', maxCards = REPORT_EMAIL.CARDS.MAX, now = Date.now(), changeByTicker = null, since = null } = {}) {
   const { query } = require('../db');
   const { getWeightedHoldings } = require('./portfolioService');
   const { usdRates } = require('./priceService');
@@ -345,7 +348,7 @@ async function buildReportInsights(userId, { market = 'US', kind = 'daily', maxC
   }
   const holdings = raw.map((h) => ({
     ticker: h.ticker, asset_class: h.asset_class, exposure_pct: h.exposure_pct ?? 0, weight_pct: h.weight_pct,
-    market_value: h.market_value, change_pct: h.change_pct,
+    market_value: h.market_value, change_pct: changeByTicker && h.ticker in changeByTicker ? changeByTicker[h.ticker] : h.change_pct,
     sector: ref[h.ticker]?.sector || null,
     country: ref[h.ticker]?.country || (['NSE', 'BSE'].includes(String(h.exchange || '').toUpperCase()) ? 'IN' : h.asset_class === 'equity' ? 'US' : 'GLOBAL'),
     z: zByTicker[h.ticker], sentiment_label: labelByTicker[h.ticker],
@@ -358,7 +361,8 @@ async function buildReportInsights(userId, { market = 'US', kind = 'daily', maxC
   }
 
   const events = await loadRecentEvents();
-  const picked = pickCards(events, holdings, zByTicker, { now, max: maxCards });
+  const cardEvents = since == null ? events : events.filter((e) => new Date(e.last_seen).getTime() >= since);
+  const picked = pickCards(cardEvents, holdings, zByTicker, { now, max: maxCards });
   const sectorByTicker = Object.fromEntries(holdings.map((h) => [h.ticker, h.sector]));
   const cards = picked.map((c) => explainCard(c, { fx, zByTicker, sectorByTicker }));
 

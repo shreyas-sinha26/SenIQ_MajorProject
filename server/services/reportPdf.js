@@ -103,7 +103,7 @@ function insightStats(r) {
 function buildReportPdf(report) {
   return new Promise((resolve, reject) => {
     const r = report || {};
-    const title = r.kind === 'weekly' ? 'Weekly Summary' : 'Daily Brief';
+    const title = r.kind === 'weekly' ? 'Weekly Summary' : r.kind === 'evening' ? 'End-of-Day Report' : 'Daily Brief';
     const doc = new PDFDocument({
       size: 'A4', margin: PAGE.margin, bufferPages: true, autoFirstPage: true,
       info: { Title: `SenIQ ${title} — ${r.dateLabel || ''}`, Author: 'SenIQ', Subject: title },
@@ -162,7 +162,7 @@ function buildReportPdf(report) {
     const cardH = 32 + leadH + subH + (lead ? 25 : 0) + 16;
     doc.roundedRect(X, y, CONTENT_W, cardH, 8).fillAndStroke(C.panel, C.line);
     doc.roundedRect(X, y, 4, cardH, 2).fill(verdict ? (verdict.level === 'check' ? C.blue : C.positive) : lead ? tone(lead.direction).fg : C.faint);
-    const leadLabel = verdict ? (r.kind === 'weekly' ? 'THIS WEEK FOR YOUR PORTFOLIO' : 'TODAY FOR YOUR PORTFOLIO') : lead ? 'MOST IMPORTANT FOR YOUR PORTFOLIO' : 'TODAY';
+    const leadLabel = verdict ? (r.kind === 'weekly' ? 'THIS WEEK FOR YOUR PORTFOLIO' : r.kind === 'evening' ? 'TONIGHT FOR YOUR PORTFOLIO' : 'TODAY FOR YOUR PORTFOLIO') : lead ? 'MOST IMPORTANT FOR YOUR PORTFOLIO' : 'TODAY';
     write(leadLabel, X + 18, y + 16, 'semibold', 7.5, C.blue, { characterSpacing: 1 });
     write(leadTitle, X + 18, y + 32, 'semibold', 14, C.ink, { width: leadW, lineGap: 2 });
     if (leadSub) write(leadSub, X + 18, y + 32 + leadH + 6, 'regular', 9.5, C.text, { width: leadW, lineGap: 2 });
