@@ -168,7 +168,7 @@ async function pollInstitutions() {
   for (const inst of institutions) {
     try {
       const stored = await queryOne(
-        'SELECT count(*)::int AS n, max(filed_at) AS max_filed FROM institution_filings WHERE institution_id = $1',
+        'SELECT count(*)::int AS n, max(filed_at)::text AS max_filed FROM institution_filings WHERE institution_id = $1',
         [inst.id]
       );
       const isBaseline = stored.n === 0;

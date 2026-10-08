@@ -42,6 +42,11 @@ function guardCheck(state) {
   return { allow: true, reason: 'ok' };
 }
 
+// brief_date is a DATE: selected as text so it reaches the browser as the stored day (pg would
+// otherwise return a local-midnight Date). Listed after `*`, it replaces that column in the row.
+// The alias makes a bare `ORDER BY brief_date` ambiguous — qualify it with the table name.
+const BRIEF_COLS = '*, brief_date::text AS brief_date';
+
 // Most recent stored packet for a user STRICTLY before `date` — the diff baseline.
 async function loadPrevPacket(userId, date) {
   const { queryOne } = require('../db');
@@ -62,7 +67,7 @@ async function generateBriefForUser(userId, { force = false, now = new Date() } 
   const date = now.toISOString().slice(0, 10);
 
   if (!force) {
-    const existing = await queryOne('SELECT * FROM daily_briefs WHERE user_id = $1 AND brief_date = $2', [userId, date]);
+    const existing = await queryOne(`SELECT ${BRIEF_COLS} FROM daily_briefs WHERE user_id = $1 AND brief_date = $2`, [userId, date]);
     if (existing) return { ...existing, cached: true };
   }
 
@@ -108,7 +113,7 @@ async function generateBriefForUser(userId, { force = false, now = new Date() } 
      ON CONFLICT (user_id, brief_date)
      DO UPDATE SET packet = EXCLUDED.packet, narrative = EXCLUDED.narrative, headline = EXCLUDED.headline,
                    writer = EXCLUDED.writer, model = EXCLUDED.model, generated_at = now()
-     RETURNING *`,
+     RETURNING ${BRIEF_COLS}`,
     [userId, date, packet, brief.narrative, brief.headline, brief.writer, brief.model]
   );
   return { ...saved, guard: guard.reason, cached: false };
@@ -132,7 +137,7 @@ async function generateDailyBriefs(now = new Date()) {
 
 async function getLatestBrief(userId) {
   const { queryOne } = require('../db');
-  return queryOne('SELECT * FROM daily_briefs WHERE user_id = $1 ORDER BY brief_date DESC LIMIT 1', [userId]);
+  return queryOne(`SELECT ${BRIEF_COLS} FROM daily_briefs WHERE user_id = $1 ORDER BY daily_briefs.brief_date DESC LIMIT 1`, [userId]);
 }
 
 module.exports = { generateBriefForUser, generateDailyBriefs, getLatestBrief, guardCheck, estimateCost };

@@ -346,13 +346,15 @@ const EXECUTORS = {
     const tickers = ticker ? [requireHeld(ctx, ticker)] : [...ctx.heldSet];
     const { query } = require('../db');
     const congress = await query(
-      `SELECT politician, chamber, party, transaction_type, ticker, transaction_date, disclosure_date
+      `SELECT politician, chamber, party, transaction_type, ticker,
+              transaction_date::text AS transaction_date, disclosure_date::text AS disclosure_date
          FROM congress_trades WHERE ticker = ANY($1)
         ORDER BY disclosure_date DESC NULLS LAST, transaction_date DESC NULLS LAST LIMIT 10`,
       [tickers]
     );
     const institutions = await query(
-      `SELECT i.name, h.ticker, h.change_type, h.shares, h.value, f.period_of_report, f.filed_at
+      `SELECT i.name, h.ticker, h.change_type, h.shares, h.value,
+              f.period_of_report::text AS period_of_report, f.filed_at::text AS filed_at
          FROM institution_holdings h
          JOIN institution_filings f ON f.id = h.filing_id
          JOIN institutions i ON i.id = f.institution_id
