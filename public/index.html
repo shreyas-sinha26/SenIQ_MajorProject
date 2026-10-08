@@ -164,7 +164,7 @@
                 <span class="material-symbols-outlined">lock</span> Password
               </label>
               <div class="input-pw-wrap">
-                <input type="password" id="signup-password" placeholder="Min 6 characters" autocomplete="new-password" required minlength="6">
+                <input type="password" id="signup-password" placeholder="Min 8 characters" autocomplete="new-password" required minlength="8" maxlength="72">
                 <button type="button" class="pw-toggle" data-target="signup-password" aria-label="Toggle password">
                   <span class="material-symbols-outlined">visibility</span>
                 </button>
@@ -220,7 +220,7 @@
                 <span class="material-symbols-outlined">lock</span> New Password
               </label>
               <div class="input-pw-wrap">
-                <input type="password" id="reset-password" placeholder="Min 6 characters" autocomplete="new-password" required minlength="6">
+                <input type="password" id="reset-password" placeholder="Min 8 characters" autocomplete="new-password" required minlength="8" maxlength="72">
                 <button type="button" class="pw-toggle" data-target="reset-password" aria-label="Toggle password">
                   <span class="material-symbols-outlined">visibility</span>
                 </button>
@@ -231,7 +231,7 @@
                 <span class="material-symbols-outlined">lock</span> Confirm Password
               </label>
               <div class="input-pw-wrap">
-                <input type="password" id="reset-password-confirm" placeholder="Repeat new password" autocomplete="new-password" required minlength="6">
+                <input type="password" id="reset-password-confirm" placeholder="Repeat new password" autocomplete="new-password" required minlength="8" maxlength="72">
                 <button type="button" class="pw-toggle" data-target="reset-password-confirm" aria-label="Toggle password">
                   <span class="material-symbols-outlined">visibility</span>
                 </button>
@@ -551,6 +551,11 @@
         <!-- Institutions panel -->
         <div class="intel-panel hidden" id="intel-panel-institutions">
           <section class="smartmoney-section">
+            <div class="scope-toggle market-switch hidden">
+              <button class="scope-btn market-btn active" data-market="us">US</button>
+              <button class="scope-btn market-btn" data-market="in">India</button>
+            </div>
+            <div data-market-pane="us">
             <div class="section-header">
               <h2>Institutions — 13F Filings</h2>
               <span class="impact-subtitle">Quarterly 13F holdings of the funds you follow</span>
@@ -572,12 +577,47 @@
               </div>
               <div class="inst-detail glass hidden" id="inst-detail"></div>
             </div>
+            </div>
+            <div data-market-pane="in" class="hidden">
+            <div class="section-header">
+              <h2>Institutions — Bulk &amp; Block Deals</h2>
+              <span class="impact-subtitle">Large trades on NSE, with the buyer or seller named</span>
+            </div>
+            <div class="sm-freshness">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>NSE publishes bulk and block deals the same evening. Names appear as the exchange reports them, so a fund trading under another name is not matched.</span>
+            </div>
+            <div class="sm-pane">
+              <div class="in-investors" id="in-investors"></div>
+              <div class="congress-controls">
+                <div class="scope-toggle">
+                  <button class="scope-btn active" data-scope="mine" data-scope-for="in-deals">My holdings &amp; follows</button>
+                  <button class="scope-btn" data-scope="all" data-scope-for="in-deals">All</button>
+                </div>
+              </div>
+              <div class="news-search-bar sm-search">
+                <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                <input type="text" id="in-deals-search" placeholder="Search client, ticker, or company…" autocomplete="off">
+                <button class="news-search-clear hidden" id="in-deals-search-clear" title="Clear search">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <div class="congress-list" id="in-deals-list">
+                <div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+              </div>
+            </div>
+            </div>
           </section>
         </div>
 
         <!-- Congress panel -->
         <div class="intel-panel hidden" id="intel-panel-congress">
           <section class="smartmoney-section">
+            <div class="scope-toggle market-switch hidden">
+              <button class="scope-btn market-btn active" data-market="us">US</button>
+              <button class="scope-btn market-btn" data-market="in">India</button>
+            </div>
+            <div data-market-pane="us">
             <div class="section-header">
               <h2>Congress — STOCK Act Disclosures</h2>
               <span class="impact-subtitle">STOCK Act disclosures from politicians you follow</span>
@@ -605,6 +645,35 @@
                 <div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
               </div>
             </div>
+            </div>
+            <div data-market-pane="in" class="hidden">
+            <div class="section-header">
+              <h2>Insiders &amp; Promoters — SEBI Disclosures</h2>
+              <span class="impact-subtitle">Trades by promoters, directors and key managers in their own company</span>
+            </div>
+            <div class="sm-freshness">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>India has no equivalent of congressional trade reports. These are trades company insiders must disclose under SEBI's insider-trading rules, usually within two trading days.</span>
+            </div>
+            <div class="sm-pane">
+              <div class="congress-controls">
+                <div class="scope-toggle">
+                  <button class="scope-btn active" data-scope="mine" data-scope-for="in-insiders">My holdings</button>
+                  <button class="scope-btn" data-scope="all" data-scope-for="in-insiders">All</button>
+                </div>
+              </div>
+              <div class="news-search-bar sm-search">
+                <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                <input type="text" id="in-insiders-search" placeholder="Search person, ticker, or company…" autocomplete="off">
+                <button class="news-search-clear hidden" id="in-insiders-search-clear" title="Clear search">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <div class="congress-list" id="in-insiders-list">
+                <div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+              </div>
+            </div>
+            </div>
             <details class="sm-webhooks" id="sm-webhooks">
               <summary>Developer · Outbound webhooks <span class="badge pro-badge">Pro</span></summary>
               <p class="form-hint">Register a URL and we POST each smart-money event to it (HMAC-signed with <code>X-SenIQ-Signature</code>). SEC/Congress don't push, so inbound is a poller — this outbound delivery is the real webhook.</p>
@@ -620,14 +689,42 @@
 
       <!-- ═══ PAGE: Analytics ═══ -->
       <div id="page-analytics" class="page hidden">
+        <!-- The headline: one number, said in words -->
+        <section class="an-summary glass" id="an-summary">
+          <div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+        </section>
+
         <section class="chart-section glass">
           <div class="section-header">
-            <h2>Sentiment Overview</h2>
-            <span class="impact-subtitle">Sentiment scores across your portfolio holdings</span>
+            <h2>Sentiment by holding</h2>
+            <span class="impact-subtitle">How the news on each holding reads right now, 0 to 100</span>
           </div>
+          <div class="an-legend" id="an-legend"></div>
           <div class="chart-container">
             <canvas id="sentiment-chart"></canvas>
           </div>
+          <p class="an-caption" id="an-chart-caption"></p>
+        </section>
+
+        <section class="an-section">
+          <div class="section-header">
+            <h2>What is behind each score</h2>
+            <span class="impact-subtitle">The parts that make up the number</span>
+          </div>
+          <div class="an-cards" id="an-cards"></div>
+        </section>
+
+        <section class="an-help glass">
+          <div class="section-header"><h2>How to read this page</h2></div>
+          <dl class="an-glossary">
+            <div><dt>Sentiment score</dt><dd>How the recent news on a holding reads, from 0 (all negative) to 100 (all positive). Above 60 counts as positive, below 40 as negative, in between as mixed. Newer articles, more credible sources and clearer readings count for more.</dd></div>
+            <div><dt>Acute window</dt><dd>The score looks at the last 72 hours. An article from this morning weighs more than one from two days ago.</dd></div>
+            <div><dt>Its own normal (baseline)</dt><dd>Each holding's average score over the last 90 days. Some companies always get upbeat coverage, so 70 can be ordinary for one and remarkable for another.</dd></div>
+            <div><dt>σ (z-score)</dt><dd>How far today's score sits from that holding's own normal, in standard deviations. Within ±0.5σ is an ordinary day; beyond ±1σ is unusual for that holding.</dd></div>
+            <div><dt>Momentum</dt><dd>The last 7 days compared with the 7 before: is the coverage getting better, worse, or holding steady?</dd></div>
+            <div><dt>Story contribution</dt><dd>Each story's share of the gap between today's score and normal. ▲ pushed the score up, ▼ pulled it down, and the shares add up to the whole gap.</dd></div>
+            <div><dt>What it is not</dt><dd>A sentiment score describes what is being written. It is not a forecast of where the price goes next.</dd></div>
+          </dl>
         </section>
       </div><!-- /page-analytics -->
 
@@ -647,7 +744,7 @@
         <!-- Ask it anything (E6) -->
         <section class="ask-section animate-in" style="--delay: 2" id="ask-section">
           <div class="section-header">
-            <h2>Ask About Your Portfolio</h2>
+            <h2>Ask SenPal About Your Portfolio</h2>
             <span class="ask-quota" id="ask-quota"></span>
           </div>
           <div class="ask-box glass">
@@ -1013,6 +1110,19 @@
                 <span>Email me real-time alerts
                   <small id="email-alerts-hint">Plus and Pro plans. Alerts always appear in the app.</small></span>
               </label>
+              <label class="email-pref">
+                <input type="checkbox" id="email-reports-toggle">
+                <span>Email me reports
+                  <small id="email-reports-hint">Free: a weekly summary. Plus and Pro: the daily brief on weekday mornings.</small></span>
+              </label>
+              <div class="form-group">
+                <label for="email-market-select">Time reports for</label>
+                <select id="email-market-select">
+                  <option value="">My portfolio's main market</option>
+                  <option value="IN">India</option>
+                  <option value="US">United States</option>
+                </select>
+              </div>
               <div id="email-pref-msg" class="profile-msg hidden"></div>
               <div id="profile-name-msg" class="profile-msg hidden"></div>
               <button class="btn btn-primary btn-sm" id="profile-save-btn">Save Changes</button>
@@ -1038,7 +1148,7 @@
               <div class="form-group">
                 <label for="profile-new-pw">New Password</label>
                 <div class="input-pw-wrap">
-                  <input type="password" id="profile-new-pw" placeholder="Min 6 characters" autocomplete="new-password">
+                  <input type="password" id="profile-new-pw" placeholder="Min 8 characters" autocomplete="new-password">
                   <button type="button" class="pw-toggle" data-target="profile-new-pw" aria-label="Toggle">
                     <span class="material-symbols-outlined">visibility</span>
                   </button>
@@ -1086,6 +1196,9 @@
               <input type="checkbox" id="api-key-write">
               <span>Allow this key to save strategies and start or stop paper deployments (virtual money only)</span>
             </label>
+            <div id="api-key-reauth" class="api-key-create hidden">
+              <input type="password" id="api-key-reauth-pw" placeholder="Confirm your password" autocomplete="current-password">
+            </div>
             <div id="api-key-msg" class="profile-msg hidden"></div>
           </div>
         </section>

@@ -10,17 +10,17 @@
  * Every response carries X-RateLimit-Limit / X-RateLimit-Remaining; 429s add
  * Retry-After (seconds). Docs: /docs.
  */
-const express = require('express');
+const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne } = require('../db');
 const { DISCLAIMER, STRATEGY_SERVICE } = require('../config');
 const { resolveApiKey, heavyLimiter, lightLimiter } = require('../services/apiKeyGate');
-const { callService, flattenDetail, cleanSymbols, iso, MAX_WATCH_SYMBOLS, WARMUP_DAYS } = require('../services/strategyClient');
+const { callService, flattenDetail, cleanSymbols, replayPaper, MAX_WATCH_SYMBOLS } = require('../services/strategyClient');
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
 const { DATA_TOOLS, runDataTool } = require('../services/dataTools');
-const { saveStrategy, deployPaper, stopPaper } = require('../services/strategyStore');
+const { saveStrategy, deployPaper, stopPaper, strategyToJson, deploymentToJson } = require('../services/strategyStore');
 const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../services/strategySignals');
 
-const router = express.Router();
+const router = asyncRouter();
 
 // ─── Auth (every /v1 route) ──────────────────────────────────
 router.use(async (req, res, next) => {
@@ -165,11 +165,7 @@ router.get('/strategies/saved', gate(lightLimiter), async (req, res) => {
   const rows = await query(
     'SELECT * FROM user_strategies WHERE user_id = $1 ORDER BY created_at DESC', [req.apiCtx.userId]);
   res.json({
-    strategies: rows.map((r) => ({
-      id: r.id, name: r.name, kind: r.kind,
-      spec: r.spec, strategy_name: r.strategy_name, params: r.params,
-      symbols: r.symbols || [], created_at: r.created_at,
-    })),
+    strategies: rows.map(strategyToJson),
   });
 });
 
@@ -178,14 +174,7 @@ router.get('/paper', gate(lightLimiter), async (req, res) => {
   const rows = await query(
     'SELECT * FROM paper_deployments WHERE user_id = $1 ORDER BY created_at DESC', [req.apiCtx.userId]);
   res.json({
-    deployments: rows.map((r) => ({
-      id: r.id, name: r.name, kind: r.kind,
-      symbol: r.symbol, exchange: r.exchange,
-      initial_cash: String(r.initial_cash),
-      deployed_at: iso(r.deployed_at),
-      status: r.status,
-      stopped_at: r.stopped_at ? iso(r.stopped_at) : null,
-    })),
+    deployments: rows.map(deploymentToJson),
   });
 });
 
@@ -195,27 +184,7 @@ router.get('/paper/:id/state', gate(heavyLimiter), async (req, res) => {
     'SELECT * FROM paper_deployments WHERE id = $1 AND user_id = $2', [req.params.id, req.apiCtx.userId]);
   if (!row) return res.status(404).json({ error: 'deployment not found' });
 
-  // Replay-from-inception, identical to routes/paper.js: warm indicators on
-  // pre-deploy history, only trade from the deploy date.
-  const deployed = new Date(row.deployed_at);
-  const start = new Date(deployed);
-  start.setDate(start.getDate() - WARMUP_DAYS);
-  const end = row.status === 'stopped' && row.stopped_at ? new Date(row.stopped_at) : new Date();
-
-  passthrough(res, await callService('/api/backtest', {
-    method: 'POST',
-    body: {
-      ...(row.kind === 'custom'
-        ? { custom: row.spec, seniq_data: await seniqDataIfNeeded(row.spec, row.symbol) }
-        : { strategy: row.strategy_name, params: row.params || {} }),
-      symbol: row.symbol,
-      exchange: row.exchange,
-      start_date: iso(start),
-      end_date: iso(end),
-      trade_from: iso(deployed),
-      initial_cash: String(row.initial_cash),
-    },
-  }));
+  passthrough(res, await replayPaper(row));
 });
 
 // ─── POST /v1/walk-forward — out-of-sample robustness check ──

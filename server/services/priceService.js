@@ -4,10 +4,18 @@
  * exposure weight (the Portfolio Impact Scoring input) AND the UI can show a live
  * price next to each holding. Cheapest-viable sources:
  *   - crypto    → CoinGecko /simple/price (free, no key) + 24h change
- *   - equities  → Finnhub /quote (FINNHUB_API_KEY, generous free tier) if set,
- *                 else Financial Modeling Prep batch /quote (FMP_API_KEY)
- *   - commodity → FMP batch /quote for the symbols it carries on the free tier
- *                 (gold GCUSD works; oil CLUSD is premium → null)
+ *   - Indian equities → Yahoo Finance chart endpoint (free, no key; the same data
+ *                 yfinance reads), as TICKER.NS, or TICKER.BO for BSE. Quoted in INR.
+ *   - other equities → Finnhub /quote (FINNHUB_API_KEY, generous free tier) if set;
+ *                 Yahoo when Finnhub has no price; then Financial Modeling Prep (FMP_API_KEY)
+ *   - commodity → Yahoo front-month futures (GC=F, CL=F, …); FMP as the fallback
+ *                 (gold GCUSD works there; oil CLUSD is premium → null)
+ *
+ * Quotes carry their own currency. usdRates() gives the conversion portfolioService
+ * needs to weigh an INR holding against a USD one.
+ *
+ * Yahoo's endpoint is unofficial: it can throttle or change without notice, and NSE/BSE
+ * prices on it run about 15 minutes late. Its quotes are cached for PRICE_TTL_SLOW.
  *
  * ⚠️ FMP free tier is ~250 calls/day and is SHARED with the congress poller, so
  * FMP-sourced prices are cached longer (PRICE_TTL_FMP) to stay within budget. Add
@@ -19,6 +27,9 @@ const { NON_EQUITY_ASSETS, coingeckoIdFor } = require('./assetRegistry');
 
 const PRICE_TTL_FAST = 60_000;      // CoinGecko / Finnhub — generous limits
 const PRICE_TTL_FMP = 5 * 60_000;   // FMP — protect the shared daily quota
+const PRICE_TTL_SLOW = 5 * 60_000;  // Yahoo — unofficial endpoint, keep the request rate low
+const FX_TTL = 60 * 60_000;
+const MARKETS_TTL = 10 * 60_000;
 const cache = new Map(); // ticker -> { price, currency, changePct, at, ttl }
 
 // Commodity ticker → FMP symbol (the ones FMP serves on the free tier).
@@ -27,6 +38,14 @@ const COMMODITY_FMP = {
   XAG: 'SIUSD', SILVER: 'SIUSD', SI: 'SIUSD',
   XPT: 'PLUSD', XPD: 'PAUSD',
   WTI: 'CLUSD', OIL: 'CLUSD', CL: 'CLUSD', BRENT: 'BZUSD', NG: 'NGUSD',
+};
+
+// Commodity ticker → Yahoo front-month futures symbol.
+const COMMODITY_YAHOO = {
+  XAU: 'GC=F', GOLD: 'GC=F', GC: 'GC=F',
+  XAG: 'SI=F', SILVER: 'SI=F', SI: 'SI=F',
+  XPT: 'PL=F', XPD: 'PA=F', HG: 'HG=F', COPPER: 'HG=F',
+  WTI: 'CL=F', OIL: 'CL=F', CL: 'CL=F', BRENT: 'BZ=F', NG: 'NG=F',
 };
 
 function getCached(ticker) {
@@ -47,6 +66,63 @@ async function fetchFinnhub(ticker, apiKey) {
     // c = current price, dp = percent change. c:0 → can't price (e.g. non-US on free tier).
     return d && d.c ? { price: d.c, currency: 'USD', changePct: d.dp ?? null } : null;
   } catch { return null; }
+}
+
+// ─── Yahoo Finance (Indian equities, commodities, FX) ────────
+async function fetchYahoo(symbol) {
+  try {
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`,
+      { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000) }
+    );
+    if (!res.ok) return null;
+    const meta = (await res.json())?.chart?.result?.[0]?.meta;
+    const price = meta?.regularMarketPrice;
+    if (typeof price !== 'number' || !(price > 0)) return null;
+    const prev = meta.chartPreviousClose ?? meta.previousClose;
+    return {
+      price,
+      currency: meta.currency || 'USD',
+      changePct: typeof prev === 'number' && prev > 0 ? ((price - prev) / prev) * 100 : null,
+    };
+  } catch { return null; }
+}
+
+// Tickers are stored bare (TCS, RELIANCE), so the market comes from the holding's
+// exchange, else from the company reference. → 'NSE' | 'BSE' | null (not Indian).
+let marketsCache = { at: 0, byTicker: {} };
+async function indianMarkets() {
+  if (Date.now() - marketsCache.at < MARKETS_TTL) return marketsCache.byTicker;
+  try {
+    const rows = await require('../db').query("SELECT ticker, exchange FROM companies WHERE country = 'IN'");
+    marketsCache = { at: Date.now(), byTicker: Object.fromEntries(rows.map((r) => [r.ticker, r.exchange === 'BSE' ? 'BSE' : 'NSE'])) };
+  } catch { /* keep the last good map */ }
+  return marketsCache.byTicker;
+}
+function indianMarketOf(h, markets) {
+  const ex = String(h.exchange || '').toUpperCase();
+  if (ex === 'NSE' || ex === 'BSE') return ex;
+  return ex ? null : markets[h.ticker] || null;
+}
+// NSE first, BSE second (or the reverse for a BSE holding): some names list on one only.
+async function fetchIndian(ticker, market) {
+  const order = market === 'BSE' ? ['.BO', '.NS'] : ['.NS', '.BO'];
+  return (await fetchYahoo(ticker + order[0])) || fetchYahoo(ticker + order[1]);
+}
+
+// How many units of each currency one US dollar buys ({ USD: 1, INR: 96.8 }); a
+// currency with no rate available is left out.
+const fxCache = new Map(); // currency -> { rate, at }
+async function usdRates(currencies) {
+  const out = { USD: 1 };
+  await Promise.all([...new Set(currencies)].filter((c) => c && c !== 'USD').map(async (c) => {
+    const hit = fxCache.get(c);
+    if (hit && Date.now() - hit.at < FX_TTL) { out[c] = hit.rate; return; }
+    const q = await fetchYahoo(`USD${c}=X`);
+    if (q) { fxCache.set(c, { rate: q.price, at: Date.now() }); out[c] = q.price; }
+    else if (hit) out[c] = hit.rate; // a stale rate beats no weight at all
+  }));
+  return out;
 }
 
 // ─── FMP (equities + commodities) ────────────────────────────
@@ -95,6 +171,9 @@ async function getQuotes(holdings) {
   const finnhubFetches = [];                // Promise<void>[]
   const fmpSymbols = [];                    // ['GCUSD', ...] (commodities + equities w/o Finnhub)
   const fmpSymbolToTicker = {};             // fmpSymbol -> our ticker
+  const yahooFetches = [];                  // Promise<void>[]
+  const markets = holdings.some((h) => h.assetClass === 'equity') ? await indianMarkets() : {};
+  const queueFmp = (sym, ticker) => { fmpSymbols.push(sym); fmpSymbolToTicker[sym] = ticker; };
 
   for (const h of holdings) {
     const ticker = h.ticker;
@@ -108,16 +187,29 @@ async function getQuotes(holdings) {
       if (id) cryptoToFetch.push({ ticker, coingeckoId: id });
       else out[ticker] = null;
     } else if (h.assetClass === 'commodity') {
-      const sym = COMMODITY_FMP[ticker] || (NON_EQUITY_ASSETS[ticker]?.fmpSymbol);
-      if (sym && fmpKey) { fmpSymbols.push(sym); fmpSymbolToTicker[sym] = ticker; }
-      else out[ticker] = null;
+      const ySym = COMMODITY_YAHOO[ticker];
+      const fSym = (COMMODITY_FMP[ticker] || NON_EQUITY_ASSETS[ticker]?.fmpSymbol);
+      yahooFetches.push((async () => {
+        let q = ySym ? await fetchYahoo(ySym) : null;
+        let ttl = PRICE_TTL_SLOW;
+        if (!q && fSym && fmpKey) { q = await fetchFmpOne(fSym, fmpKey); ttl = PRICE_TTL_FMP; }
+        out[ticker] = q; setCached(ticker, q, ttl);
+      })());
     } else if (h.assetClass === 'equity') {
-      if (finnhubKey) {
-        finnhubFetches.push(fetchFinnhub(ticker, finnhubKey).then((q) => { out[ticker] = q; setCached(ticker, q, PRICE_TTL_FAST); }));
+      const inMarket = indianMarketOf(h, markets);
+      if (inMarket) {
+        yahooFetches.push(fetchIndian(ticker, inMarket).then((q) => { out[ticker] = q; setCached(ticker, q, PRICE_TTL_SLOW); }));
+      } else if (finnhubKey) {
+        finnhubFetches.push((async () => {
+          let q = await fetchFinnhub(ticker, finnhubKey);
+          let ttl = PRICE_TTL_FAST;
+          if (!q) { q = await fetchYahoo(ticker); ttl = PRICE_TTL_SLOW; }
+          out[ticker] = q; setCached(ticker, q, ttl);
+        })());
       } else if (fmpKey) {
-        fmpSymbols.push(ticker); fmpSymbolToTicker[ticker] = ticker;
+        queueFmp(ticker, ticker);
       } else {
-        out[ticker] = null;
+        yahooFetches.push(fetchYahoo(ticker).then((q) => { out[ticker] = q; setCached(ticker, q, PRICE_TTL_SLOW); }));
       }
     } else {
       out[ticker] = null; // fx / index / unknown
@@ -140,8 +232,8 @@ async function getQuotes(holdings) {
     }
   });
 
-  await Promise.allSettled([...finnhubFetches, cryptoFetch, fmpFetch]);
+  await Promise.allSettled([...finnhubFetches, ...yahooFetches, cryptoFetch, fmpFetch]);
   return out;
 }
 
-module.exports = { getQuotes };
+module.exports = { getQuotes, usdRates, fetchYahoo, indianMarketOf, COMMODITY_YAHOO };

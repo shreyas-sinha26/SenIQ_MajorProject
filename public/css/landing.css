@@ -339,17 +339,10 @@ em { font-style: normal; color: var(--text); }
 
 /* ─── Footer ─── */
 .footer { border-top: 1px solid var(--line); padding: 3rem 2.2rem 2rem; max-width: 1280px; margin: 0 auto; }
-.footer-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.6fr; gap: 2rem; margin-bottom: 2.2rem; align-items: start; }
+.footer-grid { margin-bottom: 2.2rem; display: flex; flex-direction: column; align-items: center; text-align: center; }
 .footer-brand { margin-bottom: .9rem; display: inline-flex; }
-.footer-desc { color: var(--muted); font-size: .85rem; line-height: 1.6; max-width: 240px; margin-top: .6rem; }
-.footer-col-head { font-size: .68rem; letter-spacing: .1em; color: var(--muted); opacity: .7; margin-bottom: .8rem; }
-.footer-col-links { display: flex; flex-direction: column; gap: .55rem; }
-.footer-col-links a { font-size: .88rem; color: var(--muted); transition: color .2s; }
-.footer-col-links a:hover { color: var(--electric); }
-.footer-cta-col { display: flex; flex-direction: column; align-items: flex-end; gap: 1.2rem; text-align: right; }
-.footer-cta-headline { font-size: 1.12rem; font-weight: 700; max-width: 260px; line-height: 1.35; }
-.footer-cta-btn { align-self: flex-end; }
-.footer-bottom { border-top: 1px solid var(--line); padding-top: 1.2rem; }
+.footer-desc { color: var(--muted); font-size: .85rem; line-height: 1.6; max-width: 420px; margin: .6rem auto 0; }
+.footer-bottom { border-top: 1px solid var(--line); padding-top: 1.2rem; text-align: center; }
 .footer-copy { font-size: .72rem; letter-spacing: .04em; color: var(--muted); opacity: .6; }
 
 /* ─── Reveal / motion states ─── */
@@ -373,10 +366,7 @@ em { font-style: normal; color: var(--text); }
   .hero-visual { max-width: 520px; margin: 0 auto; }
   .problem-grid { grid-template-columns: repeat(2, 1fr); }
   .market-grid { grid-template-columns: repeat(2, 1fr); }
-  .footer-grid { grid-template-columns: 1fr 1fr; gap: 2rem; }
-  .footer-cta-col { align-items: flex-start; text-align: left; }
-  .footer-cta-btn { align-self: flex-start; }
-  .ticker-field { display: none; }
+      .ticker-field { display: none; }
 }
 @media (max-width: 760px) {
   .nav { padding: .85rem 1.1rem; }
@@ -386,9 +376,7 @@ em { font-style: normal; color: var(--text); }
   .hero { padding: 6.5rem 1.1rem 2.5rem; }
   .section { padding: 3.4rem 1.1rem; }
   .problem-grid, .sm-cards, .market-grid { grid-template-columns: 1fr; }
-  .footer-grid { grid-template-columns: 1fr; }
-  .footer-cta-col { align-items: flex-start; text-align: left; }
-  .cmd-body { grid-template-columns: 1fr; }
+    .cmd-body { grid-template-columns: 1fr; }
   .cta-inner { flex-direction: column; }
   .cta-left { text-align: center; }
   .cta-right { width: 100%; display: flex; justify-content: center; }

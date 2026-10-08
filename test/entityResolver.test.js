@@ -26,6 +26,20 @@ check('Bitcoin → BTC, not COIN', () => assert.deepStrictEqual(tk('Bitcoin hits
 check('Coinbase → COIN', () => assert.deepStrictEqual(tk('Coinbase lists a new token'), ['COIN']));
 check('"strong"/"electronics" do NOT match TRON', () => assert.deepStrictEqual(tk('Syrma SGS Technology shares look strong'), []));
 check('real TRON mention → TRX', () => assert.ok(tk('TRON network sees record TRX volume').includes('TRX')));
+check('a company named only in the summary is a passing mention when the headline names another', () => {
+  const r = resolve('SpaceX in Talks to Borrow $40 Billion to Buy Nvidia Chips',
+    "Elon Musk's SpaceX is in talks to raise $40 billion to buy chips from Nvidia Corp. joins to discuss this and the latest from Apple.");
+  assert.deepStrictEqual(r.tickers, ['NVDA']);
+});
+check('a headline naming several companies keeps them all', () => {
+  assert.deepStrictEqual(resolve('Microsoft takes on Apple with Nvidia-powered Surface', 'The Surface line gets on-device models. Tesla was also mentioned.').tickers.sort(), ['AAPL', 'MSFT', 'NVDA']);
+});
+check('a company named in the summary\'s opening sentence still counts', () => {
+  assert.deepStrictEqual(resolve('Bitcoin buying slows', 'Coinbase added 334 bitcoin last week. Analysts at Goldman Sachs were unmoved.').tickers.sort(), ['BTC', 'COIN']);
+});
+check('a headline that names no company falls back to the summary', () => {
+  assert.deepStrictEqual(resolve('Only four trillion-dollar stocks are beating the index', 'Including Nvidia and Apple.').tickers.sort(), ['AAPL', 'NVDA']);
+});
 check('"US visa limits" does NOT match Visa', () => assert.ok(!tk('Indian IT sector hit by US visa limits').includes('V')));
 check('"Visa Inc" → V', () => assert.ok(tk('Visa Inc reports record earnings').includes('V')));
 

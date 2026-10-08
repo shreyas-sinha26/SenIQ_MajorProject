@@ -1,14 +1,14 @@
-const express = require('express');
+const { asyncRouter } = require('../middleware/asyncRouter');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const { queryOne } = require('../db');
 const { makeLimiter } = require('../services/slidingWindow');
 const { createToken, consumeToken } = require('../services/authTokens');
 const { sendEmail, emailEnabled } = require('../services/emailService');
-const { AUTH_LIMITS, APP_URL } = require('../config');
+const { AUTH_LIMITS, APP_URL, SESSION } = require('../config');
+const sessions = require('../services/sessions');
+const { authMiddleware } = sessions;
 
-const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+const router = asyncRouter();
 const isProd = process.env.NODE_ENV === 'production';
 
 // ─── Phase 5: per-IP rate limits on credential endpoints ─────
@@ -30,29 +30,25 @@ function rateLimit(limiter) {
 
 const PROVIDER_LABEL = { google: 'Google', github: 'GitHub' };
 
-// ─── Middleware: Auth Guard ──────────────────────────────────
-function authMiddleware(req, res, next) {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'No token provided' });
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid token' });
-  }
-}
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+const validPassword = (p) => typeof p === 'string' && p.length >= AUTH_LIMITS.MIN_PASSWORD_CHARS && p.length <= AUTH_LIMITS.MAX_PASSWORD_CHARS;
+const PASSWORD_RULE = `Password must be ${AUTH_LIMITS.MIN_PASSWORD_CHARS}–${AUTH_LIMITS.MAX_PASSWORD_CHARS} characters`;
 
 // ─── POST /api/auth/signup ───────────────────────────────────
 router.post('/signup', rateLimit(loginLimiter), async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const body = req.body || {};
+    const email = typeof body.email === 'string' ? body.email.trim() : '';
+    const name = typeof body.name === 'string' ? body.name.trim().slice(0, 80) : '';
+    const { password } = body;
     if (!email || !password || !name) {
       return res.status(400).json({ error: 'Email, password, and name are required' });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Enter a valid email address' });
     }
+    if (!validPassword(password)) return res.status(400).json({ error: PASSWORD_RULE });
 
     const existing = await queryOne('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [email]);
     if (existing) {
@@ -77,8 +73,8 @@ router.post('/signup', rateLimit(loginLimiter), async (req, res) => {
         .catch((err) => console.error('Verification email error:', err.message));
     }
 
-    const token = jwt.sign({ id: created.id, email, name }, JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ token, user: { id: created.id, email, name, subscription_tier: 'free', is_admin: false } });
+    await sessions.startSession(res, created.id, req);
+    res.status(201).json({ user: { id: created.id, email, name, subscription_tier: 'free', is_admin: false } });
   } catch (err) {
     console.error('Signup error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -88,8 +84,8 @@ router.post('/signup', rateLimit(loginLimiter), async (req, res) => {
 // ─── POST /api/auth/login ────────────────────────────────────
 router.post('/login', rateLimit(loginLimiter), async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
+    const { email, password } = req.body || {};
+    if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
@@ -111,10 +107,43 @@ router.post('/login', rateLimit(loginLimiter), async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name, subscription_tier: user.subscription_tier || 'free', is_admin: !!user.is_admin } });
+    await sessions.startSession(res, user.id, req);
+    res.json({ user: { id: user.id, email: user.email, name: user.name, subscription_tier: user.subscription_tier || 'free', is_admin: !!user.is_admin } });
   } catch (err) {
     console.error('Login error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── POST /api/auth/logout ───────────────────────────────────
+// Ends this session on the server, so a copy of its cookie stops working too.
+router.post('/logout', async (req, res) => {
+  try {
+    const s = await sessions.findSession(sessions.readCookie(req, SESSION.COOKIE));
+    if (s) await sessions.endSession(s.id);
+    sessions.clearSessionCookie(res);
+    res.json({ message: 'Signed out' });
+  } catch (err) {
+    console.error('Logout error:', err);
+    sessions.clearSessionCookie(res);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── POST /api/auth/reauth ───────────────────────────────────
+// Confirms the password inside a live session; sensitive actions accept it for
+// SESSION.REAUTH_MINUTES (sessions.requireRecentAuth).
+router.post('/reauth', authMiddleware, rateLimit(loginLimiter), async (req, res) => {
+  try {
+    const { password } = req.body || {};
+    if (typeof password !== 'string' || !password) return res.status(400).json({ error: 'Password is required' });
+    const user = await queryOne('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
+    if (!user || !user.password_hash) return res.status(400).json({ error: 'This account has no password — sign out and sign in again instead.' });
+    if (!(await bcrypt.compare(password, user.password_hash))) return res.status(401).json({ error: 'Password is incorrect' });
+    await sessions.markReauthenticated(req.session.id);
+    res.json({ message: 'Confirmed' });
+  } catch (err) {
+    console.error('Reauth error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -134,8 +163,8 @@ router.get('/me', authMiddleware, async (req, res) => {
 // ─── PATCH /api/auth/me — update display name ────────────────
 router.patch('/me', authMiddleware, async (req, res) => {
   try {
-    const { name } = req.body;
-    if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+    const { name } = req.body || {};
+    if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'Name is required' });
     const trimmed = name.trim();
     if (trimmed.length > 80) return res.status(400).json({ error: 'Name too long' });
     const user = await queryOne(
@@ -152,23 +181,26 @@ router.patch('/me', authMiddleware, async (req, res) => {
 // ─── POST /api/auth/change-password ─────────────────────────
 router.post('/change-password', authMiddleware, async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
+    const { currentPassword, newPassword } = req.body || {};
     if (!newPassword) return res.status(400).json({ error: 'New password is required' });
-    if (newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+    if (!validPassword(newPassword)) return res.status(400).json({ error: `New ${PASSWORD_RULE.toLowerCase()}` });
 
-    const user = await queryOne('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
+    const user = await queryOne('SELECT id, email, name, password_hash FROM users WHERE id = $1', [req.user.id]);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     // OAuth-born accounts (no password yet) may SET one here without a current
     // password — they're already authenticated. Everyone else must prove it.
     if (user.password_hash) {
-      if (!currentPassword) return res.status(400).json({ error: 'Current password is required' });
+      if (typeof currentPassword !== 'string' || !currentPassword) return res.status(400).json({ error: 'Current password is required' });
       const valid = await bcrypt.compare(currentPassword, user.password_hash);
       if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
     }
 
     const hash = await bcrypt.hash(newPassword, 10);
-    await queryOne('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, req.user.id]);
+    await queryOne('UPDATE users SET password_hash = $1, password_changed_at = to_timestamp($2) WHERE id = $3', [hash, nowSeconds(), req.user.id]);
+    // Every other session ends here; this one carries on.
+    await sessions.endUserSessions(req.user.id, req.session.id);
+    await sessions.markReauthenticated(req.session.id);
     res.json({ message: 'Password updated successfully' });
   } catch (err) {
     console.error('Change password error:', err);
@@ -182,8 +214,8 @@ router.post('/change-password', authMiddleware, async (req, res) => {
 // stays testable locally.
 router.post('/forgot-password', rateLimit(resetLimiter), async (req, res) => {
   try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email is required' });
+    const { email } = req.body || {};
+    if (typeof email !== 'string' || !email) return res.status(400).json({ error: 'Email is required' });
 
     const reply = { message: 'If that email is registered, a reset link is on its way.' };
     const user = await queryOne('SELECT id, name FROM users WHERE LOWER(email) = LOWER($1)', [email]);
@@ -208,15 +240,18 @@ router.post('/forgot-password', rateLimit(resetLimiter), async (req, res) => {
 // ─── POST /api/auth/reset-password ───────────────────────────
 router.post('/reset-password', rateLimit(loginLimiter), async (req, res) => {
   try {
-    const { token: rawToken, password } = req.body;
+    const { token: rawToken, password } = req.body || {};
     if (!rawToken || !password) return res.status(400).json({ error: 'Token and new password are required' });
-    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (!validPassword(password)) return res.status(400).json({ error: PASSWORD_RULE });
 
     const consumed = await consumeToken(rawToken, 'reset');
     if (!consumed) return res.status(400).json({ error: 'This reset link is invalid or has expired — request a new one' });
 
     const hash = await bcrypt.hash(password, 10);
-    await queryOne('UPDATE users SET password_hash = $1 WHERE id = $2 RETURNING id', [hash, consumed.user_id]);
+    await queryOne('UPDATE users SET password_hash = $1, password_changed_at = to_timestamp($2) WHERE id = $3 RETURNING id',
+      [hash, nowSeconds(), consumed.user_id]);
+    // Whoever was signed in before the reset is signed out everywhere.
+    await sessions.endUserSessions(consumed.user_id);
     res.json({ message: 'Password updated — you can sign in now.' });
   } catch (err) {
     console.error('Reset password error:', err);

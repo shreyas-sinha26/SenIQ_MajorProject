@@ -82,8 +82,11 @@ check('OAuth providers report disabled without env credentials', () => {
   if (!process.env.GITHUB_CLIENT_ID) assert.strictEqual(OAUTH.GITHUB.enabled, false);
 });
 
-check('email service reports disabled without RESEND_API_KEY', () => {
-  if (!process.env.RESEND_API_KEY) assert.strictEqual(EMAIL.enabled, false);
+check('email service reports disabled with neither Resend nor SMTP configured', () => {
+  if (!process.env.RESEND_API_KEY && !process.env.SMTP_HOST) {
+    assert.strictEqual(EMAIL.enabled, false);
+    assert.strictEqual(EMAIL.provider, null);
+  }
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

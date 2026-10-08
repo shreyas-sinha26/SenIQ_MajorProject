@@ -4,13 +4,13 @@
  * the admin previews Free / Plus / Pro gating live without paying.
  */
 
-const express = require('express');
+const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne } = require('../db');
 const { authMiddleware } = require('./auth');
 const { attachTier, requireAdmin } = require('../middleware/tier');
 const { TIERS } = require('../config');
 
-const router = express.Router();
+const router = asyncRouter();
 router.use(authMiddleware, attachTier, requireAdmin);
 
 // GET /api/admin/users — everyone + their tier.

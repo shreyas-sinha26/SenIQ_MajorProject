@@ -12,7 +12,8 @@
  *       real model, grades it, and writes eval/ask/runs/<timestamp>/. Refuses to start
  *       without --yes-spend and stops once --max-usd is reached.
  *       --judge adds the rubric judge (a second, paid model call per case).
- *       Needs DATABASE_URL and ANTHROPIC_API_KEY. Creates the fixture user
+ *       Needs DATABASE_URL and a model key — AIROUTER_API_KEY (answers and judge go through
+ *       the router) or ANTHROPIC_API_KEY (direct). Creates the fixture user
  *       (fixture.user_email in cases.json) and its holdings if they do not exist.
  *
  *   node eval/ask/run.js --judge-selftest --yes-spend
@@ -39,7 +40,7 @@ const opt = (name, dflt) => {
 
 // The judge is a different model from the one under test (Haiku writes the answers), so it
 // is not grading its own style. Prices are $ per million tokens.
-const JUDGE = { MODEL: 'claude-sonnet-5-5', MAX_TOKENS: 4000, EFFORT: 'medium', PRICE: { input: 2.0, output: 10.0 } };
+const JUDGE = { MODEL: 'claude-sonnet-5-5', ROUTER_MODEL: 'anthropic/claude-sonnet-5.5', MAX_TOKENS: 4000, EFFORT: 'medium', PRICE: { input: 2.0, output: 10.0 } };
 
 const doc = JSON.parse(fs.readFileSync(path.join(HERE, 'cases.json'), 'utf8'));
 
@@ -101,10 +102,53 @@ function check() {
 function requireSpend() {
   if (!flag('yes-spend')) fail('This makes paid model calls. Re-run with --yes-spend (and --max-usd N) once you have decided to spend.');
   require('dotenv').config({ path: path.join(ROOT, '.env') });
-  if (!process.env.ANTHROPIC_API_KEY) fail('ANTHROPIC_API_KEY is not set in .env.');
+  if (!require(path.join(ROOT, 'server/services/llmClient')).llmConfigured()) fail('No model key in .env — set AIROUTER_API_KEY or ANTHROPIC_API_KEY.');
+}
+
+// True when model calls go through the OpenAI-compatible router (AIROUTER_API_KEY).
+const viaRouter = () => require(path.join(ROOT, 'server/services/llmClient')).provider() === 'router';
+
+// The judge through the router: one chat-completions call that must answer in the verdict
+// schema. Same prompt, rubric and verdict reading as the direct path below.
+async function judgeViaRouter(c, run) {
+  const { LLM } = require(path.join(ROOT, 'server/config'));
+  const lines = lib.rubricLines(doc, c);
+  try {
+    const res = await fetch(`${LLM.ROUTER.BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${LLM.ROUTER.API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: JUDGE.ROUTER_MODEL,
+        max_tokens: JUDGE.MAX_TOKENS,
+        messages: [
+          { role: 'system', content: lib.JUDGE_SYSTEM },
+          { role: 'user', content: `${lib.judgePrompt(c, run, lines)}\n\nReply with one JSON object and nothing else: {"verdicts":[{"id":"…","verdict":"pass|fail|not_applicable","reason":"…"}]}` },
+        ],
+        response_format: { type: 'json_schema', json_schema: { name: 'verdicts', strict: true, schema: lib.judgeSchema(lines.map((l) => l.id)) } },
+      }),
+      signal: AbortSignal.timeout(120000),
+    });
+    if (!res.ok) return { error: `judge call failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 160)}`, cost_usd: 0 };
+    const data = await res.json();
+    const choice = (data.choices || [])[0] || {};
+    const u = data.usage || {};
+    const cost_usd = Number(u.total_cost) || lib.costUsd({ input_tokens: u.prompt_tokens || 0, output_tokens: u.completion_tokens || 0 }, JUDGE.PRICE);
+    const base = { model: data.model, usage: u, cost_usd };
+    if (choice.finish_reason === 'content_filter') return { ...base, error: 'judge refused' };
+    if (choice.finish_reason === 'length') return { ...base, error: 'judge reply truncated' };
+    if (!String(data.model || '').startsWith(JUDGE.ROUTER_MODEL)) return { ...base, error: `judge served by ${data.model}, not ${JUDGE.ROUTER_MODEL}` };
+    const text = String((choice.message && choice.message.content) || '');
+    let parsed = null;
+    try { parsed = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)); } catch { /* reported below */ }
+    if (!parsed) return { ...base, error: 'judge reply was not JSON' };
+    return { ...base, ...lib.readVerdicts(parsed, lines) };
+  } catch (err) {
+    return { error: `judge call failed: ${err.message}`, cost_usd: 0 };
+  }
 }
 
 async function judgeOne(client, c, run) {
+  if (viaRouter()) return judgeViaRouter(c, run);
   const { jsonSchemaOutputFormat } = require('@anthropic-ai/sdk/helpers/json-schema');
   const lines = lib.rubricLines(doc, c);
   try {
@@ -143,6 +187,10 @@ async function ensureFixture() {
        SELECT $1, $2, $3, $4, $5, $6 WHERE NOT EXISTS (SELECT 1 FROM portfolio WHERE user_id = $1 AND ticker = $2)`,
       [user.id, h.ticker, h.company_name || '', h.asset_class || 'equity', h.exchange || null, h.quantity ?? null]);
   }
+  // The app computes a user's impact feed when a holding is added or the news pipeline runs.
+  // The fixture's holdings are inserted directly, so its feed is computed here — otherwise a
+  // new fixture has no ranked events and every "top events" case fails for the wrong reason.
+  await require(path.join(ROOT, 'server/services/impactScoring')).recomputeImpactsForUser(Number(user.id));
   return Number(user.id);
 }
 
@@ -161,11 +209,13 @@ async function run() {
   // spend, so it is switched on for THIS PROCESS ONLY; the app's own setting is untouched.
   config.FEATURES.CLAUDE_REPORTS = true;
   const { answerQuestion } = require(path.join(ROOT, 'server/services/qa'));
-  const Anthropic = require('@anthropic-ai/sdk');
-  const judgeClient = useJudge ? new Anthropic() : null;
+  const judgeClient = useJudge && !viaRouter() ? new (require('@anthropic-ai/sdk'))() : null;
+  // The model name the provider reports back: the router uses its own "provider/model" names.
+  const answerModel = viaRouter() ? config.LLM.ROUTER.MODEL : config.QA.MODEL;
+  const judgeModel = viaRouter() ? JUDGE.ROUTER_MODEL : JUDGE.MODEL;
 
-  console.log(`Ask eval: ${cases.length} cases × ${reps} rep(s), judge ${useJudge ? JUDGE.MODEL : 'off'}, ceiling $${maxUsd}`);
-  console.log(`  answers by ${config.QA.MODEL}; the app's own $${config.REPORTS.GLOBAL_DAILY_USD_CEILING}/day kill-switch also applies`);
+  console.log(`Ask eval: ${cases.length} cases × ${reps} rep(s), judge ${useJudge ? judgeModel : 'off'}, ceiling $${maxUsd}`);
+  console.log(`  answers by ${answerModel}${viaRouter() ? ' (through the router)' : ''}; the app's own $${config.REPORTS.GLOBAL_DAILY_USD_CEILING}/day kill-switch also applies`);
   const userId = await ensureFixture();
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -204,7 +254,7 @@ async function run() {
         if (/guard: (no_api_key|claude_reports_disabled|global_kill_switch)|model_error: 40[13]\b|authentication/i.test(infra)) { stoppedAt = `${c.id} (${infra})`; break outer; }
         continue;
       }
-      if (r.writer === 'claude' && trace.model && !String(trace.model).startsWith(config.QA.MODEL)) {
+      if (r.writer === 'claude' && trace.model && !String(trace.model).startsWith(answerModel)) {
         errors.push({ id: c.id, rep, class: `served_model_mismatch: ${trace.model}`, cost_usd: cost });
         console.log(`  ! ${c.id} not scored — served by ${trace.model}`);
         continue;
@@ -239,7 +289,7 @@ async function run() {
     truncated: rows.length - scored.length,
     stopped_early: stoppedAt,
     spent_usd: Math.round(spent * 10000) / 10000,
-    models: { answers: config.QA.MODEL, judge: useJudge ? JUDGE.MODEL : null },
+    models: { answers: answerModel, judge: useJudge ? judgeModel : null, via: viaRouter() ? 'router' : 'anthropic' },
     cases_file_version: doc.version,
     strategies_mode: !!config.FEATURES.STRATEGIES,
   };
@@ -251,8 +301,7 @@ async function run() {
 
 async function judgeSelfTest() {
   requireSpend();
-  const Anthropic = require('@anthropic-ai/sdk');
-  const client = new Anthropic();
+  const client = viaRouter() ? null : new (require('@anthropic-ai/sdk'))();
   const c = doc.cases.find((x) => x.id === 'move-01') || doc.cases[0];
   const evidence = ['{"portfolio_change_pct":-0.8,"contributions":[{"ticker":"AAPL","change_pct":-2,"weight_pct":60,"contribution_pct":-1.2}],"unpriced":["RELIANCE","TCS"]}'];
   const probes = [

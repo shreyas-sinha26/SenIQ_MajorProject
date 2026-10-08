@@ -1,7 +1,8 @@
 /**
  * Portfolio weighting — the exposure weights that Portfolio Impact Scoring (the
  * North Star) is built on. Enriches a user's holdings with a live price, market
- * value, and two weights:
+ * value (market_value is in USD so holdings in different currencies compare; price
+ * and market_value_native stay in the holding's own currency), and two weights:
  *   - weight_pct:   true value/total, or null when a holding can't be priced
  *                   (this is what the portfolio UI shows — honest "N/A").
  *   - exposure_pct: same, but with an EQUAL-weight fallback so every holding has
@@ -10,7 +11,7 @@
  */
 
 const { query } = require('../db');
-const { getQuotes } = require('./priceService');
+const { getQuotes, usdRates } = require('./priceService');
 
 async function getWeightedHoldings(userId) {
   const holdings = await query(
@@ -20,13 +21,18 @@ async function getWeightedHoldings(userId) {
   );
   if (holdings.length === 0) return [];
 
-  const quotes = await getQuotes(holdings.map((h) => ({ ticker: h.ticker, assetClass: h.asset_class })));
+  const quotes = await getQuotes(holdings.map((h) => ({ ticker: h.ticker, assetClass: h.asset_class, exchange: h.exchange })));
+  // Holdings are quoted in their own currency (INR for NSE/BSE), so shares are worked
+  // out on a common USD value. No rate for a currency → that holding counts as unpriced.
+  const fx = await usdRates(Object.values(quotes).map((q) => q && q.currency));
 
   const enriched = holdings.map((h) => {
     const quote = quotes[h.ticker] || null;
     const price = quote ? quote.price : null;
     const qty = h.quantity != null ? Number(h.quantity) : null;
-    const marketValue = price != null && qty != null ? price * qty : null;
+    const nativeValue = price != null && qty != null ? price * qty : null;
+    const rate = quote ? fx[quote.currency] : null;
+    const marketValue = nativeValue != null && rate ? nativeValue / rate : null;
     return {
       ...h,
       quantity: qty,
@@ -34,7 +40,8 @@ async function getWeightedHoldings(userId) {
       price,
       currency: quote ? quote.currency : null,
       change_pct: quote && quote.changePct != null ? Math.round(quote.changePct * 100) / 100 : null,
-      market_value: marketValue,
+      market_value: marketValue,        // USD, comparable across holdings
+      market_value_native: nativeValue, // in `currency`
       weight_pct: null,   // display: true value/total, null when unpriced
       exposure_pct: null, // scoring: same, but with an equal-weight fallback
     };

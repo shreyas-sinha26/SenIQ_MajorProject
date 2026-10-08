@@ -2,7 +2,7 @@
  * Phase 5 — OAuth sign-in (Google + GitHub), authorization-code flow.
  *
  *   GET /api/auth/oauth/:provider            → 302 to the provider's consent page
- *   GET /api/auth/oauth/:provider/callback   → code exchange → SenIQ JWT → /app?oauth=<jwt>
+ *   GET /api/auth/oauth/:provider/callback   → code exchange → session cookie → /app
  *
  * Design notes:
  * - No SDKs: the exchanges are two fetch() calls per provider (Node ≥18).
@@ -16,13 +16,14 @@
  * - Errors never 500 the browser: every failure redirects back to the login
  *   tab with a human-readable ?oauth_error=…
  */
-const express = require('express');
+const { asyncRouter } = require('../middleware/asyncRouter');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { queryOne } = require('../db');
 const { OAUTH, APP_URL } = require('../config');
+const sessions = require('../services/sessions');
 
-const router = express.Router();
+const router = asyncRouter();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 const STATE_COOKIE = 'seniq_oauth_nonce';
 
@@ -169,12 +170,19 @@ async function upsertOAuthUser(provider, profile) {
   user = await queryOne('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [profile.email]);
   if (user) {
     if (!user.oauth_provider) {
+      // An account that never proved it owns this address may have been created by someone
+      // else to wait for the real owner. Linking it removes the password it was created
+      // with and ends its sessions, so only the provider identity can open it from here.
+      const unproven = !user.email_verified;
       await queryOne(
         `UPDATE users SET oauth_provider = $1, oauth_sub = $2,
-                avatar_url = COALESCE(avatar_url, $3), email_verified = TRUE
+                avatar_url = COALESCE(avatar_url, $3), email_verified = TRUE,
+                password_hash = CASE WHEN $5 THEN NULL ELSE password_hash END,
+                password_changed_at = CASE WHEN $5 THEN to_timestamp($6) ELSE password_changed_at END
           WHERE id = $4 RETURNING id`,
-        [provider, profile.sub, profile.avatar, user.id]
+        [provider, profile.sub, profile.avatar, user.id, unproven, Math.floor(Date.now() / 1000)]
       );
+      if (unproven) await sessions.endUserSessions(user.id);
     }
     return user;
   }
@@ -242,9 +250,9 @@ router.get('/:provider/callback', async (req, res) => {
     const profile = await provider.fetchProfile(String(code), redirectUriFor(providerKey));
     const user = await upsertOAuthUser(providerKey, profile);
 
-    // Same JWT shape the password flow issues — everything downstream is identical.
-    const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
-    res.redirect(`/app?oauth=${encodeURIComponent(token)}`);
+    // The same server-side session the password flow starts; its cookie rides this redirect.
+    await sessions.startSession(res, user.id, req);
+    res.redirect('/app');
   } catch (err) {
     console.error(`OAuth ${providerKey} callback error:`, err.message);
     return failRedirect(res, err.message || 'Sign-in failed — please retry');

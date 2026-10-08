@@ -1,13 +1,13 @@
-const express = require('express');
+const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne, execute } = require('../db');
 const { getCompanyName } = require('../services/tickerMatcher');
-const { resolveAsset, isLaunchAssetClass } = require('../services/assetRegistry');
+const { resolveAsset, isLaunchAssetClass, isValidTicker } = require('../services/assetRegistry');
 const { getWeightedHoldings } = require('../services/portfolioService');
 const { onboardHolding, buildCompanyBrief } = require('../services/onboarding');
 const { authMiddleware } = require('./auth');
 const { attachTier, upsell } = require('../middleware/tier');
 
-const router = express.Router();
+const router = asyncRouter();
 
 // All portfolio routes require auth + tier context (req.tier / req.tierCfg).
 router.use(authMiddleware, attachTier);
@@ -43,10 +43,16 @@ router.get('/', async (req, res) => {
 // ─── POST /api/portfolio ─────────────────────────────────────
 router.post('/', async (req, res) => {
   try {
-    const { ticker: rawTicker, asset_class: rawClass, exchange } = req.body;
+    const { ticker: rawTicker, asset_class: rawClass } = req.body || {};
     if (!rawTicker) return res.status(400).json({ error: 'Ticker is required' });
 
     const { ticker, assetClass, name } = resolveAsset(rawTicker, rawClass);
+    if (!isValidTicker(ticker)) {
+      return res.status(400).json({ error: 'That does not look like a ticker symbol — use letters and digits, e.g. AAPL or RELIANCE.' });
+    }
+    const exchange = req.body.exchange == null || req.body.exchange === ''
+      ? null : String(req.body.exchange).trim().toUpperCase();
+    if (exchange && !/^[A-Z]{1,12}$/.test(exchange)) return res.status(400).json({ error: 'Unknown exchange' });
 
     if (!isLaunchAssetClass(assetClass)) {
       return res.status(400).json({
@@ -81,7 +87,7 @@ router.post('/', async (req, res) => {
       `INSERT INTO portfolio (user_id, ticker, company_name, asset_class, exchange, quantity, cost_basis)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, monitoring_since`,
-      [req.user.id, ticker, companyName, assetClass, exchange || null, quantity, costBasis]
+      [req.user.id, ticker, companyName, assetClass, exchange, quantity, costBasis]
     );
 
     const holding = {
@@ -89,7 +95,7 @@ router.post('/', async (req, res) => {
       ticker,
       company_name: companyName,
       asset_class: assetClass,
-      exchange: exchange || null,
+      exchange,
       quantity,
       cost_basis: costBasis,
       monitoring_since: created.monitoring_since,

@@ -12,15 +12,16 @@
  * DELETE /api/reports/threads/:id     — delete a conversation
  */
 
-const express = require('express');
+const { asyncRouter } = require('../middleware/asyncRouter');
 const { authMiddleware } = require('./auth');
 const { attachTier, requireTier } = require('../middleware/tier');
+const { userRateLimit, LIMITS } = require('../middleware/rateLimit');
 const { generateBriefForUser, getLatestBrief } = require('../services/reports');
 const { answerQuestion } = require('../services/qa');
 const { createThread, getThread, listThreads, getMessages, recentHistory, olderTurns, appendTurn, deleteThread } = require('../services/askThreads');
 const { DISCLAIMER } = require('../config');
 
-const router = express.Router();
+const router = asyncRouter();
 router.use(authMiddleware, attachTier);
 
 // Phase 6 — the AI Workspace (daily brief + Q&A) is a Plus/Pro feature.
@@ -51,7 +52,7 @@ router.post('/daily/generate', async (req, res) => {
 // per user/day by tier; over the cap (or no key) it returns a deterministic grounded answer.
 // Body: { question, thread_id? }. With a thread_id the SERVER supplies the follow-up history
 // from that saved thread (the client can't inject turns); without one a new thread starts.
-router.post('/ask', async (req, res) => {
+router.post('/ask', userRateLimit(LIMITS.ASK), async (req, res) => {
   try {
     const body = req.body || {};
     let thread = null;
