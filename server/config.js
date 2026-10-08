@@ -160,7 +160,28 @@ const EVENT_TYPES = {
 //   recency    : time decay on the event's last_seen        (mult RECENCY_FLOOR..1)
 const IMPACT = {
   EVENT_WINDOW_HOURS: 72,     // only recent events compete for "today's most important"
-  MACRO_BROAD_FACTOR: 0.5,    // relevance of a macro event to a non-matching holding
+  // Relevance of a market-wide story to a holding it does not name. A market story moves
+  // many holdings a little, so it is scored well below a story about the holding itself,
+  // always at "macro" severity whatever its own type, and only against holdings listed in
+  // the market it is about. At 0.2 a clear results story on a holding outranks an equally
+  // strong market story once that holding is above ~15% of the exposure in that market;
+  // at the old 0.5 every market story counted as "50% of your exposure" and led the feed.
+  MACRO_BROAD_FACTOR: 0.2,
+  // How big a market story is, read from how much is being written about it: related
+  // market headlines are grouped into one story (materiality.groupStories) and the story's
+  // coverage (its headlines × their sources) multiplies the relevance above:
+  //   1 + GAIN × log2(coverage), capped at MAX  →  1 headline ×1, 4 ×2, 8 ×2.5, 16+ ×3.
+  // So a one-off market headline stays low, and a day when the whole market is the story
+  // climbs into the top handful.
+  MACRO_COVERAGE_GAIN: 0.5,
+  MACRO_COVERAGE_MAX: 3,
+  // What kind of writing a story is (eventTyping.classifyStance). Only a reported event
+  // counts in full; someone's view of it counts for less, and a list that names a holding
+  // in passing for less again. At 0.6 a commentary piece cannot clear the report's card bar.
+  STANCE_FACTOR: { event: 1, commentary: 0.6, roundup: 0.4 },
+  // How an impact score is worded for a reader. High is the level at which a story about a
+  // holding would raise an alert (MATERIALITY.HOLDING_THRESHOLD); below Medium it is background.
+  LEVELS: { HIGH: 0.10, MEDIUM: 0.04 },
   SECTOR_RELEVANCE: 0.4,      // relevance of a sector event to a holding in that sector
   Z_BOOST: 0.25,              // (materiality alerts) surprising z amplifies
   NOVELTY_BASE: 0.8,          // novelty mult = BASE + GAIN×min(|z|,3)/3 ; null z → 1.0
@@ -296,6 +317,15 @@ const REPORTS = {
   GLOBAL_DAILY_USD_CEILING: 5,   // global kill-switch: stop calling Claude past this day's spend
   // Haiku 4.5 pricing ($/1M tokens) for the cost estimate logged per call.
   PRICE_PER_MTOK: { input: 1.0, output: 5.0 },
+  // The written layer on a report's headline cards (services/cardWriter.js): one call
+  // rewrites all of a report's cards; a rewrite that fails its check keeps the template.
+  CARDS: {
+    TIERS: ['plus', 'pro'],
+    MAX_OUTPUT_TOKENS: 1800,     // up to six cards × three short lines, as JSON
+    PER_USER_DAILY_QUOTA: 2,     // one report a day, plus one retry if the send fails
+    SUMMARIES_PER_CARD: 2,       // article summaries shown to the model for each card
+    MAX_SUMMARY_CHARS: 600,      // each one clamped to this (untrusted feed text)
+  },
 };
 
 // ─── Ask it anything — portfolio Q&A (Engine Phase E6) ───────
@@ -433,6 +463,19 @@ const REPORT_EMAIL = {
   DEFAULT_MARKET: 'US',
   IN_EXCHANGES: ['NSE', 'BSE'],
   MAX_EVENTS: 4,                // events listed in a report
+  // Which headlines earn a card (reportInsights.pickCards). A story about a holding or its
+  // sector passes on STRENGTH = its impact per unit of exposure it touches, i.e. event-type
+  // severity × how one-sided the coverage is × novelty × confidence × recency (0 to ~1.2).
+  // Strength ignores position size, so the bar means the same for a 5-stock and a 30-stock
+  // portfolio. At 0.40 roughly the top tenth of stories about a holding pass (2 to 4 on a
+  // normal day): a results, deal, legal or outlook story with a clear reading does; an
+  // analyst rating rarely does; a "stocks to watch" round-up cannot.
+  CARDS: {
+    BAR: 0.40,
+    MIN_EXPOSURE_PCT: 3,        // the story must touch at least this much of the portfolio
+    MAX: 6,                     // hard cap, however busy the day
+    MIN: 2,                     // a quiet day still shows its best two, as background
+  },
   SUBJECT_PREFIX: '[SenIQ]',
 };
 
@@ -594,4 +637,13 @@ const AUTH_LIMITS = {
   MAX_PASSWORD_CHARS: 72,                            // bcrypt reads only the first 72 bytes
 };
 
-module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
+// ─── Browser sessions (services/sessions.js) ─────────────────
+const SESSION = {
+  COOKIE: 'seniq_session',
+  IDLE_DAYS: 7,          // unused this long → signed out (each use pushes it back)
+  ABSOLUTE_DAYS: 30,     // signed out this long after sign-in, however active
+  TOUCH_MINUTES: 5,      // how often activity is written back to the session row
+  REAUTH_MINUTES: 10,    // how long a password confirmation covers sensitive actions
+};
+
+module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };

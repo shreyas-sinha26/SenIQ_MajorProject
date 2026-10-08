@@ -12,7 +12,8 @@
  * The report is a PDF attachment (reportPdf.js); the email body is one line saying what is
  * attached. The daily report is drawn from the same brief the app shows
  * (reports.generateBriefForUser — its Claude guardrails and free fallback writer apply
- * unchanged). Nothing here calls a model.
+ * unchanged). For Plus and Pro the headline cards' lines are rewritten by Claude under the
+ * same guardrails (cardWriter.js); everything else in the report is written by code.
  */
 
 const { REPORT_EMAIL } = require('../config');
@@ -73,16 +74,22 @@ function dateLabel(date) {
 
 /**
  * Pure: the email that carries a report. The report itself is the attached PDF
- * (reportPdf.js); the message only says what it is. → { subject, text, html, filename }
+ * (reportPdf.js); the body only says what it is, and the subject leads with the report's
+ * verdict when one is passed. → { subject, text, html, filename }
  */
-function buildReportEmail(kind, { name, date }, { unsubscribeUrl = null } = {}) {
+function buildReportEmail(kind, { name, date, verdict = null }, { unsubscribeUrl = null } = {}) {
   const what = REPORT_NAME[kind] || REPORT_NAME.daily;
   const day = dateLabel(date);
   const hello = name ? `Hi ${String(name).trim().split(/\s+/)[0]},` : 'Hi,';
   const line = `Here is your SenIQ ${what} for ${day}. It is attached to this email as a PDF.`;
   const stop = 'You get this because report emails are on for your SenIQ account.';
 
-  const subject = `${REPORT_EMAIL.SUBJECT_PREFIX} Your ${what} — ${day.replace(/^\w+, /, '')}`;
+  // The subject carries the report's verdict when there is one, so it says whether to open it.
+  const short = (t) => { const c = String(t || '').replace(/\s+/g, ' ').trim(); return c.length > 70 ? `${c.slice(0, 69).trimEnd()}…` : c; };
+  const lead = !verdict ? `Your ${what}`
+    : verdict.level === 'check' ? `${verdict.text.replace(/ (today|this week)$/, '')}: ${short(verdict.detail)}`
+      : `Nothing needs your attention ${kind === 'weekly' ? 'this week' : 'today'}`;
+  const subject = `${REPORT_EMAIL.SUBJECT_PREFIX} ${lead} — ${day.replace(/^\w+, /, '')}`;
   const text = [hello, '', line, ...(unsubscribeUrl ? ['', `${stop} Stop them: ${unsubscribeUrl}`] : [])].join('\n');
   const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:560px;color:#111;font-size:14px;line-height:1.55">
   <p style="margin:0 0 12px">${esc(hello)}</p>
@@ -95,6 +102,29 @@ function buildReportEmail(kind, { name, date }, { unsubscribeUrl = null } = {}) 
 
 // ── What goes in each report (reads the engine's own data; no model call here) ──
 // Both return the object reportPdf.buildReportPdf draws.
+// The explaining sections (reportInsights.js). A report still goes out without them.
+async function insightsFor(user, market, kind) {
+  try {
+    return await require('./reportInsights').buildReportInsights(user.id, { market, kind, ...(kind === 'weekly' ? { maxCards: 1 } : {}) });
+  } catch (err) {
+    console.error(`Report insights failed for user ${user.id}:`, err.message);
+    return null;
+  }
+}
+
+// Plus and Pro: Claude rewrites the cards' template lines (cardWriter.js — guardrailed,
+// checked per card, template kept on any doubt). The verdict is not touched.
+async function withWrittenCards(user, insights) {
+  if (!insights || !(insights.cards || []).length) return insights;
+  try {
+    const { cards } = await require('./cardWriter').writeCardsForUser(user.id, user.subscription_tier, insights.cards);
+    return { ...insights, cards };
+  } catch (err) {
+    console.error(`Report card rewrite failed for user ${user.id}:`, err.message);
+    return insights;
+  }
+}
+
 async function dailyReport(user, date, market) {
   const { generateBriefForUser } = require('./reports');
   const brief = await generateBriefForUser(user.id); // today's brief: cached, or written now
@@ -105,6 +135,7 @@ async function dailyReport(user, date, market) {
     events: packet.top_events || [], moreEvents: 0,
     holdings: (packet.portfolio && packet.portfolio.top_holdings) || [],
     changed: packet.changed || null, smartMoney: packet.smart_money || null,
+    insights: await withWrittenCards(user, await insightsFor(user, market, 'daily')),
   };
 }
 
@@ -128,6 +159,7 @@ async function weeklyReport(user, date, market) {
   return {
     kind: 'weekly', name: user.name, dateLabel: `Week ending ${dateLabel(date)}`, marketLabel: REPORT_EMAIL.MARKETS[market].label,
     events, moreEvents: Math.max(0, total - 1), holdings, alertCount: alerts.n,
+    insights: await insightsFor(user, market, 'weekly'),
     note: total
       ? `Across your ${holdings.length} holding${holdings.length === 1 ? '' : 's'}, SenIQ tracked ${total} event${total === 1 ? '' : 's'} this week` +
         `${alerts.n ? ` and raised ${alerts.n} alert${alerts.n === 1 ? '' : 's'}` : ''}. The full ranked feed and a daily brief come with Plus.`
@@ -174,7 +206,7 @@ async function runReportEmails(deps = {}) {
         const report = kind === 'daily' ? await dailyReport(user, clock.date, market) : await weeklyReport(user, clock.date, market);
         const pdf = await buildPdfFn(report);
         const unsub = email.unsubscribeUrl(user.id, 'reports');
-        const { subject, text, html, filename } = buildReportEmail(kind, { name: user.name, date: clock.date }, { unsubscribeUrl: unsub });
+        const { subject, text, html, filename } = buildReportEmail(kind, { name: user.name, date: clock.date, verdict: report.insights && report.insights.verdict }, { unsubscribeUrl: unsub });
         const res = await sendEmailFn({
           to: user.email, subject, text, html, kind: `report_${kind}`, userId: user.id,
           attachments: [{ filename, content: pdf, contentType: 'application/pdf' }],

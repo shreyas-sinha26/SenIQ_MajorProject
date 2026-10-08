@@ -84,6 +84,8 @@ app.use((req, res, next) => {
 // API surfaces are callable from other origins (a notebook, a browser-based MCP client).
 app.use(['/v1', '/mcp'], cors());
 app.use(express.json());
+// Sign-in rides a cookie, so anything under /api that changes state must come from this site.
+app.use('/api', require('./services/sessions').sameOriginGuard);
 // index: false so "/" is handled explicitly below (landing page, not the app).
 app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 

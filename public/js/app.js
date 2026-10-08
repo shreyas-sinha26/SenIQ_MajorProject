@@ -1,6 +1,9 @@
 /* ═══ AI Portfolio Copilot — Frontend Application ═══ */
 const API = '';
-let token = localStorage.getItem('copilot_token');
+// Sign-in lives in an HttpOnly cookie the server sets; scripts never see it. This flag is
+// only a hint for the landing page ("Go to Dashboard") — /api/auth/me is what decides.
+const SIGNED_IN_HINT = 'seniq_signed_in';
+localStorage.removeItem('copilot_token'); // the old sign-in token, no longer used
 let currentUser = null;
 let sentimentChart = null;
 let refreshInterval = null;
@@ -12,6 +15,7 @@ let cachedBuckets = { holdings: [], market: [], world: [] };
 let cachedAlerts = [];
 let cachedSentiments = {};
 let cachedOverallScore = 50;
+let cachedOverallLabel = 'neutral';
 let newsExpanded = false;
 let alertsExpanded = false;
 let newsSearchQuery = '';
@@ -73,9 +77,10 @@ function assetClassOf(ticker) {
 // ─── API Helper ──────────────────────────────────────────────
 async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${API}${path}`, { ...opts, headers });
+  const res = await fetch(`${API}${path}`, { ...opts, headers, credentials: 'same-origin' });
   const data = await res.json().catch(() => ({}));
+  // The session ended on the server (idle, expired, or signed out elsewhere).
+  if (res.status === 401 && currentUser && !path.startsWith('/api/auth/')) sessionEnded();
   if (!res.ok) {
     const err = new Error(data.error || 'Request failed');
     err.status = res.status;
@@ -83,6 +88,20 @@ async function api(path, opts = {}) {
     throw err;
   }
   return data;
+}
+
+function showSignedOut() {
+  currentUser = null;
+  localStorage.removeItem(SIGNED_IN_HINT);
+  if (refreshInterval) clearInterval(refreshInterval);
+  document.getElementById('dashboard-view').classList.add('hidden');
+  document.getElementById('auth-view').classList.remove('hidden');
+}
+function sessionEnded() {
+  showSignedOut();
+  const errEl = document.getElementById('auth-error');
+  errEl.textContent = 'Your session has ended — please sign in again.';
+  errEl.classList.remove('hidden');
 }
 
 // ─── Toast Notifications ─────────────────────────────────────
@@ -162,8 +181,7 @@ function initAuth() {
           password: document.getElementById('login-password').value
         })
       });
-      token = data.token;
-      localStorage.setItem('copilot_token', token);
+      localStorage.setItem(SIGNED_IN_HINT, '1');
       currentUser = data.user;
       showDashboard();
     } catch (err) {
@@ -194,8 +212,7 @@ function initAuth() {
           password: document.getElementById('signup-password').value
         })
       });
-      token = data.token;
-      localStorage.setItem('copilot_token', token);
+      localStorage.setItem(SIGNED_IN_HINT, '1');
       currentUser = data.user;
       showDashboard();
       showToast('Welcome to SenIQ! 🚀', 'success');
@@ -344,7 +361,7 @@ function renderHoldings() {
       ? `${h.weight_pct}%`
       : h.quantity != null ? `${h.quantity} units` : '—';
     const priceInline = h.price != null
-      ? `<span class="ht-price">${fmtUsd(h.price)}${h.change_pct != null
+      ? `<span class="ht-price">${fmtPrice(h.price, h.currency)}${h.change_pct != null
           ? ` <span class="ht-chg ${h.change_pct >= 0 ? 'up' : 'down'}">${h.change_pct >= 0 ? '▲' : '▼'}${Math.abs(h.change_pct).toFixed(2)}%</span>`
           : ''}</span>`
       : '<span class="ht-price muted">—</span>';
@@ -581,18 +598,41 @@ async function loadNewsFeed() {
   }
 }
 
-// One news card. Shows a "+N sources" badge when several outlets covered the same
-// event (de-spam: the duplicates are collapsed into this one card).
+// One news card. Shows a "+N more" badge when several outlets carried the same article,
+// and "+N related headlines" when other headlines on the same story were folded into it.
 function renderNewsItem(a) {
   const time = timeAgo(new Date(a.published_at));
   const tickers = (a.matchedTickers || []).filter(t => t !== '__MARKET__').slice(0, 3);
   const sources = a.source_count > 1 ? `<span class="news-source-count">+${a.source_count - 1} more</span>` : '';
-  const score = Math.round(a.sentiment.score * 100);
-  const impactSign = a.sentiment.label === 'positive' ? '+' : a.sentiment.label === 'negative' ? '−' : '';
-  const impactVal = a.sentiment.label === 'negative' ? 100 - score : score;
+  // Other headlines on the same story, folded into this card by the server.
+  const related = a.related ? `<span class="news-source-count">+${a.related} related ${a.related === 1 ? 'headline' : 'headlines'}</span>` : '';
+  // The folded headlines themselves, behind a disclosure so the card stays one line.
+  const items = (a.related_items || []);
+  const relatedList = items.length ? `<details class="news-related"><summary>Show ${items.length === a.related ? 'them' : `${items.length} of them`}</summary><ul>${items.map((r) =>
+    `<li>${r.url && r.url !== '#' ? `<a href="${safeUrl(r.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.title)}</a>` : escapeHtml(r.title)}${r.source ? ` <span>${escapeHtml(r.source)}</span>` : ''}</li>`).join('')}</ul></details>` : '';
+  const stance = a.stance && a.stance !== 'event' ? `<span class="news-stance">${a.stance === 'roundup' ? 'Round-up' : 'Commentary'}</span>` : '';
+  // The engine's own figures for this reader: how much the story matters to their
+  // portfolio, which way it reads for what they hold, and how much of it the story reaches.
+  const LEVEL_WORD = { high: 'High', medium: 'Medium', low: 'Low' };
+  const READS = { positive: 'Reads positive', negative: 'Reads negative', neutral: 'Reads mixed' };
+  let engineLine;
+  if (a.impact == null) {
+    engineLine = '<span class="ni-label">Not linked to your holdings</span>';
+  } else {
+    const dir = a.direction || 'neutral';
+    const reach = a.exposure_pct == null ? ''
+      : a.tier === 'holding' ? `${a.exposure_pct}% of your portfolio` : 'market-wide';
+    engineLine = `<span class="ni-label">Impact on you</span>
+          <span class="ni-level ${a.impact_level}">${LEVEL_WORD[a.impact_level] || 'Low'}</span>
+          <span class="ni-conf" title="Impact score: your exposure × how strong, surprising and recent the story is">${Number(a.impact).toFixed(2)}</span>
+          <span class="ni-sep">·</span>
+          <span class="ni-score ${dir}">${READS[dir]}</span>
+          ${reach ? `<span class="ni-sep">·</span><span class="ni-conf">${reach}</span>` : ''}`;
+  }
+  const dot = a.direction || a.sentiment.label;
   return `
     <div class="news-item">
-      <div class="news-sentiment-dot ${a.sentiment.label}"></div>
+      <div class="news-sentiment-dot ${dot}"></div>
       <div class="news-content">
         <div class="news-title">${a.url
           ? `<a href="${safeUrl(a.url)}" target="_blank" rel="noopener noreferrer" class="news-title-link">${escapeHtml(a.title)}</a>`
@@ -601,14 +641,14 @@ function renderNewsItem(a) {
           ${tickers.map(t => `<span class="news-ticker">${escapeHtml(t)}</span>`).join('')}
           <span>${escapeHtml(a.source || '')}</span>
           ${sources}
+          ${related}
+          ${stance}
           <span>${time}</span>
         </div>
         <div class="news-impact-row">
-          <span class="ni-label">Impact</span>
-          <span class="ni-score ${a.sentiment.label}">${impactSign}${impactVal}</span>
-          <span class="ni-sep">·</span>
-          <span class="ni-conf">Confidence ${score}%</span>
+          ${engineLine}
         </div>
+        ${relatedList}
       </div>
     </div>`;
 }
@@ -758,6 +798,7 @@ async function loadPortfolioSentiment() {
     const data = await api('/api/news/portfolio-sentiment');
     cachedSentiments = data.sentiments || {};
     cachedOverallScore = data.overallScore || 50;
+    cachedOverallLabel = data.overallLabel || 'neutral';
 
     // Update individual holding rows (always, regardless of filter)
     for (const [ticker, s] of Object.entries(cachedSentiments)) {
@@ -867,13 +908,15 @@ function renderImpactFeed(top, feed) {
       <span class="impact-exposure">${top.exposure_pct}% of your exposure</span>
       <span class="impact-source">${escapeHtml(top.source || top.platform || '')}</span>
       <span class="impact-time">${timeAgo(new Date(top.published_at))}</span>
+      ${top.related ? `<span class="impact-related">+${top.related} related ${top.related === 1 ? 'headline' : 'headlines'}</span>` : ''}
+      ${top.stance && top.stance !== 'event' ? `<span class="impact-related">${top.stance === 'roundup' ? 'round-up' : 'commentary'}</span>` : ''}
     </div>`;
 
   if (list) list.innerHTML = feed.slice(1).map(e => {
     const d = e.direction || 'neutral';
     const inner = `
         <span class="impact-dir ${d}">${DIR_ICON[d]}</span>
-        <span class="impact-row-title">${escapeHtml(e.title)}</span>
+        <span class="impact-row-title">${escapeHtml(e.title)}${e.related ? ` <span class="impact-related">+${e.related} related</span>` : ''}${e.stance && e.stance !== 'event' ? ` <span class="impact-related">· ${e.stance === 'roundup' ? 'round-up' : 'commentary'}</span>` : ''}</span>
         <span class="impact-row-exposure">${e.exposure_pct}%</span>`;
     return hasUrl(e.url)
       ? `<a class="impact-row glass" href="${safeUrl(e.url)}" target="_blank" rel="noopener">${inner}</a>`
@@ -882,24 +925,17 @@ function renderImpactFeed(top, feed) {
 }  // end renderImpactFeed
 
 function renderFilteredSentiment() {
-  let score, label, sentimentsForChart;
-
-  if (activeFilter && cachedSentiments[activeFilter]) {
-    // Show single ticker's score as the KPI
-    const s = cachedSentiments[activeFilter];
-    score = Math.round(s.score * 100);
-    sentimentsForChart = { [activeFilter]: s };
-  } else {
-    score = cachedOverallScore;
-    sentimentsForChart = cachedSentiments;
-  }
-
-  label = score > 65 ? 'Bullish' : score < 35 ? 'Bearish' : 'Neutral';
+  // The engine's score and its own reading (above 60 positive, below 40 negative), for one
+  // holding when a filter is on, otherwise for the portfolio weighted by position size.
+  const one = activeFilter && cachedSentiments[activeFilter];
+  const score = one ? Math.round(one.score * 100) : cachedOverallScore;
+  const reading = one ? one.label : cachedOverallLabel;
+  const label = reading === 'positive' ? 'Bullish' : reading === 'negative' ? 'Bearish' : 'Neutral';
 
   document.getElementById('portfolio-score').textContent = score;
   const labelEl = document.getElementById('portfolio-score-label');
   labelEl.textContent = activeFilter ? `${activeFilter} — ${label}` : label;
-  labelEl.style.color = score > 65 ? 'var(--positive)' : score < 35 ? 'var(--negative)' : 'var(--neutral)';
+  labelEl.style.color = reading === 'positive' ? 'var(--positive)' : reading === 'negative' ? 'var(--negative)' : 'var(--neutral)';
 
   // Animate ring
   const circle = document.getElementById('score-circle');
@@ -910,70 +946,222 @@ function renderFilteredSentiment() {
     circle.style.transition = 'stroke-dashoffset 1.5s ease';
   }
 
-  updateSentimentChart(sentimentsForChart);
+  updateSentimentChart();
+}
+
+// ─── Analytics page: the score, explained ────────────────────
+// One request (GET /api/news/sentiment-breakdown) feeds the whole page: the headline, the
+// chart, a card per holding and the stories behind each score. The numbers are the
+// engine's own, the same ones the "why" button on a holding and Ask use.
+let cachedBreakdown = null;
+let breakdownLoadedAt = 0;
+const SENTI_WORD = { positive: 'Positive', negative: 'Negative', neutral: 'Mixed' };
+const SENTI_COLOR = { positive: '#14B86A', negative: '#EF4444', neutral: '#94A3B8' };
+const signed = (n, d = 1) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(Number(n)).toFixed(d)}`;
+
+async function loadAnalytics(force = false) {
+  if (!force && cachedBreakdown && Date.now() - breakdownLoadedAt < 60_000) return renderAnalytics();
+  try {
+    cachedBreakdown = await api('/api/news/sentiment-breakdown');
+    breakdownLoadedAt = Date.now();
+    renderAnalytics();
+  } catch (err) {
+    document.getElementById('an-summary').innerHTML = `<p class="empty-state small">${escapeHtml(err.message || 'Could not load the sentiment breakdown.')}</p>`;
+  }
+}
+
+// Called wherever the old single chart was refreshed (dashboard load, ticker filter).
+function updateSentimentChart() {
+  if (cachedBreakdown) renderAnalytics();
+}
+
+function renderAnalytics() {
+  const b = cachedBreakdown;
+  if (!b) return;
+  const shown = activeFilter ? b.holdings.filter((h) => h.ticker === activeFilter) : b.holdings;
+  renderAnalyticsSummary(b, shown);
+  renderAnalyticsChart(b, shown);
+  document.getElementById('an-cards').innerHTML = shown.length
+    ? shown.map((h) => analyticsCard(h, b)).join('')
+    : '<p class="empty-state small">Add a holding to see how the news on it reads.</p>';
+}
+
+function renderAnalyticsSummary(b, shown) {
+  const el = document.getElementById('an-summary');
+  const p = b.portfolio;
+  if (!b.holdings.length) { el.innerHTML = '<p class="empty-state small">Add holdings to your portfolio to see their sentiment explained here.</p>'; return; }
+  if (activeFilter && shown.length === 1) {
+    const h = shown[0];
+    el.innerHTML = `<div class="an-sum-figure"><div class="an-sum-num">${h.has_news ? h.score : '—'}</div><div class="an-sum-cap">${escapeHtml(h.ticker)} sentiment</div></div>
+      <ul class="an-sum-lines"><li>${analyticsSentence(h, b)}</li><li class="muted">Showing ${escapeHtml(h.ticker)} only. Clear the filter on the Dashboard to see every holding.</li></ul>`;
+    return;
+  }
+  if (p.weighted_score == null) { el.innerHTML = `<p class="empty-state small">No scored articles on your holdings in the last ${b.window_hours} hours, so there is nothing to read yet.</p>`; return; }
+  const parts = [`${p.positive} positive`, `${p.neutral} mixed`, `${p.negative} negative`];
+  const quiet = p.holdings - p.with_news;
+  const lines = [
+    `Weighted by position size, the news across your holdings reads <span class="an-pill ${p.label}">${SENTI_WORD[p.label]}</span> at <strong>${p.weighted_score}</strong> out of 100. The plain average, counting every holding equally, is ${p.score}.`,
+    `Of ${p.with_news} holding${p.with_news === 1 ? '' : 's'} with recent news: ${parts.join(', ')}.${quiet ? ` ${quiet} had no articles in the last ${b.window_hours} hours.` : ''}`,
+  ];
+  const lift = p.biggest_lift, drag = p.biggest_drag;
+  const who = (x) => `<strong>${escapeHtml(x.ticker)}</strong> (score ${x.score}, ${x.exposure_pct}% of your portfolio)`;
+  if (lift || drag) lines.push([lift ? `Lifting it most: ${who(lift)}.` : '', drag ? `Pulling it down most: ${who(drag)}.` : ''].filter(Boolean).join(' '));
+  el.innerHTML = `<div class="an-sum-figure"><div class="an-sum-num">${p.weighted_score}</div><div class="an-sum-cap">Portfolio sentiment</div></div>
+    <ul class="an-sum-lines">${lines.map((l) => `<li>${l}</li>`).join('')}
+      <li class="muted">A large position moves the weighted figure more than a small one. Sentiment describes the coverage; it is not a forecast of price.</li></ul>`;
+}
+
+// One sentence a reader can act on: the reading, how unusual it is, and the trend.
+function analyticsSentence(h, b) {
+  const t = escapeHtml(h.ticker);
+  if (!h.has_news) return `No scored articles on ${t} in the last ${b.window_hours} hours, so its score rests at neutral.`;
+  let s = `News on ${t} reads <strong>${SENTI_WORD[h.label].toLowerCase()}</strong> (${h.score}).`;
+  if (h.baseline) {
+    if (h.baseline.z == null) s += ' There is too little history yet to compare it with its own normal.';
+    else if (Math.abs(h.baseline.z) < 0.5) s += ` That is in line with its own normal of ${h.baseline.usual}.`;
+    else s += ` That is ${Math.abs(h.baseline.z).toFixed(1)}σ ${h.baseline.z > 0 ? 'above' : 'below'} its own normal of ${h.baseline.usual}${Math.abs(h.baseline.z) >= 1 ? ', which is unusual for it' : ''}.`;
+  }
+  const m = h.momentum;
+  if (m.delta == null) s += ' Not enough history for a week-on-week trend.';
+  else if (m.direction === 'improving') s += ` Coverage is improving: up ${Math.abs(m.delta)} points on the week before.`;
+  else if (m.direction === 'declining') s += ` Coverage is worsening: down ${Math.abs(m.delta)} points on the week before.`;
+  else s += ' Coverage is steady week on week.';
+  return s;
+}
+
+// A small line of the daily average over the last two weeks, on the same 0–100 scale.
+function analyticsSparkline(trend) {
+  if (!trend || trend.length < 3) return '<span class="muted">Needs 3 days of articles</span>';
+  const W = 220, H = 34, pad = 3;
+  const x = (i) => pad + (i * (W - pad * 2)) / (trend.length - 1);
+  const y = (v) => pad + ((100 - v) * (H - pad * 2)) / 100;
+  const pts = trend.map((d, i) => `${x(i).toFixed(1)},${y(d.score).toFixed(1)}`).join(' ');
+  const last = trend[trend.length - 1];
+  return `<svg class="an-spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="Daily sentiment, ${trend[0].date} to ${last.date}: ${trend.map((d) => d.score).join(', ')}">
+    <title>${trend.map((d) => `${d.date}: ${d.score}`).join('\n')}</title>
+    <line x1="${pad}" x2="${W - pad}" y1="${y(50)}" y2="${y(50)}" stroke="#CBD5E1" stroke-width="1" stroke-dasharray="3 3"/>
+    <polyline points="${pts}" fill="none" stroke="#0A2540" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${x(trend.length - 1).toFixed(1)}" cy="${y(last.score).toFixed(1)}" r="4" fill="#0A2540" stroke="#fff" stroke-width="2"/>
+  </svg>`;
+}
+
+function analyticsCard(h, b) {
+  const total = h.split.positive + h.split.neutral + h.split.negative;
+  const seg = (k) => (h.split[k] ? `<i class="${k}" style="flex:${h.split[k]}" title="${h.split[k]} ${SENTI_WORD[k].toLowerCase()}"></i>` : '');
+  const split = total
+    ? `<div><div class="an-split">${seg('positive')}${seg('neutral')}${seg('negative')}</div>
+        <div class="an-split-text">${total} read: ${h.split.positive} positive · ${h.split.neutral} mixed · ${h.split.negative} negative</div></div>`
+    : '<span class="muted">None in the window</span>';
+  const move = h.change_pct == null ? '' : ` · latest session ${signed(h.change_pct, 2)}%`;
+  let drivers = '';
+  if (b.depth !== 'full') {
+    drivers = `<div class="an-drivers">${upgradeNote('See each holding\'s own normal and the stories moving its score on Plus.')}</div>`;
+  } else if (h.drivers && h.drivers.length) {
+    const unit = h.driver_unit === 'sigma' ? 'σ' : ' pts';
+    const rows = h.drivers.map((x) => {
+      const title = x.url && x.url !== '#' ? `<a href="${safeUrl(x.url)}" target="_blank" rel="noopener">${escapeHtml(x.title)}</a>` : escapeHtml(x.title);
+      return `<li class="drv-item ${x.direction}">
+        <span class="drv-arrow">${x.direction === 'up' ? '▲' : x.direction === 'down' ? '▼' : '■'}</span>
+        <span class="drv-title">${title}</span>
+        <span class="drv-meta">${escapeHtml(x.source || '')} · ${escapeHtml(x.date || '')}${x.articles > 1 ? ` · ${x.articles} articles` : ''}</span>
+        <span class="drv-contrib">${signed(x.contribution, h.driver_unit === 'sigma' ? 2 : 1)}${unit}</span>
+      </li>`;
+    }).join('');
+    drivers = `<div class="an-drivers"><div class="an-drivers-head">Stories moving this score most</div><div class="drv-rest" style="margin:0 0 4px">${h.driver_unit === 'sigma' ? '▲ pushed it above its own normal, ▼ pulled it below.' : '▲ pushed it above neutral (50), ▼ pulled it below.'}</div><ul class="drv-list">${rows}</ul>
+      ${h.other_stories ? `<div class="drv-rest">${h.other_stories} other ${h.other_stories === 1 ? 'story' : 'stories'} make up the rest.</div>` : ''}</div>`;
+  }
+  return `<article class="an-card">
+    <div class="an-card-head">
+      <div><div class="an-card-ticker">${escapeHtml(h.ticker)}</div><div class="an-card-name">${escapeHtml(h.name || '')}</div></div>
+      <div class="an-card-score"><b>${h.has_news ? h.score : '—'}</b><span class="an-pill ${h.label}">${h.has_news ? SENTI_WORD[h.label] : 'No news'}</span></div>
+    </div>
+    <p class="an-card-say">${analyticsSentence(h, b)}</p>
+    <div class="an-rows">
+      <div class="an-row"><span>Articles, last ${b.window_hours}h</span>${split}</div>
+      <div class="an-row"><span>Daily trend, 14 days</span><div>${analyticsSparkline(h.trend)}</div></div>
+      <div class="an-row"><span>In your portfolio</span><span>${h.exposure_pct == null ? '—' : `${h.exposure_pct}% of it`}${move}</span></div>
+    </div>
+    ${drivers}
+  </article>`;
 }
 
 // ─── Sentiment Chart ─────────────────────────────────────────
-function updateSentimentChart(sentiments) {
+// Bars = the score now, coloured by its reading. The dash on each bar = that holding's own
+// 90-day normal (Plus). The shaded band is the mixed zone, 40 to 60.
+const mixedZoneBand = {
+  id: 'mixedZoneBand',
+  beforeDatasetsDraw(chart) {
+    const { ctx, chartArea, scales } = chart;
+    if (!chartArea) return;
+    const top = scales.y.getPixelForValue(60), bottom = scales.y.getPixelForValue(40);
+    ctx.save();
+    ctx.fillStyle = '#F1F5F9';
+    ctx.fillRect(chartArea.left, top, chartArea.right - chartArea.left, bottom - top);
+    ctx.restore();
+  },
+};
+
+function renderAnalyticsChart(b, shown) {
   const ctx = document.getElementById('sentiment-chart');
   if (!ctx) return;
-
-  const tickers = Object.keys(sentiments);
-  const scores = tickers.map(t => Math.round(sentiments[t].score * 100));
-  const colors = tickers.map(t => {
-    const s = sentiments[t].score;
-    return s > 0.6 ? 'rgba(20,184,106,0.85)' : s < 0.4 ? 'rgba(239,68,68,0.85)' : 'rgba(100,116,139,0.55)';
-  });
-  const borderColors = tickers.map(t => {
-    const s = sentiments[t].score;
-    return s > 0.6 ? '#14B86A' : s < 0.4 ? '#EF4444' : '#64748B';
-  });
+  const rows = shown.filter((h) => h.has_news);
+  const hasUsual = b.depth === 'full' && rows.some((h) => h.baseline && h.baseline.usual != null);
+  document.getElementById('an-legend').innerHTML = [
+    '<span><i class="an-key" style="background:#14B86A"></i>Positive, above 60</span>',
+    '<span><i class="an-key" style="background:#94A3B8"></i>Mixed, 40 to 60</span>',
+    '<span><i class="an-key" style="background:#EF4444"></i>Negative, below 40</span>',
+    hasUsual ? `<span><i class="an-key dash"></i>Its own ${b.baseline_days}-day normal</span>` : '',
+    '<span><i class="an-key band"></i>Mixed zone</span>',
+  ].join('');
+  document.getElementById('an-chart-caption').textContent = hasUsual
+    ? 'Read each bar against its own dash, not against the other bars: a bar well above or below its dash is the unusual one, whatever its height.'
+    : 'A bar above the shaded band reads positive, below it negative.';
 
   if (sentimentChart) sentimentChart.destroy();
-
+  const datasets = [{
+    type: 'bar', label: 'Score now', order: 2,
+    data: rows.map((h) => h.score),
+    backgroundColor: rows.map((h) => SENTI_COLOR[h.label]),
+    borderRadius: 4, borderSkipped: 'bottom', maxBarThickness: 64,
+  }];
+  if (hasUsual) {
+    datasets.push({
+      type: 'line', label: 'Its own normal', order: 1, showLine: false,
+      data: rows.map((h) => (h.baseline ? h.baseline.usual : null)),
+      pointStyle: 'line', pointRadius: 26, pointHoverRadius: 28, pointBorderWidth: 3, pointHoverBorderWidth: 3,
+      pointBorderColor: '#0A2540', pointBackgroundColor: '#0A2540',
+    });
+  }
   sentimentChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: tickers,
-      datasets: [{
-        label: 'Sentiment Score',
-        data: scores,
-        backgroundColor: colors,
-        borderColor: borderColors,
-        borderWidth: 2,
-        borderRadius: 8,
-        borderSkipped: false,
-      }]
-    },
+    data: { labels: rows.map((h) => h.ticker), datasets },
+    plugins: [mixedZoneBand],
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: '#FFFFFF',
-          titleColor: '#1E293B',
-          bodyColor: '#64748B',
-          borderColor: '#E2E8F0',
-          borderWidth: 1,
-          cornerRadius: 8,
-          padding: 12,
-          callbacks: { label: (ctx) => `Sentiment: ${ctx.raw}%` }
-        }
+          backgroundColor: '#FFFFFF', titleColor: '#1E293B', bodyColor: '#475569',
+          borderColor: '#E2E8F0', borderWidth: 1, cornerRadius: 8, padding: 12, displayColors: false,
+          filter: (item) => item.datasetIndex === 0,
+          callbacks: {
+            label: (item) => {
+              const h = rows[item.dataIndex];
+              const out = [`Score now: ${h.score} (${SENTI_WORD[h.label].toLowerCase()})`];
+              if (h.baseline && h.baseline.usual != null) out.push(`Its own normal: ${h.baseline.usual}${h.baseline.z != null ? ` (${signed(h.baseline.z)}σ)` : ''}`);
+              out.push(`${h.articles} article${h.articles === 1 ? '' : 's'} in the last ${b.window_hours}h`);
+              return out;
+            },
+          },
+        },
       },
       scales: {
-        y: {
-          min: 0, max: 100,
-          grid: { color: '#EEF2F7' },
-          ticks: { color: '#64748B', font: { family: 'Inter' } }
-        },
-        x: {
-          grid: { display: false },
-          ticks: { color: '#1E293B', font: { family: 'Inter', weight: 600 } }
-        }
+        y: { min: 0, max: 100, grid: { color: '#EEF2F7' }, ticks: { color: '#64748B', font: { family: 'Inter' }, stepSize: 20 } },
+        x: { grid: { display: false }, ticks: { color: '#1E293B', font: { family: 'Inter', weight: 600 } } },
       },
-      animation: { duration: 1200, easing: 'easeOutQuart' }
-    }
+      animation: { duration: 500, easing: 'easeOutQuart' },
+    },
   });
 }
 
@@ -1144,12 +1332,10 @@ function initUserMenu() {
     switchToPage(previousPage);
   });
 
-  document.getElementById('logout-btn').addEventListener('click', () => {
-    token = null; currentUser = null;
-    localStorage.removeItem('copilot_token');
-    if (refreshInterval) clearInterval(refreshInterval);
-    document.getElementById('dashboard-view').classList.add('hidden');
-    document.getElementById('auth-view').classList.remove('hidden');
+  document.getElementById('logout-btn').addEventListener('click', async () => {
+    // Ends the session on the server; the page signs out here whether or not that call lands.
+    try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* signed out locally regardless */ }
+    showSignedOut();
     showToast('Signed out', 'info');
   });
 
@@ -1202,9 +1388,8 @@ function initUserMenu() {
     if (nw.length < 8) return showProfileMsg(msgEl, 'New password must be at least 8 characters', 'error');
     try {
       document.getElementById('profile-pw-btn').disabled = true;
-      const changed = await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: nw }) });
-      // The change signs out every other session; this one carries on with the new token.
-      if (changed.token) { token = changed.token; localStorage.setItem('copilot_token', token); }
+      // The change signs out every other session; this one carries on.
+      await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: nw }) });
       document.getElementById('profile-cur-pw').value = '';
       document.getElementById('profile-new-pw').value = '';
       document.getElementById('profile-confirm-pw').value = '';
@@ -1796,7 +1981,7 @@ function switchToPage(page) {
   if (STRATEGY_PAGES.includes(page) && !strategiesEnabled()) page = 'dashboard';
   document.querySelectorAll('.main-tab').forEach(t => t.classList.toggle('active', t.dataset.page === page));
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('hidden', p.id !== `page-${page}`));
-  if (page === 'analytics') updateSentimentChart(activeFilter && cachedSentiments[activeFilter] ? { [activeFilter]: cachedSentiments[activeFilter] } : cachedSentiments);
+  if (page === 'analytics') loadAnalytics();
   if (page === 'ai') { loadDailyBrief(); loadAskThreads(); }
   if (page === 'profile') { populateProfilePage(currentUser); loadPlans(); loadApiKeys(); loadEmailPrefs(); }
   if (page === 'backtest') initBacktestPage();
@@ -3084,6 +3269,14 @@ function fmtUsd(n) {
   return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 }
 
+// Format a price in its own currency (₹ for NSE/BSE holdings); USD when none is given.
+function fmtPrice(n, currency) {
+  if (!currency || currency === 'USD') return fmtUsd(n);
+  if (n == null || isNaN(n)) return '—';
+  const num = Number(n).toLocaleString(currency === 'INR' ? 'en-IN' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return currency === 'INR' ? '₹' + num : `${num} ${escapeHtml(currency)}`;
+}
+
 // ─── Company Brief (E4 onboarding) ───────────────────────────
 const BRIEF_TYPE_LABEL = {
   ma: 'M&A', legal: 'Legal', disruption: 'Disruption', executive: 'Exec change',
@@ -3200,8 +3393,6 @@ async function loadDailyBrief() {
   }
 }
 
-const WRITER_LABEL = { claude: 'Written by Claude', ollama: 'Local model', deterministic: 'Auto-generated' };
-
 function renderDailyBrief(brief) {
   const el = document.getElementById('daily-brief');
   if (!el) return;
@@ -3223,7 +3414,6 @@ function renderDailyBrief(brief) {
   el.innerHTML = `
     <div class="brief-top">
       <span class="brief-date">${escapeHtml(dateStr)}</span>
-      <span class="brief-writer" title="${escapeHtml(brief.model || '')}">${WRITER_LABEL[brief.writer] || 'Brief'}</span>
     </div>
     <div class="brief-headline">${escapeHtml(brief.headline || '')}</div>
     <div class="brief-changes">${chips.join('')}</div>
@@ -3543,8 +3733,17 @@ async function createApiKey() {
   const nameInput = document.getElementById('api-key-name');
   const msgEl = document.getElementById('api-key-msg');
   const btn = document.getElementById('api-key-create-btn');
+  const reauthRow = document.getElementById('api-key-reauth');
+  const reauthInput = document.getElementById('api-key-reauth-pw');
   try {
     btn.disabled = true;
+    // Asked for the password on the last try: confirm it first, then create the key.
+    if (!reauthRow.classList.contains('hidden')) {
+      if (!reauthInput.value) return showProfileMsg(msgEl, 'Enter your password to create a key with write access.', 'error');
+      await api('/api/auth/reauth', { method: 'POST', body: JSON.stringify({ password: reauthInput.value }) });
+      reauthInput.value = '';
+      reauthRow.classList.add('hidden');
+    }
     const created = await api('/api/keys', {
       method: 'POST',
       body: JSON.stringify({ name: nameInput.value.trim(), can_write: document.getElementById('api-key-write').checked }),
@@ -3569,6 +3768,10 @@ async function createApiKey() {
     if (err.status === 402) {
       showProfileMsg(msgEl, err.message || 'API keys require the Pro plan.', 'error');
       goToPlans();
+    } else if (err.status === 403 && err.data && err.data.reauth) {
+      // A key with write access needs the password confirmed in the last few minutes.
+      if (err.data.can_use_password) { reauthRow.classList.remove('hidden'); reauthInput.focus(); }
+      showProfileMsg(msgEl, err.data.can_use_password ? 'Confirm your password, then press Create Key again.' : err.message, 'error');
     } else {
       showProfileMsg(msgEl, err.message, 'error');
     }
@@ -3644,14 +3847,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Phase 5 boot: OAuth return, OAuth errors, reset + verify links ──
   {
     const qp = new URLSearchParams(location.search);
-    // The sign-in token arrives in the fragment (never sent to a server or in a Referer).
-    const oauthTok = new URLSearchParams(location.hash.slice(1)).get('oauth');
-    if (oauthTok) {
-      // Callback landed with a fresh SenIQ JWT — adopt it and clean the URL.
-      token = oauthTok;
-      localStorage.setItem('copilot_token', token);
-      history.replaceState({}, '', '/app');
-    }
     const oauthErr = qp.get('oauth_error');
     if (oauthErr) {
       const errEl = document.getElementById('auth-error');
@@ -3673,15 +3868,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // Check for existing session
-  if (token) {
-    try {
-      const data = await api('/api/auth/me');
-      currentUser = data.user;
-      showDashboard();
-    } catch (err) {
-      token = null;
-      localStorage.removeItem('copilot_token');
-    }
+  // Check for an existing session. Always asked, hint or not: a Google/GitHub sign-in
+  // returns here with only the cookie set.
+  try {
+    const data = await api('/api/auth/me');
+    currentUser = data.user;
+    localStorage.setItem(SIGNED_IN_HINT, '1');
+    showDashboard();
+  } catch (err) {
+    localStorage.removeItem(SIGNED_IN_HINT);
   }
 });

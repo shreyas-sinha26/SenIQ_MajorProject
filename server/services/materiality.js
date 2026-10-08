@@ -169,10 +169,49 @@ function regionOf(title = '', source = '') {
   return 'GLOBAL';
 }
 
-function sameStory(a, b) {
+// Words that name one running market topic by themselves: an institution, a currency, a
+// commodity. Two market headlines about "RBI" are the same story even if they share no
+// other word. Used only where a caller asks for it (the impact feed), not for alerts.
+const ANCHOR_WORDS = ['rbi', 'mpc', 'repo', 'rupee', 'sebi', 'gst', 'budget', 'fed', 'fomc', 'treasury', 'yields',
+  'ecb', 'boj', 'yen', 'opec', 'crude', 'brent', 'tariff', 'tariffs', 'inflation', 'cpi', 'jobs', 'payrolls', 'fpi', 'fii'];
+const ANCHORS = new Set(ANCHOR_WORDS.flatMap((w) => [...storyTokens(w)]));
+
+// A headline about an index moving ("Sensex tanks 780 pts", "Nifty slips below 22,400")
+// names its topic with words storyTokens throws away as filler. For the feed those headlines
+// are one story per market and direction, so they get one marker token each.
+const INDEX_RE = { IN: /\b(sensex|nifty|dalal street|d-st)\b/i, US: /\b(dow jones|dow|nasdaq|s&p ?500|wall street)\b/i };
+const INDEX_MOVE = {
+  down: /\b(crash\w*|tank\w*|slump\w*|falls?|fell|drops?|dropped|down|lows?|meltdown|sell-?off|slips?|sinks?|plunge\w*|bleed\w*|loss(es)?|wip\w+ out)\b/i,
+  up: /\b(rall(y|ies|ied)|surge\w*|jumps?|gains?|rebound\w*|recover\w*|highs?|rises?|rose|soar\w*|climb\w*)\b/i,
+  outlook: /\b(outlook|prediction|preview|ahead|expect\w*)\b/i,
+};
+// Key words of a headline for the feed: storyTokens plus the index-move markers.
+function feedTokens(title = '') {
+  const out = storyTokens(title);
+  for (const [market, re] of Object.entries(INDEX_RE)) {
+    if (!re.test(title)) continue;
+    for (const [move, mre] of Object.entries(INDEX_MOVE)) if (mre.test(title)) { out.add(`§index-${market}-${move}`); break; }
+  }
+  return out;
+}
+for (const market of Object.keys(INDEX_RE)) for (const move of Object.keys(INDEX_MOVE)) ANCHORS.add(`§index-${market}-${move}`);
+
+// The same idea for news on one holding: two headlines about its results are one story,
+// and so are two about its dividend, whatever else they say.
+const HOLDING_TOPIC_WORDS = ['results', 'earnings', 'dividend', 'buyback', 'guidance', 'merger', 'acquisition', 'takeover',
+  'lawsuit', 'probe', 'recall', 'layoffs', 'ipo', 'listing', 'split', 'bonus', 'stake', 'downgrade', 'upgrade'];
+const HOLDING_TOPICS = new Set(HOLDING_TOPIC_WORDS.flatMap((w) => [...storyTokens(w)]));
+
+// anchors: true = the market topic words above; or pass a Set of anchor tokens to use.
+function sameStory(a, b, { anchors = false, minShared = MATERIALITY.STORY_SHARED_TOKENS } = {}) {
   if (a.region !== b.region) return false;
+  const anchorSet = anchors === true ? ANCHORS : anchors || null;
   let shared = 0;
-  for (const t of a.tokens) if (b.tokens.has(t) && ++shared >= MATERIALITY.STORY_SHARED_TOKENS) return true;
+  for (const t of a.tokens) {
+    if (!b.tokens.has(t)) continue;
+    if (anchorSet && anchorSet.has(t)) return true;
+    if (++shared >= minShared) return true;
+  }
   return false;
 }
 
@@ -182,14 +221,14 @@ function sameStory(a, b) {
  * story can chain "RBI hikes rates" → "rate hike impact on banks". Pure.
  * story = { lead, events, region, importance, coverage, members:[{tokens, region}] }
  */
-function groupStories(events) {
+function groupStories(events, opts = {}) {
   const sorted = events.slice().sort((a, b) =>
     (b.importance - a.importance) || (b.sourceCount - a.sourceCount) ||
     (new Date(a.firstSeen || 0) - new Date(b.firstSeen || 0)));
   const stories = [];
   for (const ev of sorted) {
-    const member = { tokens: storyTokens(ev.title), region: regionOf(ev.title, ev.source) };
-    const home = stories.find((st) => st.members.some((m) => sameStory(m, member)));
+    const member = { tokens: opts.anchors ? feedTokens(ev.title) : storyTokens(ev.title), region: regionOf(ev.title, ev.source) };
+    const home = stories.find((st) => st.members.some((m) => sameStory(m, member, opts)));
     if (home) {
       home.events.push(ev);
       home.members.push(member);
@@ -499,5 +538,5 @@ async function deliveryForDiscreteAlert(userId) {
 
 module.exports = {
   generateAlerts, loadRecentClusters, holdingMateriality, volumeBoost, planDeliveries, inQuietWindow, isPostWatermark,
-  typeFactor, storyTokens, regionOf, sameStory, groupStories, regionExposure, scoreStory, deliveryForDiscreteAlert,
+  typeFactor, storyTokens, feedTokens, HOLDING_TOPICS, regionOf, sameStory, groupStories, regionExposure, scoreStory, deliveryForDiscreteAlert,
 };
