@@ -83,6 +83,11 @@ const FEATURES = {
   REDDIT_INGEST: true,   // Phase 2b: Reddit (needs REDDIT_CLIENT_ID/SECRET to actually fetch)
   X_INGEST: false,       // deferred — interface stubbed only
   FINBERT_CLASSIFY: process.env.FINBERT_CLASSIFY === '1', // FinBERT reads each new story (see FINBERT below); off = the word list
+  // A language model reads the multi-company stories FinBERT cannot split per company (see
+  // TARGETED below). Its own opt-in, and a choice of model: COMPANY_SENTIMENT_LLM=1 (or
+  // "claude") spends on the model key; "ollama" uses the local model, at no cost.
+  // Value here: false | 'claude' | 'ollama'.
+  COMPANY_SENTIMENT_LLM: ({ 1: 'claude', claude: 'claude', ollama: 'ollama' })[String(process.env.COMPANY_SENTIMENT_LLM || '').toLowerCase()] || false,
   SMART_MONEY: true,     // Phase 3: 13F (EDGAR) + Congress tabs + instant filing alerts
   // India side of those tabs: NSE bulk/block deals + insider trades. Opt-in
   // (INDIA_SMART_MONEY=1): the NSE routes are unofficial and their terms are unchecked.
@@ -118,6 +123,36 @@ const FINBERT = {
   RETRY_MINUTES: 10,               // after a failure, how long the word list stands in
   // Score → label, on the bands the word list's labels fall in (0.5 = neutral).
   BANDS: { POSITIVE: 0.6, NEGATIVE: 0.4 },
+};
+
+// ─── Per-company sentiment (services/targetedSentiment.js) ───
+// A story naming several companies is read once per company: FinBERT on the sentences and
+// clauses that name it, and a language model for a clause that names two or more.
+const TARGETED = {
+  // Words where a sentence turns ("…weighed on markets, while Nike advanced"): a unit ends here.
+  CLAUSE_BREAKS: ['while', 'whereas', 'but', 'although', 'though', 'even as'],
+  LLM: {
+    // Which companies the model is asked about (COMPANY_SENTIMENT_SCOPE overrides, for trials):
+    //   shared — only those in a clause with another company (the fewest calls)
+    //   multi  — every company of a story naming two or more
+    //   all    — also the company of a single-company story
+    SCOPE: ['shared', 'multi', 'all'].includes(process.env.COMPANY_SENTIMENT_SCOPE) ? process.env.COMPANY_SENTIMENT_SCOPE : 'shared',
+    // Whether a "not about" answer removes the company's tag. The local model is wrong too
+    // often for that (3 right of 8 on the hand labels; Haiku 8 of 12), and a wrong removal
+    // hides the story from the company altogether — so its answer is stored as neutral.
+    REMOVE_NOT_ABOUT: { claude: true, ollama: false },
+    MODEL: 'claude-haiku-4-5',   // same model as the brief and alert narrative
+    // The local model for COMPANY_SENTIMENT_LLM=ollama. Not OLLAMA_MODEL: that one writes
+    // prose for other features and defaults to a 3B model.
+    OLLAMA_MODEL: process.env.COMPANY_SENTIMENT_OLLAMA_MODEL || 'qwen2.5:7b-instruct-q4_0',
+    OLLAMA_TIMEOUT_MS: 120000,   // the first call also loads the model into memory
+    MAX_OUTPUT_TOKENS: 300,      // one short JSON object
+    MAX_TEXT_CHARS: 600,         // clamp the untrusted headline/summary before prompting
+    MAX_CALLS_PER_DAY: 300,      // paid calls only: one per hard story; REPORTS.GLOBAL_DAILY_USD_CEILING also applies
+    // A label → a score on FinBERT's scale (0.5 = neutral), so the history stays on one scale.
+    SCORE: { positive: 0.9, neutral: 0.5, negative: 0.1 },
+    CONFIDENCE: 0.8,
+  },
 };
 
 // ─── Sentiment v2 windows (Phase 2a) ─────────────────────────
@@ -243,6 +278,25 @@ const NEWS_RELEVANCE = {
     med: ['election', 'geopolitical', 'summit', 'opec', 'border conflict', 'trade war', 'treaty',
           'earthquake', 'hurricane', 'major flood', 'energy crisis'],
   },
+  // A roundup lists movers; it is about the market, not about any company it names. The
+  // story's one reading (FinBERT reads the whole text) is the market's tone, so it must not
+  // be stored against each name: "Market wrap: Kotak Bank, Titan… top gainers and losers"
+  // read negative for Kotak because the market fell. See newsRelevance.subjectTickers.
+  ROUNDUP_PHRASES: ['market wrap', 'gainers and losers', 'gainers & losers', 'gainers, losers',
+                    'top gainers', 'top losers', 'stocks to watch', 'stocks in focus',
+                    'stocks in news', 'stocks in the news', 'buzzing stocks'],
+  // "…shares in focus" is a roundup only when the headline lists several companies; with one
+  // it is ordinary single-company news ("Kotak Bank shares in focus after Q2 results").
+  ROUNDUP_PHRASES_MULTI: ['shares in focus', 'in focus today', 'in focus on'],
+  // Headlines about a broad market. A company such a story names only in its summary is a
+  // passing mention ("Wall Street slips… while Nike advanced"). Sector indices (Nifty IT,
+  // Nifty Bank) are left out on purpose: their stories are about the companies in them.
+  BROAD_MARKET_TERMS: ['sensex', 'wall street', 'dow jones', 'nasdaq', 's&p 500', 's p 500',
+                       'us stocks', 'asian shares', 'asian stocks', 'asian markets',
+                       'european shares', 'european stocks', 'stock market', 'stock markets',
+                       'dalal street', 'd-street'],
+  NIFTY_SECTORS: ['it', 'bank', 'auto', 'pharma', 'fmcg', 'metal', 'realty', 'psu', 'energy',
+                  'media', 'financial', 'midcap', 'smallcap', 'private', 'healthcare'],
 };
 
 // ─── Alert budgets + outcomes (Engine Phase E3) ──────────────
@@ -674,4 +728,4 @@ const SESSION = {
   REAUTH_MINUTES: 10,    // how long a password confirmation covers sensitive actions
 };
 
-module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
+module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };

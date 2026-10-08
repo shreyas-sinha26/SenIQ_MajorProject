@@ -48,13 +48,15 @@ In 2-3 sentences, explain what this means for the investor's portfolio. Be speci
  * explainer above. Throws if Ollama is unreachable/errors so callers can fall through
  * to their deterministic template.
  */
-async function generate(prompt, { numPredict = 300, temperature = 0.3, timeoutMs = 30000 } = {}) {
+async function generate(prompt, { numPredict = 300, temperature = 0.3, timeoutMs = 30000, model = OLLAMA_MODEL, system, format } = {}) {
   const response = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: OLLAMA_MODEL,
+      model,
       prompt,
+      ...(system ? { system } : {}),
+      ...(format ? { format } : {}), // 'json' = the reply must be a JSON object
       stream: false,
       options: { temperature, num_predict: numPredict }
     }),

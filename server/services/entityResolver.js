@@ -308,7 +308,9 @@ function buildResolver(companies, executives) {
     return { tickers: [...tickers], executives: [...executivesHit], sectors: [...sectors] };
   }
 
-  return { resolve, sectorByTicker };
+  // ticker → company name, for wording that must name the company (the per-company prompt).
+  const nameByTicker = Object.fromEntries(companies.map((c) => [c.ticker, c.name]));
+  return { resolve, sectorByTicker, nameByTicker };
 }
 
 // ─── DB-backed singleton (cached index, refreshed periodically) ──────

@@ -78,9 +78,13 @@ function keywordTier(text, dict) {
 
 /**
  * Grade one article. `matched` is the ticker-matcher output (may include __MARKET__).
+ * `opts.aboutMarket`: the story names tracked companies but is about none of them — a
+ * roundup ("Stocks to watch: TCS, Paytm…") or a broad-market story (subjectTickers). A
+ * holder still wants to see it, so it stays in the feed as a market story even when the
+ * headline has no market keyword.
  * Returns { tier, importance, isRelevant, primaryRef } — primaryRef seeds clustering.
  */
-function classifyArticle(article, matched = []) {
+function classifyArticle(article, matched = [], opts = {}) {
   const srcW = sourceWeight(article.source, article.platform);
   const heldTickers = matched.filter((t) => t && t !== '__MARKET__');
 
@@ -106,7 +110,7 @@ function classifyArticle(article, matched = []) {
     const importance = NEWS_RELEVANCE.TIER_WEIGHT[worldT] * srcW;
     return verdict('world', importance, srcW);
   }
-  if (marketT || isMacro) {
+  if (marketT || isMacro || opts.aboutMarket) {
     const tier = marketT || 'med';
     const importance = NEWS_RELEVANCE.TIER_WEIGHT[tier] * srcW;
     return verdict('market', importance, srcW);
@@ -114,6 +118,34 @@ function classifyArticle(article, matched = []) {
 
   // 4) Nothing the user cares about → noise.
   return { tier: 'none', importance: 0, isRelevant: false, primaryRef: null };
+}
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const BROAD_MARKET_RE = new RegExp(
+  `\\b(?:${NEWS_RELEVANCE.BROAD_MARKET_TERMS.map(escapeRe).join('|')}|nifty(?!\\s+(?:${NEWS_RELEVANCE.NIFTY_SECTORS.join('|')})\\b))\\b`);
+
+/**
+ * Which of the companies a story names it is ABOUT. The sentiment reading is one tone for
+ * the whole text, so it is stored only against these; the rest are passing mentions.
+ *   - a roundup headline (market wrap, gainers and losers, stocks to watch…) is about none
+ *     of the companies it lists;
+ *   - a broad-market headline (Sensex, Wall Street…) is about only the companies the
+ *     headline itself names, not ones that appear in the summary.
+ * `matched` is the resolver's output, `inHeadline` the tickers it finds in the title alone.
+ * Returns `matched` without the passing mentions (order kept, __MARKET__ kept).
+ */
+function subjectTickers(title, matched = [], inHeadline = []) {
+  if (isRoundup(title, inHeadline)) return matched.filter((x) => x === '__MARKET__');
+  const head = new Set(inHeadline);
+  if (BROAD_MARKET_RE.test(String(title || '').toLowerCase())) return matched.filter((x) => x === '__MARKET__' || head.has(x));
+  return matched;
+}
+
+// A headline that lists movers rather than reporting on one company.
+function isRoundup(title, inHeadline = []) {
+  const t = String(title || '').toLowerCase();
+  return NEWS_RELEVANCE.ROUNDUP_PHRASES.some((p) => t.includes(p))
+    || (new Set(inHeadline).size >= 2 && NEWS_RELEVANCE.ROUNDUP_PHRASES_MULTI.some((p) => t.includes(p)));
 }
 
 function verdict(tier, importance, _srcW) {
@@ -174,4 +206,4 @@ function assignClusters(items) {
   return items.map((_, i) => base[find(i)]);
 }
 
-module.exports = { classifyArticle, clusterKey, assignClusters, salientTokens, jaccard };
+module.exports = { classifyArticle, subjectTickers, isRoundup, clusterKey, assignClusters, salientTokens, jaccard };
