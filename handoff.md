@@ -1,4 +1,4 @@
-# Handoff — SenIQ (updated 2026-10-08)
+# Handoff — SenIQ (updated 2026-10-08, evening)
 
 **Current state in one paragraph:** v1 (Dashboard → Portfolio → Intelligence → Analytics →
 AI Workspace) and v2 (+ Strategy Builder, Your Strategies, Backtest, Paper Trade, MCP, public
@@ -10,45 +10,236 @@ in `RAG_PLAN.md`; the matching engine edits live only in the gitignored `strateg
 Every commit passes `npm test` on its own. Nothing in the merge has run with a real model
 key, real embeddings, or the real strategy engine behind the app.
 
-**Where things stand (end of 2026-10-08):** three commits sit on the local branch
-`hardening-email-reports`, **not pushed**: `be98ba8` (hardening pass, Gmail sending, PDF report
-emails, Claude through AIRouter), `b5e47f3` (handoff), `2187d91` (Ask: stated rankings in tool
-results, stricter grounding rules, eval runner through the router, verification-button UI).
-`npm test` is green (354 checks). `origin/main` has one newer commit from Shreyas (`ffa4fde`,
-README only — no overlap). `.github/workflows/ci.yml` is still left out of commits (needs the
-`workflow` token scope). The dev database is on migration 0025.
+**Where things stand (end of 2026-10-08, evening):** everything is committed on the branch
+`hardening-email-reports` and **pushed to GitHub, with a pull request open against `main`
+(not merged)**. On top of the three earlier commits (`be98ba8`, `b5e47f3`, `2187d91`) and their
+handoff (`f892281`): India smart money (`e268975`, `00bf075`, `44f0151`), the DATE-column fix
+(`de41aa7`), the afternoon session in one commit (`2d151be` — it could not be split by topic
+safely: the topics share `app.js`, `config.js` and the tests), and a merge of `origin/main`
+(`cbf1115`, Shreyas's README commit `ffa4fde`). **Tags `v1.3` and `v2.3` sit on `cbf1115`**
+(same code; v2 = `FEATURES_STRATEGIES=1`), pushed. `npm test` is green on `cbf1115` (448
+checks). The working tree is clean except `samples/` and `.github/` (both untracked, not
+pushed — see §8). The dev database is on migration **0028**.
+- **`README.md` on `main` is garbled** since `ffa4fde` (316 bytes of random characters ending
+  in `[cite: 1]`). It came in with the merge unchanged; tell Shreyas.
+- Not done for these tags: neither v1 nor v2 was clicked through in a browser as a whole; the
+  strategy engine was not run behind this code.
 
-**Running right now:** the app, at http://localhost:3010, started from the Claude Code preview
-(`seniq-main`). `.env` has `AIROUTER_API_KEY` + `CLAUDE_REPORTS=1`, so **the app can spend
-credits by itself** (see "Standing instruction" below). Stop it when not in use.
+**Running right now:** nothing — the app was stopped after the last browser check. `.env` now
+has `CLAUDE_REPORTS=0` and `INDIA_SMART_MONEY=1` (plus Annas's own `NSE_USER_AGENT`). With
+`CLAUDE_REPORTS=1` the app can spend credits by itself (see "Standing instruction" below).
+`npm start` does not watch files: restart after any server-side edit.
 
 **Standing instruction from Annas (2026-10-08): make no Claude API calls until he says so.**
-That holds the eval rerun and any trial of another model. The app itself still calls Claude
-while `CLAUDE_REPORTS=1`: Ask and the brief when he uses them, the 05:30 brief job, and a Pro
-alert narrative when a realtime alert fires for a verified Pro account. `CLAUDE_REPORTS=0` +
-restart turns all of that off (and Ask with it).
+Still in force; he approves calls one at a time. In the afternoon he approved three
+report-card calls on the demo account ($0.018 in all, logged as `report_cards`). The app itself
+still calls Claude while `CLAUDE_REPORTS=1`: Ask and the brief when he uses them, the 05:30
+brief job, a Pro alert narrative when a realtime alert fires for a verified Pro account, and
+now one card-rewrite call per Plus/Pro daily report email. `CLAUDE_REPORTS=0` + restart turns
+all of that off (and Ask with it).
 
 **Next, in order:**
-1. Push: `git fetch`, merge `origin/main` into the branch (merge, not rebase), `npm test`,
-   push with the `Annas-Shariff` gh account, open a pull request (§8). Not yet asked for.
-2. When Annas allows model calls again: rerun the 30-case eval (~$0.50) to measure the tool
-   change in `2187d91`; then, if wanted, one run with another answer model via
-   `AIROUTER_MODEL` (eval only). He should also read ~10 judged answers — the judge is strict
-   and has not been checked against a human.
-3. Email: outgoing mail ports were blocked on the network used on 2026-10-08, so nothing sent
-   that day after the first test. Retry on another connection: one alert email and one PDF
-   report to his account (id 36 — Pro, verified by hand, five demo holdings). The PDF version
-   of the report has been reviewed as a file but never emailed.
-4. Decisions still open: which SEC contact email is right (`render.yaml` says
+1. **Tell Shreyas, then merge the pull request** — with a merge commit, not a squash, so the
+   tagged commit `cbf1115` keeps its hash. The sign-in change rewrites part of his OAuth
+   callback (`server/routes/oauth.js`) and every client must sign in again. Also tell him the
+   README on `main` is garbled.
+2. India smart money: keep running `node scripts/india_smart_money.js poll` to drain the
+   insider-filing backlog (60 filings a run) and to catch each evening's deal file; before any
+   hosting, settle NSE's terms or a licensed source (see the India section below).
+3. No Claude attribution in commits or pull requests (Annas is sole author).
+4. When Annas allows it: one more report-card call to see the pass rate after the last two
+   check changes (never run live); regenerate the demo account's daily brief, which is stale
+   (written before the rebalance and the ranking fixes — needs the brief quota raised once);
+   rerun the 30-case Ask eval (~$0.50) for the tool change in `2187d91`.
+5. Decisions still open: which SEC contact email is right (`render.yaml` says
    `affiliates@arnifi.com`, `config.js` defaults to `admin@xynthis.com`); whether to buy a
    domain (needed for real email at launch — Gmail is for demos, and many hosts block mail
-   ports too).
+   ports too); whether the Dashboard should say Positive/Negative like Analytics instead of
+   Bullish/Bearish; a privacy page (the landing footer has no Privacy link until one exists).
 
-**Still switched off or never run for real:** Indian prices (Upstox), news embeddings (Ask's
-news search runs in keyword mode), hosting — so sentiment history is only a few weeks and
-SenIQ-factor backtests mean little — the strategy engine behind the app in this round, the
-Pro end-of-day report, and the daily brief / alert narrative through the router (only Ask and
-one brief have gone through it).
+**Still switched off or never run for real:** news embeddings (needs `HF_API_TOKEN` and
+pgvector — neither is set up, so Ask's news search runs in keyword mode and story linking is
+keyword-based), hosting — so sentiment history is only about a week and the "90-day normal"
+rests on that — the strategy engine behind the app in this round, the Pro end-of-day report,
+Google/GitHub sign-in end to end on the new sessions, and the alert narrative through the
+router. Indian prices now work through Yahoo; the Upstox token is still unused.
+
+### India smart money (2026-10-08, evening) — committed; NSE refuses a client that identifies itself
+The Indian side of the Institutions and Congress tabs. **Off by default** (`INDIA_SMART_MONEY=1`
+turns it on; it is set in the local `.env`). Migration `0027` is applied on the dev database.
+Offline tests: `test/indiaSmartMoney.test.js`, 25 checks, with a stand-in database.
+- **NSE refuses the SenIQ User-Agent** (connection reset; 200 for a browser one — checked
+  2026-10-08). The assistant does not set a browser User-Agent or run requests disguised that
+  way; Annas set `NSE_USER_AGENT` in his own `.env` (local demo for his professors only — not
+  for a hosted product; NSE's terms on automated access are still unchecked) and ran the poll
+  himself.
+- **Committed** as `e268975` (first build), `00bf075` (insider-filing format) and `44f0151` (a
+  one-line wording fix), on `hardening-email-reports`; pushed 2026-10-08.
+- **Insider trades — NSE changed format in May 2026.** The first build read the per-symbol
+  route (`/api/corporates-pit`), which stops at April 2026: Annas's polls stored 18 trades, none
+  newer than 30 April, none for INFY. NSE's own insider-trading page (opened in a browser
+  2026-10-08) showed 27 INFY filings since May. From May ("PIT V2.0") NSE serves one
+  whole-market list of filings (`/api/corporates-pit-gg?index=equities`, 3,155 rows that day),
+  each linking an XBRL file on `nsearchives.nseindia.com` with the trades. The daily poll now
+  reads that list (one request), keeps unread original filings for the universe + held Indian
+  tickers, and reads up to 60 a run, newest first (migration `0028`, applied on the dev
+  database). Revisions are skipped (they restate an earlier filing). Holdings in the XBRL are
+  fractions and are stored as percent. The per-symbol route is kept only as
+  `node scripts/india_smart_money.js history SYMBOL ...`. **Annas ran `poll` once on
+  2026-10-08: 59 filings read, 200 trades stored across 9 symbols, newest disclosed 2026-10-06;**
+  the Infosys filing of 28 Sep matches NSE's own file (1,100 shares, Rs 11.3 lakh, 0.19%). Older
+  filings are still unread — each further `poll` reads 60 more. Most rows are employee-trust and
+  stock-option trades, which never alert. No India alert has fired from live data yet. A trade
+  disclosed around 30 April–3 May may be stored twice, once from each route.
+- **Deals:** 218 bulk deals for 2026-10-07 stored from his poll (1 by a curated investor,
+  Goldman Sachs); the block file had no records.
+- **Alerts checked against real Postgres** (scratch database, sample rows, since dropped): first
+  file silent; then one alert per stock to a holder via the universe, a holder via an NSE
+  exchange tag and a follower of the matched investor; a US holding with the same letters gets
+  none; the sixth real-time alert of a day is filed as digest; insider alert for a director's
+  open-market sale. No alert has fired from live NSE data yet.
+- **Browser check, 2026-10-08** (throwaway user `india-ui-check@example.test`, set to Plus;
+  Annas deleted the first one, a second (id 44, no holdings or follows) was created for the
+  last check and is still in the dev database): on real data both panes render — deal rows, insider rows (stake before → after,
+  traded vs disclosed with the lag, debentures named as such), the US / India switch,
+  follow/unfollow, search, and "mine" showing the held tickers' rows (6 insider, 5 deal).
+- **Does it pull daily?** Only while the app is running at 19:30 IST on a weekday with
+  `INDIA_SMART_MONEY=1` and his `NSE_USER_AGENT` set. It is not hosted, so in practice it runs
+  when he runs it. The deal files hold one day only — a missed day's deals are gone; insider
+  filings stay on NSE's list for months and are caught up later.
+- **Command line:** `node scripts/india_smart_money.js poll` runs the poll once;
+  `… history SYMBOL ...` loads pre-May insider trades; `… import <bulk.csv|block.csv>
+  [--dry-run]` loads a deal file downloaded by hand (dry-run tested on a two-row sample only).
+- **Institutions (India) = NSE bulk and block deals** — large trades with the client named,
+  published the same evening. Two CSV files that hold only the latest day, so a day the poller
+  does not run is a day of deals never seen. The whole market is stored; "mine" = held Indian
+  tickers + followed investors.
+- **Congress (India) = insider trades.** India has no congressional-trade reports; these are
+  SEBI insider-trading (PIT) disclosures by promoters, directors and key managers, kept for the
+  Indian universe plus held Indian tickers; 365-day lookback.
+- **Followable investors:** 16 curated names in `server/data/indiaInvestors.js` (LIC, four fund
+  houses, six foreign funds, five individuals). A deal is attributed when the exchange's
+  free-text client name contains one of the investor's phrases — a fund trading under another
+  name is missed. Follow type `in_investor`.
+- **Alerts:** one per stock per run, to holders (held as an Indian stock) and followers; they
+  share the 5-a-day real-time cap. The first deal file of each type and the first fetch for each
+  symbol are stored silently; anything older than 7 days never alerts. An insider trade alerts
+  only when it is a promoter/director/key-manager open-market buy or sale of ₹1 crore or more —
+  everything else (stock options, gifts, off-market transfers, pledges) is stored only.
+- **Poller:** `server/services/smartMoney/india.js`, weekdays 19:30 IST, **never on boot**;
+  admin trigger `POST /api/smart-money/india/poll`. One plain request per file/symbol, 1.5 s
+  apart, with a User-Agent that names SenIQ (`NSE_USER_AGENT` overrides). A 401/403 ends the run.
+- **Routes:** `/api/smart-money/india/meta|investors|deals|insiders` (same Free teaser as the US
+  lists). **UI:** a US / India switch on both tabs, shown only when the switch is on. **Ask /
+  MCP / `/v1`:** `get_smart_money` adds `india_deals` and `india_insider_trades` when rows exist.
+- **Open:** NSE's routes are unofficial and its terms on automated access are unchecked; it is
+  not known whether the insider route honours `from_date`/`to_date` (the code also filters by date
+  itself). The `tdpTransactionType` field is assumed from memory, not seen in a reply. Not
+  built: quarterly shareholding pattern, mutual-fund monthly portfolios, engine factors, a BSE
+  fallback, history backfill, daily-brief grounding for India rows.
+- **Found and fixed (2026-10-08):** Postgres `DATE` columns come back from `pg` as a JS Date at
+  local midnight, so on a machine east of GMT the US dates (13F period/filed, congress
+  traded/disclosed) printed one day early — confirmed on the dev database in IST (a 12-31
+  quarter end showed as 12-30). The affected queries now select `col::text AS col`, like the
+  India routes: `/institutions`, `/institutions/:slug`, `/congress` (`routes/smartMoney.js`),
+  `get_smart_money` (`qaTools.js`), `smartMoneyContext` (`grounding.js`), the holding brief's
+  congress rows (`onboarding.js`), and `max(filed_at)` in `pollInstitutions`
+  (`smartMoney/index.js`), where a 13F filed the same day as the newest stored one could pass
+  as newly disclosed. Offline test: `test/dateColumns.test.js` (stand-in db pinned to IST).
+  Chosen over a global `pg.types.setTypeParser(1082, …)` because the paper-trading code
+  (`strategyClient.js`, `strategyTools.js`, `strategyStore.js`) reads `deployed_at` /
+  `stopped_at` as Date objects with local getters, which is correct today and would go a day
+  early west of GMT if those became strings. **Rule for new queries:** a `DATE` that goes to
+  the browser or to Ask must be selected as text (`::text` or `to_char`).
+- **Also fixed:** `daily_briefs.brief_date` — `reports.js` selects it as text (`BRIEF_COLS`, in
+  both reads and the `RETURNING`), and `renderDailyBrief` formats it with `timeZone: 'UTC'`, so
+  the brief header shows the stored day in every browser timezone (it was a day early for a
+  browser west of the server).
+
+### Afternoon session (2026-10-08) — committed as `2d151be`
+
+**Prices** (`priceService.js`, `portfolioService.js`)
+- Indian stocks and commodities are priced through Yahoo Finance's chart endpoint (the data
+  yfinance reads; no key, called directly from Node). Indian = holding's exchange NSE/BSE or
+  `companies.country = 'IN'`; fetched as `TICKER.NS` then `.BO`, quoted in INR. Commodities map
+  to front-month futures (`GC=F`, `CL=F`, …) with FMP as fallback. Other equities stay on
+  Finnhub, Yahoo only when Finnhub has no price. Finnhub never priced commodities.
+- `getWeightedHoldings` converts every holding to USD (`usdRates`, `USDINR=X`) before weights:
+  `market_value` is USD, `market_value_native` is in `currency`. Before this an INR price was
+  summed as dollars.
+- Yahoo is unofficial, can throttle, and NSE/BSE runs ~15 minutes late; quotes cache 5 minutes.
+- **Dev data changed:** five `event_outcomes` rows with pre-fix prices for Indian tickers had
+  `price_at_event` blanked; demo account 36 rebalanced to TCS 120, RELIANCE 170, AAPL 6, NVDA 9,
+  BTC 0.02 (~$10.5k; it was 5 of each, 99% Bitcoin).
+- `outcomes.resolveOutcomes` now times the 1-day and 3-day waits from `logged_at`, not
+  `first_seen` (an old story logged late used to resolve at once with a 0% move).
+
+**The report** (`reportInsights.js` new, `reportPdf.js`, `reportEmails.js`, `cardWriter.js` new)
+- New sections, all written by code: a verdict line ("1 thing to check today" / "Nothing
+  specific to your holdings needs your attention"), headline cards (why it matters to you · how
+  it affects your portfolio · how sure we are), why the portfolio moved, price and news
+  pulling apart, concentration, a coverage note, and "how earlier readings held up" (shows a
+  count until 20 graded readings exist; today it was 0 right of 5). The email subject leads
+  with the verdict; the body is still one generic line.
+- Which headlines get a card: `REPORT_EMAIL.CARDS` — strength ≥ 0.40 (impact ÷ exposure
+  touched), ≥ 3% of the portfolio, floor 2, cap 6; market-wide stories take one slot.
+- **Claude-written cards (Plus/Pro):** one call per report rewrites the cards and adds a "What
+  happened" line from the article summary. Every rewrite is checked in code against the card's
+  own facts (no new figure or name, no advice or forecast phrase, no "will" in why/how, caveats
+  kept, not copied from the summary); a failing card keeps its template, a failing "What
+  happened" drops only that line. Guardrailed like the brief (`REPORTS.CARDS`, 2 calls per user
+  per day, `claude_calls.kind = 'report_cards'`). Three live runs: 5/5, 3/5, 3/5 cards passed;
+  the last two check changes are untested live.
+- **One report email was delivered** to Annas (account 36) from a phone hotspot. The usual
+  network blocks ports 25/465/587. Account 36 has no `home_market`, so its report is in USD.
+- Not built: "the week ahead" (no calendar source), Ask links from cards, Pro-only smart money.
+
+**Sign-in** (`sessions.js` new, `routes/auth.js`, `routes/oauth.js`, migration `0026`)
+- The 7-day JWT in `localStorage` is replaced by server-side sessions: a random id in an
+  HttpOnly, SameSite=Lax cookie (`seniq_session`, Secure in production), only its hash in the
+  `sessions` table. Idle limit 7 days (sliding), absolute 30. Sign-out revokes on the server;
+  a password change ends the other sessions; a reset ends all. `SESSION` in `config.js`.
+- `sameOriginGuard` on `/api` refuses state-changing requests with a foreign `Origin`.
+- `requireRecentAuth` + `POST /api/auth/reauth`: creating an API key with write access needs
+  the password confirmed in the last 10 minutes.
+- OAuth callback sets the cookie and redirects to `/app` (no token in the URL any more).
+- `JWT_SECRET` is still needed: it signs the OAuth state and unsubscribe links.
+- Verified against the live server with throwaway accounts. Not verified: signing in through
+  the page, OAuth end to end, the write-key password prompt (v2 routes were off).
+
+**Analytics page + one sentiment score** (`sentimentBreakdown.js` new, `routes/news.js`)
+- `GET /api/news/sentiment-breakdown` feeds the page: a headline in words, the chart with each
+  holding's own 90-day normal and a mixed zone, a card per holding (article split, daily trend,
+  the stories moving the score), and a glossary. Free gets no baseline or drivers.
+- `GET /api/news/portfolio-sentiment` (Dashboard ring and holdings table) now returns the same
+  engine figures, weighted by position size. It no longer fetches Finnhub on every load.
+- Classifier confidence is left off the page: the lexicon classifier always reports 100%.
+
+**Ranking and repetition** (`impactScoring.js`, `materiality.js`, `eventTyping.js`,
+`entityResolver.js`, `routes/news.js`)
+- A market-wide story now reaches only holdings in its market, at relevance 0.2 (was 0.5) and
+  macro severity, scaled by coverage (`MACRO_COVERAGE_GAIN/MAX`: 1 headline ×1, 4 ×2, 16+ ×3).
+- Stance (`classifyStance`): event 1.0 · commentary 0.6 · round-up 0.4 in the impact score;
+  shown as a label on feed rows and report cards. Keyword rules, so it misjudges some headlines.
+- One row per story (`collapseStories`): market headlines fold on a shared topic word or the
+  same index moving the same way; headlines on one holding fold on a shared topic (results,
+  dividend, …) or three key words; a headline joins a story only if it matches the lead. Used
+  by the Dashboard feed, the Intelligence news feed (with a "Show them" expander) and the
+  scoring's coverage count. Alerts keep the old, stricter grouping.
+- Ticker tags: when a headline names companies, a company named only later in the summary is
+  dropped. 17 wrong tags were removed from the dev DB (backup in
+  `samples/removed-ticker-tags-2026-10-08.json`).
+- News cards show the engine's figures ("Impact on you Medium 0.08 · Reads positive · 24.8% of
+  your portfolio"; `IMPACT.LEVELS`) instead of "Impact +100 · Confidence 100%".
+- Known gaps: `classifyEventType` is still crude ("to buy " → M&A); the importance grade on
+  market events barely discriminates; a folded market card shows its lead headline's figures.
+
+**Small UI changes:** landing footer reduced to logo, one line and copyright, centred; "Written
+by Claude" badge removed from the brief; Ask heading is "Ask SenPal About Your Portfolio".
+
+**Leftovers:** `samples/` (untracked) holds the sample report PDF and the removed-tags backup —
+decide whether to gitignore it. Temporary `preview-…@seniq.test` accounts used for browser
+checks were all deleted.
 
 ### Hardening pass (2026-10-08, in `be98ba8`)
 A read-through of the whole Node app, then fixes. Nothing here changes a feature.
@@ -86,6 +277,9 @@ A read-through of the whole Node app, then fixes. Nothing here changes a feature
   Two migrations are numbered `0016`; harmless, and renaming an applied one would re-run it.
 
 ### Email sending + report emails (2026-10-08, in `be98ba8`)
+*Update, same afternoon: one PDF report was emailed to Annas and delivered (from a phone
+hotspot), the report gained the explaining sections, and sign-in moved to server-side sessions —
+see the afternoon-session section above. The "To finish" list below is otherwise still open.*
 - **Sending without a domain:** `emailService.js` sends through Resend when `RESEND_API_KEY` is
   set, otherwise through SMTP (`SMTP_HOST/PORT/USER/PASS`, nodemailer) — a Gmail app password,
   ~500 emails/day, sent from that address. Moving to a domain later is an `.env` change only.
@@ -226,6 +420,8 @@ workflow file is rejected until the token has the `workflow` scope (see §8).
 | `v2.1` | `673791a` | same code, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
 | `v1.2` | `537612d` | v1.1 + Google/GitHub sign-in, password reset, alert emails | `npm start` |
 | `v2.2` | `537612d` | same code as v1.2, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
+| `v1.3` | `cbf1115` | v1.2 + the October work: knowledge base, Ask grounding, alert quality, hardening and server-side sessions, report emails, INR prices, Analytics, feed ranking, India smart money | `npm start` |
+| `v2.3` | `cbf1115` | same code as v1.3, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
 
 History since the July push (`ac6d217`), newest first:
 ```
@@ -241,6 +437,9 @@ d08fe98 Ask v2 — tool-calling agent, news search (RAG), saved conversations
 Still local only: `.github/` (CI workflow — see §8), `strategy-service/` (gitignored), and the whole
 2026-10-07 session (merged in pull request #1 — see the table above).
 `v1.2`/`v2.2` pass `npm test` but have **not been clicked through in the browser** yet.
+`v1.3`/`v2.3` (2026-10-08) are on the branch `hardening-email-reports`, reachable from `main`
+once its pull request is merged with a merge commit. Rule for the next version: one commit, two
+annotated tags (`v1.N` = strategies off, `v2.N` = the same code with `FEATURES_STRATEGIES=1`).
 
 **Why one branch, not two:** strategy commits are interleaved in history (since `ecb9c83`),
 so no commit is "v1 without strategies". The switch `FEATURES.STRATEGIES`
@@ -493,7 +692,8 @@ with a short narrative). Without a key every send returns `delivered:false` and 
 
 ### Live prices
 `FINNHUB_API_KEY` (US stocks + company news) and `FMP_API_KEY` (gold/silver) are set in `.env`
-and verified. Crypto via CoinGecko (no key). **Indian stocks: not priced yet** (see §6).
+and verified. Crypto via CoinGecko (no key). **Indian stocks and commodities are priced through
+Yahoo Finance since 2026-10-08** (see the afternoon-session section near the top).
 
 ## 4. Environment (`.env` — never commit; names only)
 
@@ -503,11 +703,12 @@ and verified. Crypto via CoinGecko (no key). **Indian stocks: not priced yet** (
 | `STRATEGY_SERVICE_URL`, `STRATEGY_SERVICE_SECRET` | set | v2 engine at :8100 |
 | `FINNHUB_API_KEY` | set | US prices + company news |
 | `FMP_API_KEY` | set | commodities; US fallback |
-| `UPSTOX_ANALYTICS_TOKEN` | **empty** | Indian prices (code not built yet) |
+| `UPSTOX_ANALYTICS_TOKEN` | **empty** | unused — Indian prices come from Yahoo for now; Upstox is the launch-grade source |
 | `AIROUTER_API_KEY` (or `ANTHROPIC_API_KEY`) | **set** (AIRouter, with `CLAUDE_REPORTS=1`) | Claude brief + Ask + alert narrative (also needs `CLAUDE_REPORTS=1`) |
 | `HF_API_TOKEN` (+ `FINBERT_CLASSIFY=1`, `NEWS_EMBEDDINGS=1`) | not set | FinBERT sentiment, RAG embeddings |
 | `FEATURES_STRATEGIES` | unset = v1 | `1` = v2 |
 | `CONGRESS_TRADES_URL` | not set locally | live congress data (set on the deploy host); local uses sample |
+| `INDIA_SMART_MONEY` (+ optional `NSE_USER_AGENT`) | not set | `1` = NSE bulk/block deals + insider trades, daily poll, US/India switch on the two tabs |
 | `REDDIT_CLIENT_ID/SECRET`, `SENTRY_DSN` | not set | Reddit ingest, error monitoring |
 | `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET` | not set | OAuth sign-in buttons (hidden until set) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM` | **set** (Gmail app password) | all email while there is no domain; ~500/day, sent from that Gmail address |
@@ -522,9 +723,9 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
 (Postgres/Neon, Render, Sentry, Docker) · v2 (FastAPI + yfinance strategy service, MCP, `/v1`).
 
 ## 5. Tests & evaluation
-- `npm test` — offline, no DB/API calls, all passing: resolver 49 · engine/alerts logic 50 ·
-  reports 23 · Ask 83 · eval 15 · strategy signals 12 · filings 10 · strategy drafts 14 · MCP/keys/data tools 19 · auth 9 · alert email 30 ·
-  request safety 12 · report emails + PDF 15 · model router + answer hygiene 10 (354 checks in all).
+- `npm test` — offline, no DB/API calls, all passing (448 checks at `v1.3`/`v2.3`; 406 before the evening session; 354 at
+  `2187d91`). The afternoon session added checks to the resolver, engine, request-safety
+  (sessions) and report-email suites, and a new `test/sentimentBreakdown.test.js`.
 - Engine: `cd strategy-service && ./venv/bin/python -m pytest -q` → 37 passing (local-only).
 - **Clean-database check (2026-10-07):** all 19 migrations + the seed applied twice to a
   brand-new database, then dropped.
@@ -565,9 +766,9 @@ The immediate queue is the "Next, in order" list at the top. Behind it:
    `node-cron` 4; two migrations are numbered `0016` (harmless — do not rename).
 7. **Data foundation (parked by Annas):** hosting / daily recording, sentiment backfill, CUSIP →
    ticker for 13F holdings → fund factor, event-type factor.
-8. **Indian prices via Upstox:** the Analytics Token is in `.env` (`UPSTOX_ANALYTICS_TOKEN`) but
-   nothing reads it yet; build the NSE ticker → instrument key lookup. TCS/RELIANCE show no
-   live price until then, so weights skew to whatever is priced.
+8. **Indian prices via Upstox (lower priority now):** Yahoo prices NSE/BSE since 2026-10-08, but
+   it is unofficial and ~15 minutes late. For launch, build the NSE ticker → instrument key
+   lookup on the Upstox Analytics Token (`UPSTOX_ANALYTICS_TOKEN`, still unread).
 9. **RAG embeddings:** `HF_API_TOKEN` + `NEWS_EMBEDDINGS=1` + pgvector. Never run.
 10. **Knowledge base upkeep:** Noel Tata retires as Trent chairman in November 2026; re-run
     `node scripts/refresh_executives.js` now and then (US only, ~100 FMP calls).
@@ -604,8 +805,12 @@ The immediate queue is the "Next, in order" list at the top. Behind it:
   Commits are authored as Annas Shariff with no AI attribution.
 - **Done 2026-10-08:** pushed the branch `ask-retrieval-signals`, opened pull request #1 and merged it into `main` with a merge commit (`ac88e2a`); the branch was then deleted. No tag yet.
 - **2026-10-08, later:** three commits on the local branch `hardening-email-reports`
-  (`be98ba8`, `b5e47f3`, `2187d91`), **not pushed**. `git fetch` worked with the current gh
+  (`be98ba8`, `b5e47f3`, `2187d91`), not pushed at that point. `git fetch` worked with the current gh
   account and showed `origin/main` one commit ahead (`ffa4fde`, README only).
+- **2026-10-08, evening:** fetched, merged `origin/main` (`ffa4fde`) into
+  `hardening-email-reports`, ran `npm test`, pushed the branch and the tags `v1.3` + `v2.3`, and
+  opened a pull request against `main`. Not merged. `samples/` (a sample report PDF built from
+  the demo account and a backup of removed ticker tags) and `.github/` were left out.
 - Next time: **fetch first**, merge (not rebase) if teammates pushed, run `npm test`, then
   push the branch and open a pull request, as was done for #1.
 - `.github/workflows/ci.yml` still can't be pushed until the token has the `workflow` scope
