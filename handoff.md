@@ -49,18 +49,18 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
    clarifying questions before writing code.
 7. **Work in `~/Downloads/SenIQ_MajorProject`.** `~/Downloads/ai-portfolio-copilot` is a stale
    copy.
-8. From the Claude desktop app, a session **cannot merge pull requests into `main` or delete
-   database rows**, even with a yes. Give Annas the one-line command and check the result
-   before writing "done".
+8. **Merging into `main` and deleting database rows happen only when Annas asks for that
+   specific action.** A session can do both (on 2026-10-08 it merged pull request #8 and
+   removed 65 stored tags at his request; an earlier note here said it could not). Dry-run
+   first, save a backup of any rows removed, and check the result before writing "done".
 
 ---
 
 ## 3. Current state
 
 - **Git** *(checked 2026-10-08)*: on `main`, level with `origin/main`, no other branch, no
-  open pull request. `main` is at `d13a560`, the merge of pull request #8 (per-company
-  sentiment), which is **not tagged yet**: the latest tags are still **`v1.7` / `v2.7`** on
-  `898314c`. Untracked and never pushed: `samples/` and `.github/` (see §11).
+  open pull request. Latest tags **`v1.8` / `v2.8`** on `d13a560`, the merge of pull request #8
+  (per-company sentiment); the commits after it on `main` are handoff notes only. Untracked and never pushed: `samples/` and `.github/` (see §11).
 - **Tests** *(checked 2026-10-08)*: `npm test` passes — 22 files, 530 checks, offline
   (no database or API calls).
 - **Dev database** *(checked)*: Postgres `seniq`, all 30 migration files applied (latest
@@ -73,8 +73,11 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ### Next, in order
 
-1. **Tell Shreyas that `main` moved.** Sign-in is now server-side sessions, so part of his
+1. **Tell Shreyas that `main` moved** (still to do; Annas sends it). Sign-in is now
+   server-side sessions, so part of his
    OAuth callback (`server/routes/oauth.js`) was rewritten and everyone must sign in again.
+   Since then `v1.8` / `v2.8` added per-company sentiment: nothing for him to change, and the
+   new `COMPANY_SENTIMENT_LLM` switch is off unless set.
    `README.md` on `main` is garbled since his commit `ffa4fde` (316 bytes of random
    characters) and needs restoring.
 2. **India smart money:** keep running `node scripts/india_smart_money.js poll` (60 insider
@@ -377,8 +380,9 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   named tracked companies but is about none of them stays in the feed as a market story
   (`classifyArticle`'s `aboutMarket`), "stocks to watch" lists included — Annas asked for
   this.
-  - Stored stories keep their old tags: a dry run of `scripts/retag_roundups.js` found 65
-    company tags on 37 stories (of 848). `--write` has not been run.
+  - Stored stories were brought in line on 2026-10-08: `scripts/retag_roundups.js --write`
+    removed 65 company tags from 37 roundup stories and re-graded them (32 market, 2 world,
+    3 still holding news for a company their headline is about). Backup in §9.
 - **Per-company reading (2026-10-08, pull request #8, merged; `services/targetedSentiment.js`).** A new
   story naming two or more companies is read once per company. Step 1: FinBERT reads each
   company from the sentences and clauses that name it (clauses end at "while", "but"… —
@@ -419,6 +423,11 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
     rule-tuning, but they have now been used to choose between these, so they flatter the
     choice a little; fresh labels would be needed for a clean figure. No further tuning is
     planned.
+  - **Who reads what, and the fallbacks.** FinBERT reads every new story, multi-company
+    ones included, and is the default reading for everything; the word list stands in only
+    if FinBERT is off or fails. In a multi-company story FinBERT also gives each company its
+    own reading. The local model only replaces the readings of companies that share a
+    clause, and only when it answers.
   - Needs `ollama serve` running with `qwen2.5:7b-instruct-q4_0` pulled. **FinBERT is the
     fallback when it is not** *(checked 2026-10-08 with Ollama stopped)*: the call fails at
     once, one warning is logged, and every company keeps FinBERT's per-company reading. No
@@ -426,8 +435,7 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   - Single-company stories never reach the model: FinBERT alone matched 21–22 of 35 there.
   - **Stored stories re-read (2026-10-08):** `reread_companies.js --write` updated 257
     readings on 140 multi-company stories (226 by the local model, none removed). Old rows:
-    `samples/company-readings-before-2026-10-08.json`. `retag_roundups.js --write` has
-    **not** been run.
+    `samples/company-readings-before-2026-10-08.json`. The roundup clean-up was run after it (above).
   - Not handled: a commodity's reading follows the story's tone, not the price direction
     ("stocks retreat as oil rebounds" reads negative for oil).
 - A story read as neutral just below the middle (0.46) is still worded "Reads negative" on the
@@ -521,10 +529,13 @@ Changes made by hand to the dev database on 2026-10-08, with backups in `samples
 | 1,222 stored sentiment readings re-scored with FinBERT | `sentiment-before-finbert-2026-10-08.json` |
 | 41 of 128 stored commodity tags removed | `removed-commodity-tags-2026-10-08.json` |
 | 17 wrong ticker tags removed | `removed-ticker-tags-2026-10-08.json` |
+| 257 readings on 140 multi-company stories re-read per company (226 by the local model); none removed | `company-readings-before-2026-10-08.json` |
+| 65 company tags removed from 37 roundup stories; 28 `__MARKET__` readings added; those stories re-graded | `roundup-tags-before-2026-10-08.json` |
 | 5 `event_outcomes` rows for Indian tickers had a pre-fix `price_at_event` blanked | none |
 | Account 36 rebalanced; marked verified by hand | none |
 
-`samples/` also holds a sample report PDF built from account 36.
+`samples/` also holds a sample report PDF built from account 36, and
+`sentiment-labels-2026-10-08.csv`: the 100 hand-labelled (story, company) pairs (§8).
 
 ---
 
@@ -605,13 +616,13 @@ Changes made by hand to the dev database on 2026-10-08, with backups in `samples
 | `v1.5` / `v2.5` | `f5d2605` | #4: India deals and insider trades in the reports and the brief |
 | `v1.6` / `v2.6` | `7af294a` | #5: local FinBERT, re-score script |
 | `v1.7` / `v2.7` | `898314c` | #7: commodity word inside a company name; commodity re-tag script |
+| `v1.8` / `v2.8` | `d13a560` | #8: per-company sentiment (FinBERT per company, optional local or hosted language model), roundups as market stories, re-read and labelling scripts |
 
 Pull request #6 was closed by GitHub when its base branch was deleted; #7 replaced it.
 
 **Pull request #8** (`per-company-sentiment`) was merged on 2026-10-08 as `d13a560`, at
 Annas's request from a session, and the branch deleted: roundups as market stories,
-per-company sentiment, the local-model step and the labelling scripts. **Not tagged** — the
-next pair would be `v1.8` / `v2.8` on `d13a560`.
+per-company sentiment, the local-model step and the labelling scripts. Tagged `v1.8` / `v2.8`.
 
 ---
 
