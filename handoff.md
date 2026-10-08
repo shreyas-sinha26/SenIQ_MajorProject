@@ -10,18 +10,45 @@ in `RAG_PLAN.md`; the matching engine edits live only in the gitignored `strateg
 Every commit passes `npm test` on its own. Nothing in the merge has run with a real model
 key, real embeddings, or the real strategy engine behind the app.
 
-**Committed on the branch `hardening-email-reports` (from `be98ba8`, 2026-10-08, not pushed):** a
-hardening pass, Gmail sending, report emails as PDF attachments, and Claude through AIRouter
-(the three sections below) — 51 files, `npm test` green (351 checks). The dev database is on
-migration 0025. `origin/main` has since gained one commit from Shreyas (`ffa4fde`, README
-only — no overlap). **Next:** merge `origin/main` into the branch (merge, not rebase), run
-`npm test`, push the branch with the `Annas-Shariff` gh account and open a pull request (§8).
-`.github/workflows/ci.yml` is still left out of commits (needs the `workflow` token scope).
+**Where things stand (end of 2026-10-08):** three commits sit on the local branch
+`hardening-email-reports`, **not pushed**: `be98ba8` (hardening pass, Gmail sending, PDF report
+emails, Claude through AIRouter), `b5e47f3` (handoff), `2187d91` (Ask: stated rankings in tool
+results, stricter grounding rules, eval runner through the router, verification-button UI).
+`npm test` is green (354 checks). `origin/main` has one newer commit from Shreyas (`ffa4fde`,
+README only — no overlap). `.github/workflows/ci.yml` is still left out of commits (needs the
+`workflow` token scope). The dev database is on migration 0025.
 
-**What is still switched off or never run for real:** Claude answers (`ANTHROPIC_API_KEY` +
-`CLAUDE_REPORTS=1`), Indian prices (Upstox), news embeddings, and hosting — so sentiment
-history is only ~16 days and SenIQ-factor backtests mean little. Email now works through a
-Gmail app password, but no SenIQ account uses a real address yet.
+**Running right now:** the app, at http://localhost:3010, started from the Claude Code preview
+(`seniq-main`). `.env` has `AIROUTER_API_KEY` + `CLAUDE_REPORTS=1`, so **the app can spend
+credits by itself** (see "Standing instruction" below). Stop it when not in use.
+
+**Standing instruction from Annas (2026-10-08): make no Claude API calls until he says so.**
+That holds the eval rerun and any trial of another model. The app itself still calls Claude
+while `CLAUDE_REPORTS=1`: Ask and the brief when he uses them, the 05:30 brief job, and a Pro
+alert narrative when a realtime alert fires for a verified Pro account. `CLAUDE_REPORTS=0` +
+restart turns all of that off (and Ask with it).
+
+**Next, in order:**
+1. Push: `git fetch`, merge `origin/main` into the branch (merge, not rebase), `npm test`,
+   push with the `Annas-Shariff` gh account, open a pull request (§8). Not yet asked for.
+2. When Annas allows model calls again: rerun the 30-case eval (~$0.50) to measure the tool
+   change in `2187d91`; then, if wanted, one run with another answer model via
+   `AIROUTER_MODEL` (eval only). He should also read ~10 judged answers — the judge is strict
+   and has not been checked against a human.
+3. Email: outgoing mail ports were blocked on the network used on 2026-10-08, so nothing sent
+   that day after the first test. Retry on another connection: one alert email and one PDF
+   report to his account (id 36 — Pro, verified by hand, five demo holdings). The PDF version
+   of the report has been reviewed as a file but never emailed.
+4. Decisions still open: which SEC contact email is right (`render.yaml` says
+   `affiliates@arnifi.com`, `config.js` defaults to `admin@xynthis.com`); whether to buy a
+   domain (needed for real email at launch — Gmail is for demos, and many hosts block mail
+   ports too).
+
+**Still switched off or never run for real:** Indian prices (Upstox), news embeddings (Ask's
+news search runs in keyword mode), hosting — so sentiment history is only a few weeks and
+SenIQ-factor backtests mean little — the strategy engine behind the app in this round, the
+Pro end-of-day report, and the daily brief / alert narrative through the router (only Ask and
+one brief have gone through it).
 
 ### Hardening pass (2026-10-08, in `be98ba8`)
 A read-through of the whole Node app, then fixes. Nothing here changes a feature.
@@ -117,11 +144,10 @@ A read-through of the whole Node app, then fixes. Nothing here changes a feature
   grounding check. **The new length rule has not been checked against a live answer yet.**
 - Note: shells started from Claude Code carry their own `ANTHROPIC_BASE_URL`; it is not in
   `.env` and does not matter while the router key is set.
-- `eval/ask/run.js` still constructs the Anthropic SDK directly (needs `ANTHROPIC_API_KEY`).
 
 ### First Ask eval run (2026-10-08) — `eval/ask/runs/2026-10-08T06-49-53/` (gitignored)
 - 30 cases × 1 rep, answers by Haiku 4.5 and judge Sonnet 5.5, both through AIRouter.
-  `eval/ask/run.js` now uses the router when `AIROUTER_API_KEY` is set (**uncommitted**).
+  `eval/ask/run.js` uses the router when `AIROUTER_API_KEY` is set (in `2187d91`).
   Judge self-test passed first. Spent $0.48 ($0.20 answers, $0.29 judge). No infra errors.
 - **Automatic checks: 26/30.** Right tools 19/19, scope refusals 5/5, no data leak 6/6, no
   advice 28/28, concise 28/28, no markdown. Grounded 24/28 — of the four misses, `edu-02` is a
@@ -213,7 +239,7 @@ ff9fe88 Add alert notification and narrative services with tests       (Shreyas)
 d08fe98 Ask v2 — tool-calling agent, news search (RAG), saved conversations
 ```
 Still local only: `.github/` (CI workflow — see §8), `strategy-service/` (gitignored), and the whole
-2026-10-07 session (uncommitted — see the table above).
+2026-10-07 session (merged in pull request #1 — see the table above).
 `v1.2`/`v2.2` pass `npm test` but have **not been clicked through in the browser** yet.
 
 **Why one branch, not two:** strategy commits are interleaved in history (since `ecb9c83`),
@@ -273,27 +299,27 @@ cd ~/Downloads/SenIQ_MajorProject && FEATURES_STRATEGIES=1 PORT=3030 npm start  
   chars; automatic prompt caching (Haiku 4.5 only caches prefixes ≥4,096 tokens, so only long
   multi-tool questions benefit); billable cost logged cache-aware; failed runs logged as
   `qa_failed` (counts toward the global $ ceiling, not the user quota).
-- **`explain_sentiment` (2026-10-07, uncommitted):** ninth Ask tool, also on MCP and
+- **`explain_sentiment` (2026-10-07, merged in pull request #1):** ninth Ask tool, also on MCP and
   `/v1/tickers/:ticker/sentiment/drivers`. Returns the stories behind a ticker's acute score with
   each one's exact share of the z-score. Plan for Ask/retrieval/signals work: `RAG_PLAN.md`.
-- **Story-level hybrid search (2026-10-07, uncommitted):** migration `0020_article_search` adds a
+- **Story-level hybrid search (2026-10-07, merged in pull request #1):** migration `0020_article_search` adds a
   full-text column; `search_news` now returns story cards (full-text + vector fused per story,
   re-ranked by the user's impact) and `get_story_detail` expands one. **0020 has not been applied
   to the dev database yet — it runs on the next app start.** Vector half still never run.
-- **Grounding check, thread digest, local-model tier (2026-10-07, uncommitted):**
+- **Grounding check, thread digest, local-model tier (2026-10-07, merged in pull request #1):**
   `answerCheck.js` audits each model-written answer against its evidence and stores the result
-  (migration `0021_ask_grounding`, also not yet applied; `GET /api/admin/ask-grounding`). Older
+  (migration `0021_ask_grounding`, applied 2026-10-08; `GET /api/admin/ask-grounding`). Older
   turns reach the model as a code-built digest. `ASK_OLLAMA=1` adds a local-model tier between
   Claude and the data summary — never run against a real model.
-- **Strategy tools in Ask (2026-10-07, uncommitted, v2 mode only):** `strategyTools.js` adds four
+- **Strategy tools in Ask (2026-10-07, merged in pull request #1, v2 mode only):** `strategyTools.js` adds four
   read-only tools (my strategies, paper performance, explain a signal, preset catalog) and a
   prompt addendum. Tested with a stand-in engine only — not yet against `strategy-service`.
-- **Eval code + three data fixes (2026-10-07, uncommitted):** `eval/ask/lib.js` + `run.js`
+- **Eval code + three data fixes (2026-10-07, merged in pull request #1):** `eval/ask/lib.js` + `run.js`
   (`--check` is free and offline; `--run --yes-spend --max-usd N [--judge]` is the paid run,
   never executed). GDELT now covers all 57 Indian universe names (12 per run, rotating); all 25
   universe coins have a CoinGecko price ID and resolve as crypto; commodities are matched on the
   headline only. Stored articles keep their old commodity tags until re-resolved.
-- **Smart-money factors (2026-10-07, uncommitted; engine edits local-only, engine tests 37 → 48):**
+- **Smart-money factors (2026-10-07, merged in pull request #1; engine edits local-only, engine tests 37 → 48):**
   CUSIP map now covers all 100 US universe names (OpenFIGI-verified) with an automatic ticker
   backfill on stored 13F rows (runs on next app start); new engine factors `congress_buys`,
   `congress_sells`, `congress_buyers`, `politician` param, `funds_holding`, `funds_net_adds`,
@@ -301,17 +327,17 @@ cd ~/Downloads/SenIQ_MajorProject && FEATURES_STRATEGIES=1 PORT=3030 npm start  
   comparison on `/api/strategies/compare`, `/v1` and MCP. **Fixed: dates sent to the engine were
   one day early east of GMT (lookahead) — earlier SenIQ-factor backtests from this machine were
   affected.** The Node code needs the local engine copy for the new factors.
-- **Company filings (2026-10-07, uncommitted):** migration `0022_disclosures` (not yet applied),
+- **Company filings (2026-10-07, merged in pull request #1):** migration `0022_disclosures` (applied on the dev database 2026-10-08),
   `services/disclosures.js`, Ask/MCP/`/v1` tool `get_disclosures`. SEC 8-Ks for held US-listed
   stocks, fetched lazily after the smart-money poll (4 tickers per poll; `DISCLOSURES=0`
   disables). Live-checked against EDGAR on a scratch DB. India (NSE/BSE) was only spiked — all
   routes reachable, findings in `RAG_PLAN.md` — nothing built.
-- **Plain English → strategy draft (2026-10-07, uncommitted, v2 only):** Ask tool
+- **Plain English → strategy draft (2026-10-07, merged in pull request #1, v2 only):** Ask tool
   `draft_strategy` validates a Builder spec the agent writes (`services/strategySpec.js`, plus
   the engine when reachable) and returns it as `draft` on the ask response; stored on the turn
-  (migration `0023_ask_drafts`, not yet applied). Saves nothing. Tested with a scripted model
+  (migration `0023_ask_drafts`, applied 2026-10-08). Saves nothing. Tested with a scripted model
   only.
-- **UI pass (2026-10-08, uncommitted):** "Basic coverage" label and click-a-score sentiment
+- **UI pass (2026-10-08, merged in pull request #1):** "Basic coverage" label and click-a-score sentiment
   drivers on the Portfolio table; grounding badge and strategy-draft card with "Open in Strategy
   Builder" in the AI Workspace; new congress/fund factors and SenIQ templates in the Builder;
   "Compare without SenIQ signals" on Backtest results. Checked in a browser on a scratch DB copy;
@@ -342,7 +368,7 @@ mostly a second token set. Nav: sliding underline (horizontal) / left accent bar
   migrations share the `0016` prefix (`ask_threads`, `oauth_accounts`) — fine, the runner
   keys on the full filename and they touch different tables.
 
-### Company knowledge base refresh (2026-10-07, uncommitted)
+### Company knowledge base refresh (2026-10-07, merged in pull request #1)
 - **Universe 129 → 186:** US 54 → 100, India 50 → 57 (added TRENT, BEL, ETERNAL, JIOFIN, INDIGO,
   MAXHEALTH; TATAMOTORS → TMPV + TMCV, LTIM → LTM — the old tickers are kept in the DB as
   `is_active = false`), crypto 25, plus XAU/XAG/WTI/NG as commodities.
@@ -361,7 +387,7 @@ mostly a second token set. Nav: sliding underline (horizontal) / left accent bar
 - Existing articles are not re-resolved — only new ones use the new matching, so stored tags from
   before 2026-10-07 can still be wrong (e.g. "HDFC Securities" tagged as HDFC Bank).
 
-### v2 strategies + MCP round (2026-10-07, uncommitted)
+### v2 strategies + MCP round (2026-10-07, merged in pull request #1)
 First real end-to-end run of v2 (engine + app, throwaway Pro user, since deleted): build → backtest
 (US / NSE / crypto / gold) → save → live signal → paper → API key → `/v1` → `/mcp` all work.
 - **MCP / `/v1` data tools:** Ask's 8 read tools are exposed to keys through one catalog
@@ -411,7 +437,7 @@ First real end-to-end run of v2 (engine + app, throwaway Pro user, since deleted
 - **Parked with the data work:** daily recording/hosting, sentiment backfill, fund factor (needs
   CUSIP → ticker: only 1.5% of 13F holdings have one), event-type factor.
 
-### Alert quality (2026-10-07, uncommitted)
+### Alert quality (2026-10-07, merged in pull request #1)
 History since the June budget: 477 of 513 alerts were general market/world news, 5 were about a
 user's holdings, one RBI decision produced 7+ alerts, and some days reached 10 real-time alerts
 against a limit of 5. Changes, all in `server/services/materiality.js` + `config.js`:
@@ -433,7 +459,7 @@ against a limit of 5. Changes, all in `server/services/materiality.js` + `config
   confirmation, feedback loop from opens and outcomes, emailing the daily brief. Alert emails
   still need `RESEND_API_KEY` and have never been sent for real.
 
-### Email — status and what's needed (checked 2026-10-07)
+### Email — status as of 2026-10-07 (superseded by the 2026-10-08 section near the top)
 **Built:** one sender (`server/services/emailService.js`, Resend over HTTPS, no SDK) used by
 verification, password reset and alert emails (`alertNotifier.js`: Free none, Plus standard, Pro
 with a short narrative). Without a key every send returns `delivered:false` and nothing breaks.
@@ -444,7 +470,7 @@ with a short narrative). Without a key every send returns `delivered:false` and 
    `SenIQ <alerts@yourdomain>`. Without it the default `onboarding@resend.dev` only delivers to the
    Resend account's own address — fine for a first test, useless for other users.
 3. `APP_URL` set to the real address once hosted; locally links point at `localhost`.
-**Safeguards built 2026-10-07 (uncommitted; migration `0019_email_safeguards`):**
+**Safeguards built 2026-10-07 (merged in pull request #1; migration `0019_email_safeguards`):**
 - **Verified addresses only.** `alertNotifier.recipientBlock` refuses an unverified or unsubscribed
   recipient. All 10 local users are unverified (they signed up with no provider), so
   `POST /api/auth/resend-verification` was added, with a "Send verification link" button in Profile.
@@ -478,7 +504,7 @@ and verified. Crypto via CoinGecko (no key). **Indian stocks: not priced yet** (
 | `FINNHUB_API_KEY` | set | US prices + company news |
 | `FMP_API_KEY` | set | commodities; US fallback |
 | `UPSTOX_ANALYTICS_TOKEN` | **empty** | Indian prices (code not built yet) |
-| `AIROUTER_API_KEY` (or `ANTHROPIC_API_KEY`) | to be added by Annas | Claude brief + Ask + alert narrative (also needs `CLAUDE_REPORTS=1`) |
+| `AIROUTER_API_KEY` (or `ANTHROPIC_API_KEY`) | **set** (AIRouter, with `CLAUDE_REPORTS=1`) | Claude brief + Ask + alert narrative (also needs `CLAUDE_REPORTS=1`) |
 | `HF_API_TOKEN` (+ `FINBERT_CLASSIFY=1`, `NEWS_EMBEDDINGS=1`) | not set | FinBERT sentiment, RAG embeddings |
 | `FEATURES_STRATEGIES` | unset = v1 | `1` = v2 |
 | `CONGRESS_TRADES_URL` | not set locally | live congress data (set on the deploy host); local uses sample |
@@ -498,7 +524,7 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
 ## 5. Tests & evaluation
 - `npm test` — offline, no DB/API calls, all passing: resolver 49 · engine/alerts logic 50 ·
   reports 23 · Ask 83 · eval 15 · strategy signals 12 · filings 10 · strategy drafts 14 · MCP/keys/data tools 19 · auth 9 · alert email 30 ·
-  request safety 12 · report emails + PDF 15 · model router + answer hygiene 10.
+  request safety 12 · report emails + PDF 15 · model router + answer hygiene 10 (354 checks in all).
 - Engine: `cd strategy-service && ./venv/bin/python -m pytest -q` → 37 passing (local-only).
 - **Clean-database check (2026-10-07):** all 19 migrations + the seed applied twice to a
   brand-new database, then dropped.
@@ -509,39 +535,45 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
   The scripts lived in the session scratchpad and are **not** in the repo.
 - **Ask eval set** `eval/ask/cases.json`: 30 cases over a fixture portfolio (AAPL, NVDA, BTC,
   XAU, RELIANCE, TCS). All 30 route as expected through the scope pre-check (`scope-04` now asks
-  about Paytm — uncommitted). **Still awaiting sign-off on the cases**; then grader + runner +
+  about Paytm). **Run twice on 2026-10-08 with the judge — results in the section near the top.** Earlier plan was: grader + runner +
   a small paid pilot (ask before any paid run).
 
 ## 6. Open items (priority order)
-1. **After the merge of pull request #1:** start the app once on the dev database (applies
-   migrations 0020–0023, fills 13F tickers, begins fetching SEC filings); start the strategy
-   engine and check the strategy pages and Ask's strategy tools against it; then tag
-   (`v1.3` / `v2.3`). If a Render service is connected to `main`, the merge already deployed
-   there and applied 0017–0023 — check its dashboard. The CI workflow is still uncommitted (§8).
-2. **Email, remaining.** Sending works through Gmail (see the top section). Left: Annas signs
-   up with a real address and verifies it, then one test alert and one report to that account.
-   For a public launch buy/verify a domain and set `RESEND_API_KEY` — Gmail is for demos only.
-3. **Turn on real AI answers:** set `ANTHROPIC_API_KEY` **and** `CLAUDE_REPORTS=1` in `.env`
-   (a key alone does nothing).
-4. **Reports by email** (agreed direction, not built): Free weekly summary, Plus daily brief
-   before the user's market opens, Pro daily + optional end-of-day wrap. No hourly/6h/12h
-   reports — anything that can't wait is an alert. Needs per-user time zone + home market, which
-   also unlocks quiet hours. The brief today is in-app only, generated 05:30 server time.
+The immediate queue is the "Next, in order" list at the top. Behind it:
+1. **Tag after the next merge** (`v1.3` / `v2.3`); start the strategy engine and check the
+   strategy pages and Ask's strategy tools against it (not exercised in the 2026-10-08 round).
+   If a Render service is connected to `main`, a merge deploys there and applies migrations
+   up to 0025 — check its dashboard, and note `render.yaml` sets `CLAUDE_REPORTS` and
+   `FEATURES_STRATEGIES` to "0".
+2. **Ask quality** (from the two eval runs): factual slips by Haiku 4.5 are the weak spot —
+   ranking, trade direction, "released" vs previewed, added interpretation. Tools now state
+   rankings and tallies (unmeasured). Also: the automatic grounding check should not count a
+   general explanation (e.g. what a 13F is) as ungrounded; the judge's grounded line fails a
+   whole answer for one loose phrase; "last month" questions only have ~7 days of events.
+3. **Email at launch:** a verified domain + `RESEND_API_KEY` (HTTPS, so not blockable like
+   mail ports). Read bounces/complaints from the provider's webhook.
+4. **Reports, remaining:** the Pro end-of-day wrap; per-user time zone beyond the India/US
+   market choice; quiet hours. Scheduled reports need the server running at send time.
 5. **Alerts, remaining:** sensitivity dial (critical / balanced / everything) and per-stock mute;
    price-move confirmation before emailing; feedback loop from opens/dismissals and outcomes
-   (0 of 72 tracked alerts were followed by a 3% move); read bounces/complaints from Resend's
-   webhook. Thresholds were calibrated on one day of data and ten test portfolios — revisit.
-   Analyst notes are mostly typed "other", so the type weight doesn't demote them enough.
-6. **Data foundation (parked by Annas):** hosting / daily recording, sentiment backfill, CUSIP →
-   ticker for 13F holdings (only 1.5% have a ticker) → fund factor, event-type factor.
-7. **Indian prices via Upstox:** paste the Analytics Token (free, read-only, 1-year expiry), then
-   build NSE ticker → instrument key lookup. Treat the token as a secret.
-8. **RAG embeddings:** `HF_API_TOKEN` + `NEWS_EMBEDDINGS=1` + pgvector. Never run.
-9. **Eval:** sign off the 30 cases → grader + runner → pilot.
+   (0 of 72 tracked alerts were followed by a 3% move). Thresholds were calibrated on one day
+   of data and ten test portfolios — revisit. Analyst notes are mostly typed "other", so the
+   type weight doesn't demote them enough.
+6. **Security, remaining from the hardening pass:** the global $/day Claude ceiling can be
+   overshot by a few calls under concurrency; `safeFetch` has a DNS-rebinding gap (documented
+   in the file); the CSP still allows inline scripts; 25 moderate `npm audit` advisories need
+   `node-cron` 4; two migrations are numbered `0016` (harmless — do not rename).
+7. **Data foundation (parked by Annas):** hosting / daily recording, sentiment backfill, CUSIP →
+   ticker for 13F holdings → fund factor, event-type factor.
+8. **Indian prices via Upstox:** the Analytics Token is in `.env` (`UPSTOX_ANALYTICS_TOKEN`) but
+   nothing reads it yet; build the NSE ticker → instrument key lookup. TCS/RELIANCE show no
+   live price until then, so weights skew to whatever is priced.
+9. **RAG embeddings:** `HF_API_TOKEN` + `NEWS_EMBEDDINGS=1` + pgvector. Never run.
 10. **Knowledge base upkeep:** Noel Tata retires as Trent chairman in November 2026; re-run
     `node scripts/refresh_executives.js` now and then (US only, ~100 FMP calls).
 11. Smaller: dark-mode toggle; realistic demo portfolio quantities; browser check of the
-    OAuth sign-in page; price service has no cache or backoff; the company card shows "US · US" (exchange and country).
+    OAuth sign-in page; price service has no cache or backoff; the company card shows
+    "US · US" (exchange and country); the CI workflow is still uncommitted (§8).
 
 ## 7. Where things live
 | Area | Files |
@@ -559,7 +591,10 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
 | Email: sender, log, unsubscribe | `server/services/emailService.js`, `server/routes/email.js`, `alertNotifier.js`; resend-verification in `server/routes/auth.js` |
 | MCP + public API | `server/routes/mcp.js`, `v1.js`, `server/services/dataTools.js` (data tools), `strategyStore.js` (save / deploy / stop), `apiKeyGate.js`, `signalHistory.js` |
 | Strategy engine (local-only) | `strategy-service/app.py`, `service/backtest_runner.py`, `service/seniq_factors.py`, `engine/brokers/simulated.py`, `tests/` |
-| Tests / eval | `test/*.test.js` (7 files, run by `npm test`), `eval/ask/cases.json` |
+| Request safety (2026-10-08) | `server/middleware/asyncRouter.js`, `rateLimit.js`, `server/services/safeFetch.js`; session checks in `server/routes/auth.js` |
+| Report emails + PDF | `server/services/reportEmails.js`, `reportPdf.js`, `emailService.js` (Resend or SMTP, attachments), `server/routes/email.js` (preferences, unsubscribe), `config.js` (`REPORT_EMAIL`) |
+| Model access (Anthropic direct or AIRouter) | `server/services/llmClient.js`, `config.js` (`LLM`); cost guards in `reports.js`, `qa.js` |
+| Tests / eval | `test/*.test.js` (14 files, run by `npm test`), `eval/ask/cases.json`, `eval/ask/run.js` (`--check` free; `--run --yes-spend --max-usd N [--judge]` paid), runs in `eval/ask/runs/` (gitignored) |
 
 ## 8. Pushing to GitHub
 - Repo `shreyas-sinha26/SenIQ_MajorProject` is **private**: only the `Annas-Shariff` gh account
@@ -568,8 +603,11 @@ congress) · AI (Claude Haiku 4.5, HF FinBERT + MiniLM, optional local Ollama) �
   tagged commits keep their hashes), pushed `main` + tags `v1.0`, `v1.1`, `v2.1`, `v1.2`, `v2.2`.
   Commits are authored as Annas Shariff with no AI attribution.
 - **Done 2026-10-08:** pushed the branch `ask-retrieval-signals`, opened pull request #1 and merged it into `main` with a merge commit (`ac88e2a`); the branch was then deleted. No tag yet.
+- **2026-10-08, later:** three commits on the local branch `hardening-email-reports`
+  (`be98ba8`, `b5e47f3`, `2187d91`), **not pushed**. `git fetch` worked with the current gh
+  account and showed `origin/main` one commit ahead (`ffa4fde`, README only).
 - Next time: **fetch first**, merge (not rebase) if teammates pushed, run `npm test`, then
-  push `main` and any new tags (`git push origin main <tag>`).
+  push the branch and open a pull request, as was done for #1.
 - `.github/workflows/ci.yml` still can't be pushed until the token has the `workflow` scope
   (`gh auth refresh -h github.com -s workflow`, interactive).
 - `strategy-service/` stays gitignored / local-only (your IP) unless you say otherwise.
