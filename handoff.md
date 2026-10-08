@@ -61,9 +61,9 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 ## 3. Current state
 
 - **Git** *(checked 2026-10-08)*: on `main`, level with `origin/main`, no other branch, no
-  open pull request. Latest tags **`v1.8` / `v2.8`** on `d13a560`, the merge of pull request #8
-  (per-company sentiment). After it, untagged: the README restored and rewritten, and
-  pull request #9 (`55c5fe3`, in-page confirm dialog); the rest are handoff notes. Untracked and never pushed: `samples/` and `.github/` (see §11).
+  open pull request. Latest tags **`v1.9` / `v2.9`** on `55c5fe3`, the merge of pull request #9
+  (in-page confirm dialog; the README restored and rewritten is in it too). The commits
+  after it on `main` are handoff notes and the README's "latest tag" line. Untracked and never pushed: `samples/` and `.github/` (see §11).
 - **Tests** *(checked 2026-10-08)*: `npm test` passes — 22 files, 530 checks, offline
   (no database or API calls).
 - **Dev database** *(checked)*: Postgres `seniq`, all 30 migration files applied (latest
@@ -628,6 +628,7 @@ Changes made by hand to the dev database on 2026-10-08, with backups in `samples
 | `v1.6` / `v2.6` | `7af294a` | #5: local FinBERT, re-score script |
 | `v1.7` / `v2.7` | `898314c` | #7: commodity word inside a company name; commodity re-tag script |
 | `v1.8` / `v2.8` | `d13a560` | #8: per-company sentiment (FinBERT per company, optional local or hosted language model), roundups as market stories, re-read and labelling scripts |
+| `v1.9` / `v2.9` | `55c5fe3` | #9: in-page confirm dialog for the delete and stop buttons; README restored and brought up to date, with the hand-label sentiment results |
 
 Pull request #6 was closed by GitHub when its base branch was deleted; #7 replaced it.
 
@@ -636,7 +637,7 @@ Annas's request from a session, and the branch deleted: roundups as market stori
 per-company sentiment, the local-model step and the labelling scripts. Tagged `v1.8` / `v2.8`.
 
 **Pull request #9** (`in-page-confirm`) was merged on 2026-10-08 as `55c5fe3`, at Annas's
-request, and the branch deleted. **Not tagged.** The five buttons that asked "are you sure?"
+request, and the branch deleted. Tagged `v1.9` / `v2.9`. The five buttons that asked "are you sure?"
 with the browser's `confirm()` (delete an Ask conversation, delete a strategy, stop or delete
 a paper deployment, revoke an API key) now use an in-page dialog, `confirmAction()` in
 `public/js/app.js`.
