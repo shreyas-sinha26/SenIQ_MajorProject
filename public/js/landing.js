@@ -45,7 +45,7 @@
     .catch(() => {});
 
   // Already logged in → point every app CTA straight at the dashboard
-  if (localStorage.getItem('copilot_token')) {
+  if (localStorage.getItem('seniq_signed_in') === '1') {
     document.querySelectorAll('a[href^="/app"]').forEach((a) => {
       a.setAttribute('href', '/app');
       // Relabel sign-up CTAs; leave "Sign In" links alone.

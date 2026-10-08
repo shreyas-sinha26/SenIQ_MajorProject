@@ -40,9 +40,52 @@ function classifyEventType(title = '', summary = '', tier = 'holding') {
   return 'other';
 }
 
+// ─── Stance: is this a reported event, or talk about one? ────
+// The type above says what a story is about; the stance says what kind of writing it is.
+// Only an event is news in the sense the impact score means. Returns:
+//   'event'      something happened, or was reported to have happened
+//   'commentary' opinion, prediction, preview, explainer or a question: someone's view
+//   'roundup'    a list or market wrap that names many companies in passing
+const ROUNDUP = [
+  /\b(stocks?|shares?) to (watch|buy|track)\b/, /\btop (\d+ |stock )?(stocks?|movers|gainers|losers|picks)\b/,
+  /\b(top|biggest|which) .*\bmovers\b/, /\bstocks? (in focus|in news)\b/, /\bbuzzing stocks?\b/,
+  /\bmarket (live|wrap|today|open(ing)?|clos(e|ing))\b/, /\blive updates?\b/, /\blive:/, /\bstock market today\b/,
+  /\bearnings trends? highlights?\b/, /\bfeatured highlights\b/, /\bstock of the day\b/, /\bweek ahead\b/,
+  /\bnames \d+ .*\bstocks?\b/, /\b\d+ (\w+ ){0,2}stocks? (to|for|that)\b/,
+];
+const COMMENTARY = [
+  /\?\s*$/, /^(why|what|how|should|will|is|are|can|could|does|do|which|where|when)\b/,
+  /\b(prediction|opinion|explained|explainer|analysis|preview|outlook)\b/, /\bhere'?s (why|what|how)\b/,
+  /\bwhat to expect\b/, /\bhow to trade\b/, /\bshould you\b/, /\bis it time\b/, /\bhistory says\b/,
+  /\b\d+ (triggers?|reasons?|things|factors?|takeaways|lessons?|charts?)\b/,
+  /\b(experts?|analysts?)['’]? (view|say|says|believe|expect|weigh)\b/, /\bweighs in\b/,
+  /\b(could|might|may|likely to|set to|poised to)\b/, /\bvs\.? .*\bwhich\b/,
+  /\bbest (\w+ ){0,2}stocks?\b/, /\bstocks? (investors )?should\b/, /\bhere'?s \d+\b/,
+  /\b(summit|conclave|webinar|podcast|interview)\b/,   // talk about markets, not a market event
+];
+// "Hunter Biden Says…", "Peter Schiff Warns…", "Scott Galloway: …" — a named person's view.
+const PERSON_SAYS = /^((?:[A-Z][\w.'’-]+\s+){1,3}?)(says|warns|calls|slams|predicts|believes|thinks|argues|claims|rejects|sees|expects)\b/i;
+const PERSON_COLON = /^((?:[A-Z][\w.'’-]+\s+){1,2}[A-Z][\w.'’-]+):\s/;
+
+/**
+ * @param {string} title
+ * @param {(text:string)=>boolean} [isCompany] true when the text names a tracked company
+ *        or its executive — "Tata Motors says it will cut jobs" is the company speaking,
+ *        which is an event, not commentary.
+ */
+function classifyStance(title = '', isCompany = () => false) {
+  const t = String(title).trim();
+  const lower = t.toLowerCase();
+  if (ROUNDUP.some((re) => re.test(lower))) return 'roundup';
+  const who = t.match(PERSON_SAYS) || t.match(PERSON_COLON);
+  if (who && /^[A-Z]/.test(t) && !isCompany(who[1])) return 'commentary';
+  if (COMMENTARY.some((re) => re.test(lower))) return 'commentary';
+  return 'event';
+}
+
 function severityFor(type) {
   const { EVENT_TYPES } = require('../config');
   return EVENT_TYPES.SEVERITY[type] ?? EVENT_TYPES.SEVERITY.other;
 }
 
-module.exports = { classifyEventType, severityFor };
+module.exports = { classifyEventType, classifyStance, severityFor };

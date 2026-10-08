@@ -84,7 +84,12 @@ const FEATURES = {
   X_INGEST: false,       // deferred — interface stubbed only
   FINBERT_CLASSIFY: process.env.FINBERT_CLASSIFY === '1', // HF Inference API batch classifier (needs HF_API_TOKEN)
   SMART_MONEY: true,     // Phase 3: 13F (EDGAR) + Congress tabs + instant filing alerts
-  CLAUDE_REPORTS: false,
+  // India side of those tabs: NSE bulk/block deals + insider trades. Opt-in
+  // (INDIA_SMART_MONEY=1): the NSE routes are unofficial and their terms are unchecked.
+  INDIA_SMART_MONEY: process.env.INDIA_SMART_MONEY === '1',
+  // Claude writes the daily brief, Ask answers and the Pro alert narrative. Off unless
+  // CLAUDE_REPORTS=1 — a key alone never starts spending.
+  CLAUDE_REPORTS: process.env.CLAUDE_REPORTS === '1',
   // v2 feature set: Strategy Builder / Your Strategies / Backtest / Paper Trade + the MCP
   // server, public REST API (/v1), API keys and /docs. Off = v1 (portfolio → AI Workspace).
   STRATEGIES: process.env.FEATURES_STRATEGIES === '1',
@@ -155,7 +160,28 @@ const EVENT_TYPES = {
 //   recency    : time decay on the event's last_seen        (mult RECENCY_FLOOR..1)
 const IMPACT = {
   EVENT_WINDOW_HOURS: 72,     // only recent events compete for "today's most important"
-  MACRO_BROAD_FACTOR: 0.5,    // relevance of a macro event to a non-matching holding
+  // Relevance of a market-wide story to a holding it does not name. A market story moves
+  // many holdings a little, so it is scored well below a story about the holding itself,
+  // always at "macro" severity whatever its own type, and only against holdings listed in
+  // the market it is about. At 0.2 a clear results story on a holding outranks an equally
+  // strong market story once that holding is above ~15% of the exposure in that market;
+  // at the old 0.5 every market story counted as "50% of your exposure" and led the feed.
+  MACRO_BROAD_FACTOR: 0.2,
+  // How big a market story is, read from how much is being written about it: related
+  // market headlines are grouped into one story (materiality.groupStories) and the story's
+  // coverage (its headlines × their sources) multiplies the relevance above:
+  //   1 + GAIN × log2(coverage), capped at MAX  →  1 headline ×1, 4 ×2, 8 ×2.5, 16+ ×3.
+  // So a one-off market headline stays low, and a day when the whole market is the story
+  // climbs into the top handful.
+  MACRO_COVERAGE_GAIN: 0.5,
+  MACRO_COVERAGE_MAX: 3,
+  // What kind of writing a story is (eventTyping.classifyStance). Only a reported event
+  // counts in full; someone's view of it counts for less, and a list that names a holding
+  // in passing for less again. At 0.6 a commentary piece cannot clear the report's card bar.
+  STANCE_FACTOR: { event: 1, commentary: 0.6, roundup: 0.4 },
+  // How an impact score is worded for a reader. High is the level at which a story about a
+  // holding would raise an alert (MATERIALITY.HOLDING_THRESHOLD); below Medium it is background.
+  LEVELS: { HIGH: 0.10, MEDIUM: 0.04 },
   SECTOR_RELEVANCE: 0.4,      // relevance of a sector event to a holding in that sector
   Z_BOOST: 0.25,              // (materiality alerts) surprising z amplifies
   NOVELTY_BASE: 0.8,          // novelty mult = BASE + GAIN×min(|z|,3)/3 ; null z → 1.0
@@ -291,6 +317,15 @@ const REPORTS = {
   GLOBAL_DAILY_USD_CEILING: 5,   // global kill-switch: stop calling Claude past this day's spend
   // Haiku 4.5 pricing ($/1M tokens) for the cost estimate logged per call.
   PRICE_PER_MTOK: { input: 1.0, output: 5.0 },
+  // The written layer on a report's headline cards (services/cardWriter.js): one call
+  // rewrites all of a report's cards; a rewrite that fails its check keeps the template.
+  CARDS: {
+    TIERS: ['plus', 'pro'],
+    MAX_OUTPUT_TOKENS: 1800,     // up to six cards × three short lines, as JSON
+    PER_USER_DAILY_QUOTA: 2,     // one report a day, plus one retry if the send fails
+    SUMMARIES_PER_CARD: 2,       // article summaries shown to the model for each card
+    MAX_SUMMARY_CHARS: 600,      // each one clamped to this (untrusted feed text)
+  },
 };
 
 // ─── Ask it anything — portfolio Q&A (Engine Phase E6) ───────
@@ -396,6 +431,54 @@ const ALERT_NARRATIVE = {
   MAX_WORDS: 250,
 };
 
+// ─── Model access for the analyst voice (services/llmClient.js) ──
+// Claude is reached either directly (ANTHROPIC_API_KEY) or through an OpenAI-compatible
+// router (AIROUTER_API_KEY — AIRouter by default, credits topped up in INR). The router
+// names models "provider/model"; its Haiku 4.5 is priced the same as REPORTS.PRICE_PER_MTOK.
+const LLM = {
+  ROUTER: {
+    API_KEY: process.env.AIROUTER_API_KEY || '',
+    BASE_URL: (process.env.AIROUTER_BASE_URL || 'https://api.airouter.in/v1').replace(/\/$/, ''),
+    MODEL: process.env.AIROUTER_MODEL || 'anthropic/claude-haiku-4.5',
+    TIMEOUT_MS: 60000,
+  },
+};
+
+// ─── Report emails (scheduled summaries) ─────────────────────
+// Anything that can't wait is an alert; reports are the calm, scheduled read.
+//   Free       → a weekly summary, Sunday evening.
+//   Plus / Pro → the daily brief on weekday mornings, before the user's market opens.
+// "The user's market" is users.home_market, or worked out from what they hold. The job runs
+// every few minutes and sends to whoever is inside their send window and has not had that
+// day's report (report_sends), so a restart or a late start still delivers once.
+const REPORT_EMAIL = {
+  CRON: '*/15 * * * *',
+  DAILY: { HOUR: 8, MINUTE: 30, WEEKDAYS: [1, 2, 3, 4, 5] },  // local time, Mon–Fri
+  WEEKLY: { HOUR: 18, MINUTE: 0, WEEKDAY: 0 },                // local time, Sunday
+  SEND_WINDOW_MINUTES: 180,     // how long after the send time a late report still goes out
+  MARKETS: {
+    IN: { label: 'India', timeZone: 'Asia/Kolkata' },
+    US: { label: 'United States', timeZone: 'America/New_York' },
+  },
+  DEFAULT_MARKET: 'US',
+  IN_EXCHANGES: ['NSE', 'BSE'],
+  MAX_EVENTS: 4,                // events listed in a report
+  // Which headlines earn a card (reportInsights.pickCards). A story about a holding or its
+  // sector passes on STRENGTH = its impact per unit of exposure it touches, i.e. event-type
+  // severity × how one-sided the coverage is × novelty × confidence × recency (0 to ~1.2).
+  // Strength ignores position size, so the bar means the same for a 5-stock and a 30-stock
+  // portfolio. At 0.40 roughly the top tenth of stories about a holding pass (2 to 4 on a
+  // normal day): a results, deal, legal or outlook story with a clear reading does; an
+  // analyst rating rarely does; a "stocks to watch" round-up cannot.
+  CARDS: {
+    BAR: 0.40,
+    MIN_EXPOSURE_PCT: 3,        // the story must touch at least this much of the portfolio
+    MAX: 6,                     // hard cap, however busy the day
+    MIN: 2,                     // a quiet day still shows its best two, as background
+  },
+  SUBJECT_PREFIX: '[SenIQ]',
+};
+
 // ─── Company filings (primary sources) ───────────────────────
 // SEC 8-Ks for held US-listed stocks. Lazy and bounded: only tickers someone holds, a few per
 // poll, a few filings each, and each request spaced by SMART_MONEY.SEC_RATE_DELAY_MS.
@@ -458,6 +541,34 @@ const SMART_MONEY = {
   CONGRESS_TRADES_URL: process.env.CONGRESS_TRADES_URL || '',
   WEBHOOK_TIMEOUT_MS: 6000,
   WEBHOOK_MAX_FAILURES: 10,      // auto-disable a webhook after this many consecutive fails
+  MAX_WEBHOOKS_PER_USER: 5,
+};
+
+// ─── India smart money (NSE bulk/block deals + insider trades) ───
+// The Indian side of the Institutions and Congress tabs. Runs only when
+// FEATURES.INDIA_SMART_MONEY is on. NSE's routes are public but unofficial, so the poller
+// asks once a day after the market closes (never on boot) and gives up quietly when refused.
+const INDIA_SMART_MONEY = {
+  CRON: '30 19 * * 1-5',         // weekdays 19:30, in TIMEZONE — the deal files are out by then
+  TIMEZONE: 'Asia/Kolkata',
+  // Sent on every NSE request. Says who we are; override with NSE_USER_AGENT.
+  USER_AGENT: process.env.NSE_USER_AGENT || 'Mozilla/5.0 (compatible; SenIQ/1.0; admin@xynthis.com)',
+  BULK_DEALS_URL: 'https://nsearchives.nseindia.com/content/equities/bulk.csv',
+  BLOCK_DEALS_URL: 'https://nsearchives.nseindia.com/content/equities/block.csv',
+  // Insider trades. Since May 2026 NSE publishes them as filings: one whole-market list,
+  // each filing pointing to an XBRL file on FILINGS_HOST with the trades inside.
+  INSIDER_FILINGS_URL: 'https://www.nseindia.com/api/corporates-pit-gg?index=equities',
+  FILINGS_HOST: 'https://nsearchives.nseindia.com/',
+  INSIDER_MAX_FILINGS: 60,       // filings read per run, newest first — a backlog fills in over later runs
+  // The older per-symbol route. It stops at April 2026 and is kept only to load history
+  // by hand (scripts/india_smart_money.js history SYMBOL ...).
+  INSIDER_URL: 'https://www.nseindia.com/api/corporates-pit',
+  TIMEOUT_MS: 25000,             // the archive host is slow; a first probe timed out at 15s
+  REQUEST_DELAY_MS: 1500,        // gap between two NSE requests
+  INSIDER_LOOKBACK_DAYS: 365,    // how far back disclosures are kept — large caps can go months without one
+  ALERT_MAX_AGE_DAYS: 7,         // an older deal/disclosure fetched late is stored, never alerted
+  INSIDER_ALERT_MIN_INR: 1e7,    // ₹1 crore — smaller insider trades are stored but do not alert
+  LIST_WINDOW: 500,              // newest rows a list route looks at before filtering
 };
 
 // ─── Strategy service (Phase 7) ──────────────────────────────
@@ -493,13 +604,26 @@ const OAUTH = {
 };
 
 // ─── Transactional email (Phase 5 reset/verify; Phase 9 reuses this) ──
-// Resend (https://resend.com) — one HTTPS POST, no SDK. Without a key the app
-// still works: password-reset links are returned in dev responses instead of
-// emailed, and verification emails are skipped.
+// Two ways to send, picked by what is configured:
+//   Resend (https://resend.com) — one HTTPS POST. Needs a verified sending domain to reach
+//     anyone but the account owner. Used whenever RESEND_API_KEY is set.
+//   SMTP — any mailbox that accepts an app password (Gmail: ~500 emails/day, sent from
+//     that address). The no-domain option for demos and a few test users.
+// With neither, the app still works: password-reset links are returned in dev responses
+// instead of emailed, and verification + alert emails are skipped.
 const EMAIL = {
   RESEND_API_KEY: process.env.RESEND_API_KEY || '',
-  FROM: process.env.EMAIL_FROM || 'SenIQ <onboarding@resend.dev>',
-  get enabled() { return !!this.RESEND_API_KEY; },
+  SMTP: {
+    HOST: process.env.SMTP_HOST || '',
+    PORT: Number(process.env.SMTP_PORT) || 587,
+    USER: process.env.SMTP_USER || '',
+    PASS: (process.env.SMTP_PASS || '').replace(/\s+/g, ''), // Google shows app passwords in spaced groups
+    get enabled() { return !!(this.HOST && this.USER && this.PASS); },
+  },
+  FROM: process.env.EMAIL_FROM || (process.env.SMTP_USER ? `SenIQ <${process.env.SMTP_USER}>` : 'SenIQ <onboarding@resend.dev>'),
+  get provider() { return this.RESEND_API_KEY ? 'resend' : (this.SMTP.enabled ? 'smtp' : null); },
+  get enabled() { return !!this.provider; },
+  SMTP_TIMEOUT_MS: 15000,
 };
 
 // ─── Auth endpoint rate limits (Phase 5 hardening) ───────────
@@ -509,6 +633,17 @@ const AUTH_LIMITS = {
   LOGIN:  { limit: 20, windowMs: 10 * 60 * 1000 },  // login + signup attempts
   RESET:  { limit: 5,  windowMs: 15 * 60 * 1000 },  // forgot-password requests
   TOKEN_TTL_MIN: { RESET: 30, VERIFY: 60 * 24 },    // emailed link lifetimes
+  MIN_PASSWORD_CHARS: 8,
+  MAX_PASSWORD_CHARS: 72,                            // bcrypt reads only the first 72 bytes
 };
 
-module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES };
+// ─── Browser sessions (services/sessions.js) ─────────────────
+const SESSION = {
+  COOKIE: 'seniq_session',
+  IDLE_DAYS: 7,          // unused this long → signed out (each use pushes it back)
+  ABSOLUTE_DAYS: 30,     // signed out this long after sign-in, however active
+  TOUCH_MINUTES: 5,      // how often activity is written back to the session row
+  REAUTH_MINUTES: 10,    // how long a password confirmation covers sensitive actions
+};
+
+module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };

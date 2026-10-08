@@ -57,3 +57,38 @@ services:
       # Free-tier HF Inference API token — huggingface.co → Settings → Access Tokens.
       - key: HF_API_TOKEN
         sync: false
+      # ── Prices + congress data (Financial Modeling Prep) ──
+      - key: FMP_API_KEY
+        sync: false
+      # ── Admin account seeded on boot (leave ADMIN_PASSWORD unset to skip) ──
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      # ── Email (Resend): password reset, verification, alert emails ──
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      # ── Sign-in with Google / GitHub (a provider shows only when both are set) ──
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      # ── Claude (daily brief, Ask, Pro alert narrative) ──
+      # The key alone spends nothing; Claude is called only when CLAUDE_REPORTS is "1".
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CLAUDE_REPORTS
+        value: "0"
+      # ── v2 (strategies, API keys, /mcp, /v1) — needs the strategy service reachable ──
+      - key: FEATURES_STRATEGIES
+        value: "0"
+      - key: STRATEGY_SERVICE_URL
+        sync: false
+      - key: STRATEGY_SERVICE_SECRET
+        sync: false

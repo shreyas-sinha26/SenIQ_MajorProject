@@ -74,7 +74,7 @@ async function loadSmartMoney(ticker) {
     [ticker, limit]
   );
   const congress = await query(
-    `SELECT politician, chamber, party, transaction_type, transaction_date
+    `SELECT politician, chamber, party, transaction_type, transaction_date::text AS transaction_date
        FROM congress_trades
       WHERE ticker = $1
       ORDER BY disclosure_date DESC NULLS LAST, transaction_date DESC NULLS LAST

@@ -18,7 +18,7 @@
  * saved strategies and virtual-money deployments only; nothing here can
  * delete, and nothing anywhere places a real order.
  */
-const express = require('express');
+const { asyncRouter } = require('../middleware/asyncRouter');
 const { z } = require('zod');
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
@@ -28,10 +28,10 @@ const { DISCLAIMER, STRATEGY_SERVICE } = require('../config');
 // Auth + rate limits shared with the public REST API (/v1): one budget per key
 // across both transports.
 const { resolveApiKey, heavyLimiter, lightLimiter } = require('../services/apiKeyGate');
-const { callService, flattenDetail, cleanSymbols, iso, MAX_WATCH_SYMBOLS, WARMUP_DAYS } = require('../services/strategyClient');
+const { callService, flattenDetail, cleanSymbols, replayPaper, MAX_WATCH_SYMBOLS } = require('../services/strategyClient');
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
 const { DATA_TOOLS, runDataTool } = require('../services/dataTools');
-const { saveStrategy, deployPaper, stopPaper } = require('../services/strategyStore');
+const { saveStrategy, deployPaper, stopPaper, strategyToJson, deploymentToJson } = require('../services/strategyStore');
 const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../services/strategySignals');
 
 // Normalize a service reply into an MCP tool result. 422 = pydantic field
@@ -220,11 +220,7 @@ function buildMcpServer(ctx) {
     const rows = await query(
       'SELECT * FROM user_strategies WHERE user_id = $1 ORDER BY created_at DESC', [ctx.userId]);
     return ok({
-      strategies: rows.map((r) => ({
-        id: r.id, name: r.name, kind: r.kind,
-        spec: r.spec, strategy_name: r.strategy_name, params: r.params,
-        symbols: r.symbols || [], created_at: r.created_at,
-      })),
+      strategies: rows.map(strategyToJson),
     });
   });
 
@@ -236,14 +232,7 @@ function buildMcpServer(ctx) {
     const rows = await query(
       'SELECT * FROM paper_deployments WHERE user_id = $1 ORDER BY created_at DESC', [ctx.userId]);
     return ok({
-      deployments: rows.map((r) => ({
-        id: r.id, name: r.name, kind: r.kind,
-        symbol: r.symbol, exchange: r.exchange,
-        initial_cash: String(r.initial_cash),
-        deployed_at: iso(r.deployed_at),
-        status: r.status,
-        stopped_at: r.stopped_at ? iso(r.stopped_at) : null,
-      })),
+      deployments: rows.map(deploymentToJson),
     });
   });
 
@@ -257,28 +246,7 @@ function buildMcpServer(ctx) {
       'SELECT * FROM paper_deployments WHERE id = $1 AND user_id = $2', [deployment_id, ctx.userId]);
     if (!row) return fail('deployment not found');
 
-    // Replay-from-inception, identical to routes/paper.js: warm indicators on
-    // pre-deploy history, only trade from the deploy date.
-    const deployed = new Date(row.deployed_at);
-    const start = new Date(deployed);
-    start.setDate(start.getDate() - WARMUP_DAYS);
-    const end = row.status === 'stopped' && row.stopped_at ? new Date(row.stopped_at) : new Date();
-
-    const out = await callService('/api/backtest', {
-      method: 'POST',
-      body: {
-        ...(row.kind === 'custom'
-          ? { custom: row.spec, seniq_data: await seniqDataIfNeeded(row.spec, row.symbol) }
-          : { strategy: row.strategy_name, params: row.params || {} }),
-        symbol: row.symbol,
-        exchange: row.exchange,
-        start_date: iso(start),
-        end_date: iso(end),
-        trade_from: iso(deployed),
-        initial_cash: String(row.initial_cash),
-      },
-    });
-    return serviceResult(out);
+    return serviceResult(await replayPaper(row));
   });
 
   // ── SenIQ data tools (shared catalog with /v1) ──
@@ -360,7 +328,7 @@ async function authApiKey(req, res, next) {
 }
 
 // ─── Transport wiring (stateless Streamable HTTP) ────────────
-const router = express.Router();
+const router = asyncRouter();
 
 router.post('/', authApiKey, async (req, res, next) => {
   try {

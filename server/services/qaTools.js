@@ -39,14 +39,50 @@ function computeAttribution(holdings) {
     }))
     .sort((a, b) => a.contribution_pct - b.contribution_pct); // biggest drag first
   const total = contributions.reduce((s, c) => s + c.contribution_pct, 0);
+  // Stated outright so the model reads the comparison instead of working it out: "X caused
+  // most of the loss" is wrong whenever gains elsewhere offset part of it.
+  const detractors = contributions.filter((c) => c.contribution_pct < 0);
+  const contributors = contributions.filter((c) => c.contribution_pct > 0);
+  const sum = (rows) => round(rows.reduce((s, c) => s + c.contribution_pct, 0), 3);
+  const lift = contributors.length ? contributors[contributors.length - 1] : null;
   return {
     portfolio_change_pct: priced.length ? round(total, 2) : null,
     contributions,
+    biggest_drag: detractors.length ? { ticker: detractors[0].ticker, contribution_pct: detractors[0].contribution_pct } : null,
+    biggest_lift: lift ? { ticker: lift.ticker, contribution_pct: lift.contribution_pct } : null,
+    detractors_total_pct: sum(detractors),
+    contributors_total_pct: sum(contributors),
+    offsetting: detractors.length > 0 && contributors.length > 0, // losses and gains partly cancel
     unpriced: holdings.filter((h) => !priced.includes(h)).map((h) => h.ticker),
     note: priced.length
       ? 'Equities: change since previous close. Crypto: rolling 24h. Covers priced holdings only.'
       : 'No live prices available for these holdings, so the move cannot be attributed.',
   };
+}
+
+/**
+ * Holdings ordered largest first, each with its rank, plus the comparison spelled out —
+ * so "largest", "second-largest" and "unpriced" are read from the result, not inferred.
+ * `key` is the share used to order them (exposure_pct). Pure.
+ */
+function rankHoldings(rows, key = 'exposure_pct') {
+  const holdings = rows.slice()
+    .sort((a, b) => (b[key] ?? -1) - (a[key] ?? -1))
+    .map((h, i) => ({ rank: i + 1, ...h }));
+  return {
+    holdings,
+    largest: holdings.length ? { ticker: holdings[0].ticker, [key]: holdings[0][key] } : null,
+    order_by_exposure: holdings.map((h) => `${h.rank}. ${h.ticker} ${h[key] ?? '?'}%`).join(', '),
+    unpriced: holdings.filter((h) => h.price == null).map((h) => h.ticker),
+  };
+}
+
+// "4 trades: 3 sell, 1 buy" — the tally a reader would otherwise count by hand. Pure.
+function tallyBy(rows, field) {
+  const counts = {};
+  for (const r of rows) counts[String(r[field] || 'unknown').toLowerCase()] = (counts[String(r[field] || 'unknown').toLowerCase()] || 0) + 1;
+  const parts = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${k}`);
+  return `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}${parts.length ? `: ${parts.join(', ')}` : ''}`;
 }
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -61,6 +97,11 @@ const { AMBIGUOUS, AMBIGUOUS_SYMBOLS } = require('./entityResolver');
  * symbols that are everyday uppercase text ("F&O", "PM", "Series C") count only as $F / $PM,
  * and names that are ordinary words ("visa", "meta", "cosmos") count only when capitalized.
  */
+// Tickers that are also everyday words. Like the short symbols, they count only when
+// written as a symbol (UPPERCASE or $-prefixed): "near-term" is not NEAR Protocol and
+// "the cost of capital" is not Costco.
+const WORD_TICKERS = new Set(['near', 'cost', 'coin', 'hood', 'link', 'atom', 'uber', 'dell', 'doge']);
+
 function findMentionedTickers(text, universe) {
   const q = String(text || '');
   const found = new Set();
@@ -69,7 +110,7 @@ function findMentionedTickers(text, universe) {
     if (!t || t === '__MARKET__') continue;
     const tickerRe = AMBIGUOUS_SYMBOLS.has(t)
       ? new RegExp(`\\$${escapeRe(t)}(?![A-Za-z0-9&])`)
-      : t.length <= 3 || (t.length === 4 && AMBIGUOUS.has(t.toLowerCase())) // META: "meta-analysis" is not the stock
+      : t.length <= 3 || WORD_TICKERS.has(t.toLowerCase()) || (t.length === 4 && AMBIGUOUS.has(t.toLowerCase())) // META: "meta-analysis" is not the stock
       ? new RegExp(`(^|[^A-Za-z0-9])\\$?${escapeRe(t)}(?![A-Za-z0-9])`)
       : new RegExp(`(^|[^A-Za-z0-9])\\$?${escapeRe(t)}(?![A-Za-z0-9])`, 'i');
     let hit = tickerRe.test(q);
@@ -146,7 +187,7 @@ const TOOLS = [
   },
   {
     name: 'get_smart_money',
-    description: 'Congressional trades and institutional 13F position changes touching the user\'s holdings (or one held ticker). These disclosures lag by weeks — always state the dates.',
+    description: 'Congressional trades and institutional 13F position changes touching the user\'s holdings (or one held ticker); for Indian stocks, NSE bulk/block deals and insider (promoter, director) trades. Disclosures lag the trades — always state the dates.',
     input_schema: { type: 'object', properties: { ticker: { ...tickerProp, description: 'Optional: limit to one held ticker.' } } },
   },
   {
@@ -215,7 +256,11 @@ const EXECUTORS = {
         sentiment: s ? { label: s.label, acute: s.acute.score, z: s.baseline.z, momentum: s.momentum.direction, articles_72h: s.acute.count } : null,
       });
     }
-    return { as_of: new Date().toISOString(), holdings: out };
+    return {
+      as_of: new Date().toISOString(),
+      ...rankHoldings(out),
+      note: 'Holdings are listed largest first; rank 1 is the largest exposure. A holding in "unpriced" has no live price, so its weight_pct and day change are unknown.',
+    };
   },
 
   async get_attribution(_args, ctx) {
@@ -226,7 +271,9 @@ const EXECUTORS = {
     const n = Math.max(1, Math.min(10, Number(limit) || 5));
     const feed = await getImpactFeed(ctx.userId, n);
     return {
-      events: feed.map((e) => ({
+      // Already ordered: rank 1 is the event with the highest impact on this portfolio.
+      events: feed.map((e, i) => ({
+        rank: i + 1,
         title: e.title, source: e.source, url: e.url, date: day(e.published_at),
         impact_score: round(Number(e.impact_score), 3), exposure_pct: round(Number(e.exposure_pct), 1), direction: e.direction,
       })),
@@ -299,13 +346,15 @@ const EXECUTORS = {
     const tickers = ticker ? [requireHeld(ctx, ticker)] : [...ctx.heldSet];
     const { query } = require('../db');
     const congress = await query(
-      `SELECT politician, chamber, party, transaction_type, ticker, transaction_date, disclosure_date
+      `SELECT politician, chamber, party, transaction_type, ticker,
+              transaction_date::text AS transaction_date, disclosure_date::text AS disclosure_date
          FROM congress_trades WHERE ticker = ANY($1)
         ORDER BY disclosure_date DESC NULLS LAST, transaction_date DESC NULLS LAST LIMIT 10`,
       [tickers]
     );
     const institutions = await query(
-      `SELECT i.name, h.ticker, h.change_type, h.shares, h.value, f.period_of_report, f.filed_at
+      `SELECT i.name, h.ticker, h.change_type, h.shares, h.value,
+              f.period_of_report::text AS period_of_report, f.filed_at::text AS filed_at
          FROM institution_holdings h
          JOIN institution_filings f ON f.id = h.filing_id
          JOIN institutions i ON i.id = f.institution_id
@@ -313,10 +362,36 @@ const EXECUTORS = {
         ORDER BY f.filed_at DESC NULLS LAST, h.value DESC NULLS LAST LIMIT 10`,
       [tickers]
     );
+    const congressRows = congress.map((c) => ({ politician: c.politician, chamber: c.chamber, party: c.party, action: c.transaction_type, ticker: c.ticker, traded: day(c.transaction_date), disclosed: day(c.disclosure_date) }));
+    const institutionRows = institutions.map((r) => ({ fund: r.name, ticker: r.ticker, change: r.change_type, shares: Number(r.shares), value_usd: Number(r.value), quarter_end: day(r.period_of_report), filed: day(r.filed_at) }));
+    // India: NSE bulk/block deals and insider trades. The keys appear only when there are rows.
+    const deals = await query(
+      `SELECT deal_type, deal_date::text AS deal_date, ticker, client_name, side, quantity, price, value
+         FROM india_deals WHERE ticker = ANY($1)
+        ORDER BY deal_date DESC, value DESC LIMIT 10`,
+      [tickers]
+    );
+    const insiders = await query(
+      `SELECT ticker, person, category, mode, side, quantity, value, trade_from::text AS trade_from, disclosed_at::text AS disclosed_at
+         FROM india_insider_trades WHERE ticker = ANY($1) AND side IN ('buy','sell')
+        ORDER BY disclosed_at DESC NULLS LAST, value DESC NULLS LAST LIMIT 10`,
+      [tickers]
+    );
+    const dealRows = deals.map((d) => ({ client: d.client_name, deal: d.deal_type, action: d.side, ticker: d.ticker, shares: Number(d.quantity), price_inr: Number(d.price), value_inr: Number(d.value), traded: d.deal_date }));
+    const insiderRows = insiders.map((t) => ({ person: t.person, category: t.category, how: t.mode, action: t.side, ticker: t.ticker, shares: t.quantity == null ? null : Number(t.quantity), value_inr: t.value == null ? null : Number(t.value), traded: t.trade_from, disclosed: t.disclosed_at }));
+    const india = dealRows.length || insiderRows.length ? {
+      india_note: 'Indian stocks: bulk/block deals are large trades NSE publishes the same day with the client named; insider trades are SEBI disclosures by promoters, directors and key managers, usually within two trading days. India has no congressional-trade disclosures.',
+      india_deals: dealRows,
+      india_insider_trades_summary: tallyBy(insiderRows, 'action'),
+      india_insider_trades: insiderRows,
+    } : {};
     return {
-      note: 'Disclosures lag the actual trades (13F up to 45 days after quarter end; congress up to 45 days after the trade).',
-      congress: congress.map((c) => ({ politician: c.politician, chamber: c.chamber, party: c.party, action: c.transaction_type, ticker: c.ticker, traded: day(c.transaction_date), disclosed: day(c.disclosure_date) })),
-      institutions: institutions.map((r) => ({ fund: r.name, ticker: r.ticker, change: r.change_type, shares: Number(r.shares), value_usd: Number(r.value), quarter_end: day(r.period_of_report), filed: day(r.filed_at) })),
+      note: 'Disclosures lag the actual trades (13F up to 45 days after quarter end; congress up to 45 days after the trade). Each row\'s "action"/"change" is exactly what was disclosed — repeat it as written.',
+      congress_summary: tallyBy(congressRows, 'action'),
+      congress: congressRows,
+      institutions_summary: tallyBy(institutionRows, 'change'),
+      institutions: institutionRows,
+      ...india,
     };
   },
 
@@ -394,4 +469,4 @@ async function runTool(block, ctx, executors = EXECUTORS) {
   return { type: 'tool_result', tool_use_id: block.id, content, ...(isError ? { is_error: true } : {}) };
 }
 
-module.exports = { TOOLS, EXECUTORS, ScopeError, runTool, computeAttribution, findMentionedTickers, scopeCheck, outOfScopeAnswer, requireHeld };
+module.exports = { TOOLS, EXECUTORS, ScopeError, runTool, computeAttribution, rankHoldings, tallyBy, findMentionedTickers, scopeCheck, outOfScopeAnswer, requireHeld };

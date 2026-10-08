@@ -22,7 +22,7 @@ const apiKeysRouter = require('./routes/apiKeys');
 const mcpRouter = require('./routes/mcp');
 const v1Router = require('./routes/v1');
 const { startScheduler } = require('./scheduler');
-const { initSentry, sentryErrorHandler } = require('./observability');
+const { initSentry, sentryErrorHandler, captureException } = require('./observability');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -44,6 +44,22 @@ initSentry();
 // Without this, req.secure is always false and the HTTPS redirect below would loop.
 if (isProd) app.set('trust proxy', 1);
 
+// What a page served from here may load. The pages still use inline scripts and onclick
+// handlers, so 'unsafe-inline' stays for now; the policy's job is to pin WHERE code, styles
+// and requests can come from, and to forbid plugins, <base> rewrites and foreign framing.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data: https:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+].join('; ');
+
 // ─── Security headers + force HTTPS (prod only) ──────────────
 app.use((req, res, next) => {
   if (isProd) {
@@ -59,12 +75,17 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Content-Security-Policy', CONTENT_SECURITY_POLICY);
   next();
 });
 
 // ─── Middleware ──────────────────────────────────────────────
-app.use(cors());
+// The web app is served from this same origin and needs no CORS. Only the key-authenticated
+// API surfaces are callable from other origins (a notebook, a browser-based MCP client).
+app.use(['/v1', '/mcp'], cors());
 app.use(express.json());
+// Sign-in rides a cookie, so anything under /api that changes state must come from this site.
+app.use('/api', require('./services/sessions').sameOriginGuard);
 // index: false so "/" is handled explicitly below (landing page, not the app).
 app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 
@@ -180,6 +201,13 @@ async function shutdown(signal) {
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Last line of defence: a promise nobody awaited (a fire-and-forget job, a missed catch)
+// is logged and reported instead of ending the process for every user.
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled promise rejection:', err);
+  captureException(err);
+});
 
 start().catch((err) => {
   console.error('❌ Failed to start server:', err);

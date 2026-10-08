@@ -11,3 +11,7 @@ test
 !README.md
 .DS_Store
 scripts
+# Local-only workspaces and tooling — never part of the image.
+strategy-service
+eval
+.claude

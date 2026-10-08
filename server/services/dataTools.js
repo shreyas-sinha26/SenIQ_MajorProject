@@ -62,7 +62,7 @@ const DATA_TOOLS = [
   },
   {
     name: 'get_smart_money',
-    description: 'Congressional trades and institutional 13F position changes — for one ticker, or across the user\'s holdings when no ticker is given. Disclosures lag the trades by weeks; always state the dates.',
+    description: 'Congressional trades and institutional 13F position changes — for one ticker, or across the user\'s holdings when no ticker is given. For Indian stocks: NSE bulk/block deals and insider (promoter, director) trades. Disclosures lag the trades; always state the dates.',
     args: { ticker: ticker(`Optional. ${ANY_TICKER}`) },
     rest: '/v1/smart-money',
   },

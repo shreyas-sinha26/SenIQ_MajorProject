@@ -1,6 +1,9 @@
 /* ═══ AI Portfolio Copilot — Frontend Application ═══ */
 const API = '';
-let token = localStorage.getItem('copilot_token');
+// Sign-in lives in an HttpOnly cookie the server sets; scripts never see it. This flag is
+// only a hint for the landing page ("Go to Dashboard") — /api/auth/me is what decides.
+const SIGNED_IN_HINT = 'seniq_signed_in';
+localStorage.removeItem('copilot_token'); // the old sign-in token, no longer used
 let currentUser = null;
 let sentimentChart = null;
 let refreshInterval = null;
@@ -12,6 +15,7 @@ let cachedBuckets = { holdings: [], market: [], world: [] };
 let cachedAlerts = [];
 let cachedSentiments = {};
 let cachedOverallScore = 50;
+let cachedOverallLabel = 'neutral';
 let newsExpanded = false;
 let alertsExpanded = false;
 let newsSearchQuery = '';
@@ -73,9 +77,10 @@ function assetClassOf(ticker) {
 // ─── API Helper ──────────────────────────────────────────────
 async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${API}${path}`, { ...opts, headers });
+  const res = await fetch(`${API}${path}`, { ...opts, headers, credentials: 'same-origin' });
   const data = await res.json().catch(() => ({}));
+  // The session ended on the server (idle, expired, or signed out elsewhere).
+  if (res.status === 401 && currentUser && !path.startsWith('/api/auth/')) sessionEnded();
   if (!res.ok) {
     const err = new Error(data.error || 'Request failed');
     err.status = res.status;
@@ -83,6 +88,20 @@ async function api(path, opts = {}) {
     throw err;
   }
   return data;
+}
+
+function showSignedOut() {
+  currentUser = null;
+  localStorage.removeItem(SIGNED_IN_HINT);
+  if (refreshInterval) clearInterval(refreshInterval);
+  document.getElementById('dashboard-view').classList.add('hidden');
+  document.getElementById('auth-view').classList.remove('hidden');
+}
+function sessionEnded() {
+  showSignedOut();
+  const errEl = document.getElementById('auth-error');
+  errEl.textContent = 'Your session has ended — please sign in again.';
+  errEl.classList.remove('hidden');
 }
 
 // ─── Toast Notifications ─────────────────────────────────────
@@ -162,8 +181,7 @@ function initAuth() {
           password: document.getElementById('login-password').value
         })
       });
-      token = data.token;
-      localStorage.setItem('copilot_token', token);
+      localStorage.setItem(SIGNED_IN_HINT, '1');
       currentUser = data.user;
       showDashboard();
     } catch (err) {
@@ -194,8 +212,7 @@ function initAuth() {
           password: document.getElementById('signup-password').value
         })
       });
-      token = data.token;
-      localStorage.setItem('copilot_token', token);
+      localStorage.setItem(SIGNED_IN_HINT, '1');
       currentUser = data.user;
       showDashboard();
       showToast('Welcome to SenIQ! 🚀', 'success');
@@ -224,7 +241,7 @@ function initAuth() {
       okEl.textContent = data.message;
       // Local dev without an email provider: the server hands the link back.
       if (data.devResetLink) {
-        okEl.innerHTML = `${data.message}<br><a href="${data.devResetLink}" style="color:inherit;text-decoration:underline">Dev: open reset link</a>`;
+        okEl.innerHTML = `${escapeHtml(data.message)}<br><a href="${escapeHtml(data.devResetLink)}" style="color:inherit;text-decoration:underline">Dev: open reset link</a>`;
       }
       okEl.classList.remove('hidden');
     } catch (err) {
@@ -344,23 +361,23 @@ function renderHoldings() {
       ? `${h.weight_pct}%`
       : h.quantity != null ? `${h.quantity} units` : '—';
     const priceInline = h.price != null
-      ? `<span class="ht-price">${fmtUsd(h.price)}${h.change_pct != null
+      ? `<span class="ht-price">${fmtPrice(h.price, h.currency)}${h.change_pct != null
           ? ` <span class="ht-chg ${h.change_pct >= 0 ? 'up' : 'down'}">${h.change_pct >= 0 ? '▲' : '▼'}${Math.abs(h.change_pct).toFixed(2)}%</span>`
           : ''}</span>`
       : '<span class="ht-price muted">—</span>';
     return `
-    <tr class="${rowClass}" data-ticker="${h.ticker}" onclick="toggleFilter('${h.ticker}')">
+    <tr class="${rowClass}" data-ticker="${escapeHtml(h.ticker)}" onclick="toggleFilter('${escapeHtml(h.ticker)}')">
       <td>
-        <div class="ht-ticker">${h.ticker} <span class="asset-class-badge ${cls}">${clsLabel}</span>${h.coverage === 'basic' ? ' <span class="coverage-badge" title="Outside SenIQ\'s curated list of companies. News is matched on the name and symbol only, so expect fewer stories and a thinner sentiment score.">Basic coverage</span>' : ''} ${priceInline}</div>
-        <div class="ht-name">${h.company_name || h.ticker}</div>
+        <div class="ht-ticker">${escapeHtml(h.ticker)} <span class="asset-class-badge ${cls}">${clsLabel}</span>${h.coverage === 'basic' ? ' <span class="coverage-badge" title="Outside SenIQ\'s curated list of companies. News is matched on the name and symbol only, so expect fewer stories and a thinner sentiment score.">Basic coverage</span>' : ''} ${priceInline}</div>
+        <div class="ht-name">${escapeHtml(h.company_name || h.ticker)}</div>
       </td>
       <td class="ht-exposure">${exposure}</td>
-      <td><span class="ht-senti-label neutral" id="senti-label-${h.ticker}">—</span></td>
-      <td><button class="ht-score-why" type="button" title="See the stories behind this score" onclick="event.stopPropagation(); toggleSentimentDrivers('${h.ticker}')"><span class="ht-score neutral" id="score-${h.ticker}">—</span><span class="ht-score-caret" aria-hidden="true">▾</span></button></td>
-      <td><span class="ht-headline" id="headline-${h.ticker}">—</span></td>
+      <td><span class="ht-senti-label neutral" id="senti-label-${escapeHtml(h.ticker)}">—</span></td>
+      <td><button class="ht-score-why" type="button" title="See the stories behind this score" onclick="event.stopPropagation(); toggleSentimentDrivers('${escapeHtml(h.ticker)}')"><span class="ht-score neutral" id="score-${escapeHtml(h.ticker)}">—</span><span class="ht-score-caret" aria-hidden="true">▾</span></button></td>
+      <td><span class="ht-headline" id="headline-${escapeHtml(h.ticker)}">—</span></td>
       <td class="ht-actions">
-        <button class="ht-info" onclick="event.stopPropagation(); openBriefFor('${h.ticker}')" title="Company brief">ℹ</button>
-        <button class="ht-remove" onclick="event.stopPropagation(); removeStock('${h.ticker}')" title="Remove">×</button>
+        <button class="ht-info" onclick="event.stopPropagation(); openBriefFor('${escapeHtml(h.ticker)}')" title="Company brief">ℹ</button>
+        <button class="ht-remove" onclick="event.stopPropagation(); removeStock('${escapeHtml(h.ticker)}')" title="Remove">×</button>
       </td>
     </tr>
   `}).join('');
@@ -430,10 +447,10 @@ function initTickerSearch() {
         const scoreClass = s ? s.label : 'neutral';
         const isActive = activeFilter === h.ticker;
         return `
-          <div class="search-result-item${isActive ? ' active-item' : ''}" onclick="selectSearchResult('${h.ticker}')">
+          <div class="search-result-item${isActive ? ' active-item' : ''}" onclick="selectSearchResult('${escapeHtml(h.ticker)}')">
             <div>
-              <span class="search-result-ticker">${h.ticker}</span>
-              <span class="search-result-name">${h.company_name || ''}</span>
+              <span class="search-result-ticker">${escapeHtml(h.ticker)}</span>
+              <span class="search-result-name">${escapeHtml(h.company_name || '')}</span>
             </div>
             <span class="search-result-score sentiment-score ${scoreClass}">${scoreVal}${s ? '%' : ''}</span>
           </div>
@@ -454,10 +471,10 @@ function initTickerSearch() {
         const scoreClass = s ? s.label : 'neutral';
         const isActive = activeFilter === h.ticker;
         return `
-          <div class="search-result-item${isActive ? ' active-item' : ''}" onclick="selectSearchResult('${h.ticker}')">
+          <div class="search-result-item${isActive ? ' active-item' : ''}" onclick="selectSearchResult('${escapeHtml(h.ticker)}')">
             <div>
-              <span class="search-result-ticker">${h.ticker}</span>
-              <span class="search-result-name">${h.company_name || ''}</span>
+              <span class="search-result-ticker">${escapeHtml(h.ticker)}</span>
+              <span class="search-result-name">${escapeHtml(h.company_name || '')}</span>
             </div>
             <span class="search-result-score sentiment-score ${scoreClass}">${scoreVal}${s ? '%' : ''}</span>
           </div>
@@ -581,34 +598,57 @@ async function loadNewsFeed() {
   }
 }
 
-// One news card. Shows a "+N sources" badge when several outlets covered the same
-// event (de-spam: the duplicates are collapsed into this one card).
+// One news card. Shows a "+N more" badge when several outlets carried the same article,
+// and "+N related headlines" when other headlines on the same story were folded into it.
 function renderNewsItem(a) {
   const time = timeAgo(new Date(a.published_at));
   const tickers = (a.matchedTickers || []).filter(t => t !== '__MARKET__').slice(0, 3);
   const sources = a.source_count > 1 ? `<span class="news-source-count">+${a.source_count - 1} more</span>` : '';
-  const score = Math.round(a.sentiment.score * 100);
-  const impactSign = a.sentiment.label === 'positive' ? '+' : a.sentiment.label === 'negative' ? '−' : '';
-  const impactVal = a.sentiment.label === 'negative' ? 100 - score : score;
+  // Other headlines on the same story, folded into this card by the server.
+  const related = a.related ? `<span class="news-source-count">+${a.related} related ${a.related === 1 ? 'headline' : 'headlines'}</span>` : '';
+  // The folded headlines themselves, behind a disclosure so the card stays one line.
+  const items = (a.related_items || []);
+  const relatedList = items.length ? `<details class="news-related"><summary>Show ${items.length === a.related ? 'them' : `${items.length} of them`}</summary><ul>${items.map((r) =>
+    `<li>${r.url && r.url !== '#' ? `<a href="${safeUrl(r.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.title)}</a>` : escapeHtml(r.title)}${r.source ? ` <span>${escapeHtml(r.source)}</span>` : ''}</li>`).join('')}</ul></details>` : '';
+  const stance = a.stance && a.stance !== 'event' ? `<span class="news-stance">${a.stance === 'roundup' ? 'Round-up' : 'Commentary'}</span>` : '';
+  // The engine's own figures for this reader: how much the story matters to their
+  // portfolio, which way it reads for what they hold, and how much of it the story reaches.
+  const LEVEL_WORD = { high: 'High', medium: 'Medium', low: 'Low' };
+  const READS = { positive: 'Reads positive', negative: 'Reads negative', neutral: 'Reads mixed' };
+  let engineLine;
+  if (a.impact == null) {
+    engineLine = '<span class="ni-label">Not linked to your holdings</span>';
+  } else {
+    const dir = a.direction || 'neutral';
+    const reach = a.exposure_pct == null ? ''
+      : a.tier === 'holding' ? `${a.exposure_pct}% of your portfolio` : 'market-wide';
+    engineLine = `<span class="ni-label">Impact on you</span>
+          <span class="ni-level ${a.impact_level}">${LEVEL_WORD[a.impact_level] || 'Low'}</span>
+          <span class="ni-conf" title="Impact score: your exposure × how strong, surprising and recent the story is">${Number(a.impact).toFixed(2)}</span>
+          <span class="ni-sep">·</span>
+          <span class="ni-score ${dir}">${READS[dir]}</span>
+          ${reach ? `<span class="ni-sep">·</span><span class="ni-conf">${reach}</span>` : ''}`;
+  }
+  const dot = a.direction || a.sentiment.label;
   return `
     <div class="news-item">
-      <div class="news-sentiment-dot ${a.sentiment.label}"></div>
+      <div class="news-sentiment-dot ${dot}"></div>
       <div class="news-content">
         <div class="news-title">${a.url
-          ? `<a href="${escapeHtml(a.url)}" target="_blank" rel="noopener noreferrer" class="news-title-link">${escapeHtml(a.title)}</a>`
+          ? `<a href="${safeUrl(a.url)}" target="_blank" rel="noopener noreferrer" class="news-title-link">${escapeHtml(a.title)}</a>`
           : escapeHtml(a.title)}</div>
         <div class="news-meta">
-          ${tickers.map(t => `<span class="news-ticker">${t}</span>`).join('')}
+          ${tickers.map(t => `<span class="news-ticker">${escapeHtml(t)}</span>`).join('')}
           <span>${escapeHtml(a.source || '')}</span>
           ${sources}
+          ${related}
+          ${stance}
           <span>${time}</span>
         </div>
         <div class="news-impact-row">
-          <span class="ni-label">Impact</span>
-          <span class="ni-score ${a.sentiment.label}">${impactSign}${impactVal}</span>
-          <span class="ni-sep">·</span>
-          <span class="ni-conf">Confidence ${score}%</span>
+          ${engineLine}
         </div>
+        ${relatedList}
       </div>
     </div>`;
 }
@@ -733,7 +773,7 @@ function renderFilteredAlerts() {
   feed.innerHTML = visible.map(a => {
     const urgency = a.alert_type.includes('negative') ? 'high' : a.alert_type.includes('positive') ? 'medium' : 'low';
     const msg = a.article_url
-      ? `<a href="${escapeHtml(a.article_url)}" target="_blank" rel="noopener noreferrer" class="alert-title-link">${escapeHtml(a.message)}</a>`
+      ? `<a href="${safeUrl(a.article_url)}" target="_blank" rel="noopener noreferrer" class="alert-title-link">${escapeHtml(a.message)}</a>`
       : escapeHtml(a.message);
     return `
       <div class="alert-item ${urgency}${a.read ? ' read' : ''}">
@@ -758,6 +798,7 @@ async function loadPortfolioSentiment() {
     const data = await api('/api/news/portfolio-sentiment');
     cachedSentiments = data.sentiments || {};
     cachedOverallScore = data.overallScore || 50;
+    cachedOverallLabel = data.overallLabel || 'neutral';
 
     // Update individual holding rows (always, regardless of filter)
     for (const [ticker, s] of Object.entries(cachedSentiments)) {
@@ -794,7 +835,7 @@ function renderSentimentDrivers(d) {
   if (!d.drivers.length) return head + `<div class="drv-empty">${escapeHtml(d.note || 'No recent articles are driving this score.')}</div>`;
   const unit = z ? 'σ' : ' pts';
   const rows = d.drivers.map((x) => {
-    const title = x.url && x.url !== '#' ? `<a href="${escapeHtml(x.url)}" target="_blank" rel="noopener">${escapeHtml(x.title)}</a>` : escapeHtml(x.title);
+    const title = x.url && x.url !== '#' ? `<a href="${safeUrl(x.url)}" target="_blank" rel="noopener">${escapeHtml(x.title)}</a>` : escapeHtml(x.title);
     return `<li class="drv-item ${x.direction}">
         <span class="drv-arrow">${x.direction === 'up' ? '▲' : x.direction === 'down' ? '▼' : '■'}</span>
         <span class="drv-title">${title}</span>
@@ -857,7 +898,7 @@ function renderImpactFeed(top, feed) {
   const dir = top.direction || 'neutral';
   const hasUrl = (u) => u && u !== '#';
   const topTitle = hasUrl(top.url)
-    ? `<a class="impact-hero-title" href="${escapeHtml(top.url)}" target="_blank" rel="noopener">${escapeHtml(top.title)}</a>`
+    ? `<a class="impact-hero-title" href="${safeUrl(top.url)}" target="_blank" rel="noopener">${escapeHtml(top.title)}</a>`
     : `<span class="impact-hero-title no-link">${escapeHtml(top.title)}</span>`;
   hero.innerHTML = `
     <div class="impact-hero-tag">Most important event for you</div>
@@ -867,39 +908,34 @@ function renderImpactFeed(top, feed) {
       <span class="impact-exposure">${top.exposure_pct}% of your exposure</span>
       <span class="impact-source">${escapeHtml(top.source || top.platform || '')}</span>
       <span class="impact-time">${timeAgo(new Date(top.published_at))}</span>
+      ${top.related ? `<span class="impact-related">+${top.related} related ${top.related === 1 ? 'headline' : 'headlines'}</span>` : ''}
+      ${top.stance && top.stance !== 'event' ? `<span class="impact-related">${top.stance === 'roundup' ? 'round-up' : 'commentary'}</span>` : ''}
     </div>`;
 
   if (list) list.innerHTML = feed.slice(1).map(e => {
     const d = e.direction || 'neutral';
     const inner = `
         <span class="impact-dir ${d}">${DIR_ICON[d]}</span>
-        <span class="impact-row-title">${escapeHtml(e.title)}</span>
+        <span class="impact-row-title">${escapeHtml(e.title)}${e.related ? ` <span class="impact-related">+${e.related} related</span>` : ''}${e.stance && e.stance !== 'event' ? ` <span class="impact-related">· ${e.stance === 'roundup' ? 'round-up' : 'commentary'}</span>` : ''}</span>
         <span class="impact-row-exposure">${e.exposure_pct}%</span>`;
     return hasUrl(e.url)
-      ? `<a class="impact-row glass" href="${escapeHtml(e.url)}" target="_blank" rel="noopener">${inner}</a>`
+      ? `<a class="impact-row glass" href="${safeUrl(e.url)}" target="_blank" rel="noopener">${inner}</a>`
       : `<div class="impact-row glass no-link">${inner}</div>`;
   }).join('');
 }  // end renderImpactFeed
 
 function renderFilteredSentiment() {
-  let score, label, sentimentsForChart;
-
-  if (activeFilter && cachedSentiments[activeFilter]) {
-    // Show single ticker's score as the KPI
-    const s = cachedSentiments[activeFilter];
-    score = Math.round(s.score * 100);
-    sentimentsForChart = { [activeFilter]: s };
-  } else {
-    score = cachedOverallScore;
-    sentimentsForChart = cachedSentiments;
-  }
-
-  label = score > 65 ? 'Bullish' : score < 35 ? 'Bearish' : 'Neutral';
+  // The engine's score and its own reading (above 60 positive, below 40 negative), for one
+  // holding when a filter is on, otherwise for the portfolio weighted by position size.
+  const one = activeFilter && cachedSentiments[activeFilter];
+  const score = one ? Math.round(one.score * 100) : cachedOverallScore;
+  const reading = one ? one.label : cachedOverallLabel;
+  const label = reading === 'positive' ? 'Bullish' : reading === 'negative' ? 'Bearish' : 'Neutral';
 
   document.getElementById('portfolio-score').textContent = score;
   const labelEl = document.getElementById('portfolio-score-label');
   labelEl.textContent = activeFilter ? `${activeFilter} — ${label}` : label;
-  labelEl.style.color = score > 65 ? 'var(--positive)' : score < 35 ? 'var(--negative)' : 'var(--neutral)';
+  labelEl.style.color = reading === 'positive' ? 'var(--positive)' : reading === 'negative' ? 'var(--negative)' : 'var(--neutral)';
 
   // Animate ring
   const circle = document.getElementById('score-circle');
@@ -910,70 +946,222 @@ function renderFilteredSentiment() {
     circle.style.transition = 'stroke-dashoffset 1.5s ease';
   }
 
-  updateSentimentChart(sentimentsForChart);
+  updateSentimentChart();
+}
+
+// ─── Analytics page: the score, explained ────────────────────
+// One request (GET /api/news/sentiment-breakdown) feeds the whole page: the headline, the
+// chart, a card per holding and the stories behind each score. The numbers are the
+// engine's own, the same ones the "why" button on a holding and Ask use.
+let cachedBreakdown = null;
+let breakdownLoadedAt = 0;
+const SENTI_WORD = { positive: 'Positive', negative: 'Negative', neutral: 'Mixed' };
+const SENTI_COLOR = { positive: '#14B86A', negative: '#EF4444', neutral: '#94A3B8' };
+const signed = (n, d = 1) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(Number(n)).toFixed(d)}`;
+
+async function loadAnalytics(force = false) {
+  if (!force && cachedBreakdown && Date.now() - breakdownLoadedAt < 60_000) return renderAnalytics();
+  try {
+    cachedBreakdown = await api('/api/news/sentiment-breakdown');
+    breakdownLoadedAt = Date.now();
+    renderAnalytics();
+  } catch (err) {
+    document.getElementById('an-summary').innerHTML = `<p class="empty-state small">${escapeHtml(err.message || 'Could not load the sentiment breakdown.')}</p>`;
+  }
+}
+
+// Called wherever the old single chart was refreshed (dashboard load, ticker filter).
+function updateSentimentChart() {
+  if (cachedBreakdown) renderAnalytics();
+}
+
+function renderAnalytics() {
+  const b = cachedBreakdown;
+  if (!b) return;
+  const shown = activeFilter ? b.holdings.filter((h) => h.ticker === activeFilter) : b.holdings;
+  renderAnalyticsSummary(b, shown);
+  renderAnalyticsChart(b, shown);
+  document.getElementById('an-cards').innerHTML = shown.length
+    ? shown.map((h) => analyticsCard(h, b)).join('')
+    : '<p class="empty-state small">Add a holding to see how the news on it reads.</p>';
+}
+
+function renderAnalyticsSummary(b, shown) {
+  const el = document.getElementById('an-summary');
+  const p = b.portfolio;
+  if (!b.holdings.length) { el.innerHTML = '<p class="empty-state small">Add holdings to your portfolio to see their sentiment explained here.</p>'; return; }
+  if (activeFilter && shown.length === 1) {
+    const h = shown[0];
+    el.innerHTML = `<div class="an-sum-figure"><div class="an-sum-num">${h.has_news ? h.score : '—'}</div><div class="an-sum-cap">${escapeHtml(h.ticker)} sentiment</div></div>
+      <ul class="an-sum-lines"><li>${analyticsSentence(h, b)}</li><li class="muted">Showing ${escapeHtml(h.ticker)} only. Clear the filter on the Dashboard to see every holding.</li></ul>`;
+    return;
+  }
+  if (p.weighted_score == null) { el.innerHTML = `<p class="empty-state small">No scored articles on your holdings in the last ${b.window_hours} hours, so there is nothing to read yet.</p>`; return; }
+  const parts = [`${p.positive} positive`, `${p.neutral} mixed`, `${p.negative} negative`];
+  const quiet = p.holdings - p.with_news;
+  const lines = [
+    `Weighted by position size, the news across your holdings reads <span class="an-pill ${p.label}">${SENTI_WORD[p.label]}</span> at <strong>${p.weighted_score}</strong> out of 100. The plain average, counting every holding equally, is ${p.score}.`,
+    `Of ${p.with_news} holding${p.with_news === 1 ? '' : 's'} with recent news: ${parts.join(', ')}.${quiet ? ` ${quiet} had no articles in the last ${b.window_hours} hours.` : ''}`,
+  ];
+  const lift = p.biggest_lift, drag = p.biggest_drag;
+  const who = (x) => `<strong>${escapeHtml(x.ticker)}</strong> (score ${x.score}, ${x.exposure_pct}% of your portfolio)`;
+  if (lift || drag) lines.push([lift ? `Lifting it most: ${who(lift)}.` : '', drag ? `Pulling it down most: ${who(drag)}.` : ''].filter(Boolean).join(' '));
+  el.innerHTML = `<div class="an-sum-figure"><div class="an-sum-num">${p.weighted_score}</div><div class="an-sum-cap">Portfolio sentiment</div></div>
+    <ul class="an-sum-lines">${lines.map((l) => `<li>${l}</li>`).join('')}
+      <li class="muted">A large position moves the weighted figure more than a small one. Sentiment describes the coverage; it is not a forecast of price.</li></ul>`;
+}
+
+// One sentence a reader can act on: the reading, how unusual it is, and the trend.
+function analyticsSentence(h, b) {
+  const t = escapeHtml(h.ticker);
+  if (!h.has_news) return `No scored articles on ${t} in the last ${b.window_hours} hours, so its score rests at neutral.`;
+  let s = `News on ${t} reads <strong>${SENTI_WORD[h.label].toLowerCase()}</strong> (${h.score}).`;
+  if (h.baseline) {
+    if (h.baseline.z == null) s += ' There is too little history yet to compare it with its own normal.';
+    else if (Math.abs(h.baseline.z) < 0.5) s += ` That is in line with its own normal of ${h.baseline.usual}.`;
+    else s += ` That is ${Math.abs(h.baseline.z).toFixed(1)}σ ${h.baseline.z > 0 ? 'above' : 'below'} its own normal of ${h.baseline.usual}${Math.abs(h.baseline.z) >= 1 ? ', which is unusual for it' : ''}.`;
+  }
+  const m = h.momentum;
+  if (m.delta == null) s += ' Not enough history for a week-on-week trend.';
+  else if (m.direction === 'improving') s += ` Coverage is improving: up ${Math.abs(m.delta)} points on the week before.`;
+  else if (m.direction === 'declining') s += ` Coverage is worsening: down ${Math.abs(m.delta)} points on the week before.`;
+  else s += ' Coverage is steady week on week.';
+  return s;
+}
+
+// A small line of the daily average over the last two weeks, on the same 0–100 scale.
+function analyticsSparkline(trend) {
+  if (!trend || trend.length < 3) return '<span class="muted">Needs 3 days of articles</span>';
+  const W = 220, H = 34, pad = 3;
+  const x = (i) => pad + (i * (W - pad * 2)) / (trend.length - 1);
+  const y = (v) => pad + ((100 - v) * (H - pad * 2)) / 100;
+  const pts = trend.map((d, i) => `${x(i).toFixed(1)},${y(d.score).toFixed(1)}`).join(' ');
+  const last = trend[trend.length - 1];
+  return `<svg class="an-spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="Daily sentiment, ${trend[0].date} to ${last.date}: ${trend.map((d) => d.score).join(', ')}">
+    <title>${trend.map((d) => `${d.date}: ${d.score}`).join('\n')}</title>
+    <line x1="${pad}" x2="${W - pad}" y1="${y(50)}" y2="${y(50)}" stroke="#CBD5E1" stroke-width="1" stroke-dasharray="3 3"/>
+    <polyline points="${pts}" fill="none" stroke="#0A2540" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${x(trend.length - 1).toFixed(1)}" cy="${y(last.score).toFixed(1)}" r="4" fill="#0A2540" stroke="#fff" stroke-width="2"/>
+  </svg>`;
+}
+
+function analyticsCard(h, b) {
+  const total = h.split.positive + h.split.neutral + h.split.negative;
+  const seg = (k) => (h.split[k] ? `<i class="${k}" style="flex:${h.split[k]}" title="${h.split[k]} ${SENTI_WORD[k].toLowerCase()}"></i>` : '');
+  const split = total
+    ? `<div><div class="an-split">${seg('positive')}${seg('neutral')}${seg('negative')}</div>
+        <div class="an-split-text">${total} read: ${h.split.positive} positive · ${h.split.neutral} mixed · ${h.split.negative} negative</div></div>`
+    : '<span class="muted">None in the window</span>';
+  const move = h.change_pct == null ? '' : ` · latest session ${signed(h.change_pct, 2)}%`;
+  let drivers = '';
+  if (b.depth !== 'full') {
+    drivers = `<div class="an-drivers">${upgradeNote('See each holding\'s own normal and the stories moving its score on Plus.')}</div>`;
+  } else if (h.drivers && h.drivers.length) {
+    const unit = h.driver_unit === 'sigma' ? 'σ' : ' pts';
+    const rows = h.drivers.map((x) => {
+      const title = x.url && x.url !== '#' ? `<a href="${safeUrl(x.url)}" target="_blank" rel="noopener">${escapeHtml(x.title)}</a>` : escapeHtml(x.title);
+      return `<li class="drv-item ${x.direction}">
+        <span class="drv-arrow">${x.direction === 'up' ? '▲' : x.direction === 'down' ? '▼' : '■'}</span>
+        <span class="drv-title">${title}</span>
+        <span class="drv-meta">${escapeHtml(x.source || '')} · ${escapeHtml(x.date || '')}${x.articles > 1 ? ` · ${x.articles} articles` : ''}</span>
+        <span class="drv-contrib">${signed(x.contribution, h.driver_unit === 'sigma' ? 2 : 1)}${unit}</span>
+      </li>`;
+    }).join('');
+    drivers = `<div class="an-drivers"><div class="an-drivers-head">Stories moving this score most</div><div class="drv-rest" style="margin:0 0 4px">${h.driver_unit === 'sigma' ? '▲ pushed it above its own normal, ▼ pulled it below.' : '▲ pushed it above neutral (50), ▼ pulled it below.'}</div><ul class="drv-list">${rows}</ul>
+      ${h.other_stories ? `<div class="drv-rest">${h.other_stories} other ${h.other_stories === 1 ? 'story' : 'stories'} make up the rest.</div>` : ''}</div>`;
+  }
+  return `<article class="an-card">
+    <div class="an-card-head">
+      <div><div class="an-card-ticker">${escapeHtml(h.ticker)}</div><div class="an-card-name">${escapeHtml(h.name || '')}</div></div>
+      <div class="an-card-score"><b>${h.has_news ? h.score : '—'}</b><span class="an-pill ${h.label}">${h.has_news ? SENTI_WORD[h.label] : 'No news'}</span></div>
+    </div>
+    <p class="an-card-say">${analyticsSentence(h, b)}</p>
+    <div class="an-rows">
+      <div class="an-row"><span>Articles, last ${b.window_hours}h</span>${split}</div>
+      <div class="an-row"><span>Daily trend, 14 days</span><div>${analyticsSparkline(h.trend)}</div></div>
+      <div class="an-row"><span>In your portfolio</span><span>${h.exposure_pct == null ? '—' : `${h.exposure_pct}% of it`}${move}</span></div>
+    </div>
+    ${drivers}
+  </article>`;
 }
 
 // ─── Sentiment Chart ─────────────────────────────────────────
-function updateSentimentChart(sentiments) {
+// Bars = the score now, coloured by its reading. The dash on each bar = that holding's own
+// 90-day normal (Plus). The shaded band is the mixed zone, 40 to 60.
+const mixedZoneBand = {
+  id: 'mixedZoneBand',
+  beforeDatasetsDraw(chart) {
+    const { ctx, chartArea, scales } = chart;
+    if (!chartArea) return;
+    const top = scales.y.getPixelForValue(60), bottom = scales.y.getPixelForValue(40);
+    ctx.save();
+    ctx.fillStyle = '#F1F5F9';
+    ctx.fillRect(chartArea.left, top, chartArea.right - chartArea.left, bottom - top);
+    ctx.restore();
+  },
+};
+
+function renderAnalyticsChart(b, shown) {
   const ctx = document.getElementById('sentiment-chart');
   if (!ctx) return;
-
-  const tickers = Object.keys(sentiments);
-  const scores = tickers.map(t => Math.round(sentiments[t].score * 100));
-  const colors = tickers.map(t => {
-    const s = sentiments[t].score;
-    return s > 0.6 ? 'rgba(20,184,106,0.85)' : s < 0.4 ? 'rgba(239,68,68,0.85)' : 'rgba(100,116,139,0.55)';
-  });
-  const borderColors = tickers.map(t => {
-    const s = sentiments[t].score;
-    return s > 0.6 ? '#14B86A' : s < 0.4 ? '#EF4444' : '#64748B';
-  });
+  const rows = shown.filter((h) => h.has_news);
+  const hasUsual = b.depth === 'full' && rows.some((h) => h.baseline && h.baseline.usual != null);
+  document.getElementById('an-legend').innerHTML = [
+    '<span><i class="an-key" style="background:#14B86A"></i>Positive, above 60</span>',
+    '<span><i class="an-key" style="background:#94A3B8"></i>Mixed, 40 to 60</span>',
+    '<span><i class="an-key" style="background:#EF4444"></i>Negative, below 40</span>',
+    hasUsual ? `<span><i class="an-key dash"></i>Its own ${b.baseline_days}-day normal</span>` : '',
+    '<span><i class="an-key band"></i>Mixed zone</span>',
+  ].join('');
+  document.getElementById('an-chart-caption').textContent = hasUsual
+    ? 'Read each bar against its own dash, not against the other bars: a bar well above or below its dash is the unusual one, whatever its height.'
+    : 'A bar above the shaded band reads positive, below it negative.';
 
   if (sentimentChart) sentimentChart.destroy();
-
+  const datasets = [{
+    type: 'bar', label: 'Score now', order: 2,
+    data: rows.map((h) => h.score),
+    backgroundColor: rows.map((h) => SENTI_COLOR[h.label]),
+    borderRadius: 4, borderSkipped: 'bottom', maxBarThickness: 64,
+  }];
+  if (hasUsual) {
+    datasets.push({
+      type: 'line', label: 'Its own normal', order: 1, showLine: false,
+      data: rows.map((h) => (h.baseline ? h.baseline.usual : null)),
+      pointStyle: 'line', pointRadius: 26, pointHoverRadius: 28, pointBorderWidth: 3, pointHoverBorderWidth: 3,
+      pointBorderColor: '#0A2540', pointBackgroundColor: '#0A2540',
+    });
+  }
   sentimentChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: tickers,
-      datasets: [{
-        label: 'Sentiment Score',
-        data: scores,
-        backgroundColor: colors,
-        borderColor: borderColors,
-        borderWidth: 2,
-        borderRadius: 8,
-        borderSkipped: false,
-      }]
-    },
+    data: { labels: rows.map((h) => h.ticker), datasets },
+    plugins: [mixedZoneBand],
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: '#FFFFFF',
-          titleColor: '#1E293B',
-          bodyColor: '#64748B',
-          borderColor: '#E2E8F0',
-          borderWidth: 1,
-          cornerRadius: 8,
-          padding: 12,
-          callbacks: { label: (ctx) => `Sentiment: ${ctx.raw}%` }
-        }
+          backgroundColor: '#FFFFFF', titleColor: '#1E293B', bodyColor: '#475569',
+          borderColor: '#E2E8F0', borderWidth: 1, cornerRadius: 8, padding: 12, displayColors: false,
+          filter: (item) => item.datasetIndex === 0,
+          callbacks: {
+            label: (item) => {
+              const h = rows[item.dataIndex];
+              const out = [`Score now: ${h.score} (${SENTI_WORD[h.label].toLowerCase()})`];
+              if (h.baseline && h.baseline.usual != null) out.push(`Its own normal: ${h.baseline.usual}${h.baseline.z != null ? ` (${signed(h.baseline.z)}σ)` : ''}`);
+              out.push(`${h.articles} article${h.articles === 1 ? '' : 's'} in the last ${b.window_hours}h`);
+              return out;
+            },
+          },
+        },
       },
       scales: {
-        y: {
-          min: 0, max: 100,
-          grid: { color: '#EEF2F7' },
-          ticks: { color: '#64748B', font: { family: 'Inter' } }
-        },
-        x: {
-          grid: { display: false },
-          ticks: { color: '#1E293B', font: { family: 'Inter', weight: 600 } }
-        }
+        y: { min: 0, max: 100, grid: { color: '#EEF2F7' }, ticks: { color: '#64748B', font: { family: 'Inter' }, stepSize: 20 } },
+        x: { grid: { display: false }, ticks: { color: '#1E293B', font: { family: 'Inter', weight: 600 } } },
       },
-      animation: { duration: 1200, easing: 'easeOutQuart' }
-    }
+      animation: { duration: 500, easing: 'easeOutQuart' },
+    },
   });
 }
 
@@ -1144,12 +1332,10 @@ function initUserMenu() {
     switchToPage(previousPage);
   });
 
-  document.getElementById('logout-btn').addEventListener('click', () => {
-    token = null; currentUser = null;
-    localStorage.removeItem('copilot_token');
-    if (refreshInterval) clearInterval(refreshInterval);
-    document.getElementById('dashboard-view').classList.add('hidden');
-    document.getElementById('auth-view').classList.remove('hidden');
+  document.getElementById('logout-btn').addEventListener('click', async () => {
+    // Ends the session on the server; the page signs out here whether or not that call lands.
+    try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* signed out locally regardless */ }
+    showSignedOut();
     showToast('Signed out', 'info');
   });
 
@@ -1199,9 +1385,10 @@ function initUserMenu() {
     const msgEl = document.getElementById('profile-pw-msg');
     if (!cur || !nw || !conf) return showProfileMsg(msgEl, 'All password fields are required', 'error');
     if (nw !== conf) return showProfileMsg(msgEl, 'New passwords do not match', 'error');
-    if (nw.length < 6) return showProfileMsg(msgEl, 'New password must be at least 6 characters', 'error');
+    if (nw.length < 8) return showProfileMsg(msgEl, 'New password must be at least 8 characters', 'error');
     try {
       document.getElementById('profile-pw-btn').disabled = true;
+      // The change signs out every other session; this one carries on.
       await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: nw }) });
       document.getElementById('profile-cur-pw').value = '';
       document.getElementById('profile-new-pw').value = '';
@@ -1229,6 +1416,7 @@ function openProfilePage() {
   populateProfilePage(currentUser);
   loadPlans();
   loadApiKeys();
+  loadEmailPrefs();
   moveNavIndicator();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -1254,8 +1442,18 @@ function emailPrefMsg(text, kind = 'success') {
   el.textContent = text;
   el.className = `profile-msg ${kind}`;
 }
+// "Weekly summary, Sundays at 18:00 India time" — from the server's own schedule.
+function showReportSchedule(p) {
+  const r = p.report;
+  if (!r) return;
+  const when = r.kind === 'daily' ? `The daily brief, weekdays at ${r.time}` : `A weekly summary, Sundays at ${r.time}`;
+  document.getElementById('email-reports-hint').textContent =
+    `${when} ${r.market_label} time${r.kind === 'weekly' ? '. Plus and Pro get the daily brief.' : '.'}`;
+}
 async function loadEmailPrefs() {
   const toggle = document.getElementById('email-alerts-toggle');
+  const reportsToggle = document.getElementById('email-reports-toggle');
+  const marketSelect = document.getElementById('email-market-select');
   const status = document.getElementById('email-verify-status');
   const btn = document.getElementById('email-verify-btn');
   if (!emailPrefsBound) {
@@ -1269,21 +1467,74 @@ async function loadEmailPrefs() {
         emailPrefMsg(err.message || 'Could not save that', 'error');
       }
     });
+    reportsToggle.addEventListener('change', async () => {
+      try {
+        const r = await api('/api/email/preferences', { method: 'PUT', body: JSON.stringify({ email_reports: reportsToggle.checked }) });
+        emailPrefMsg(r.email_reports ? 'Report emails are on.' : 'Report emails are off — your brief is still in the app.');
+      } catch (err) {
+        reportsToggle.checked = !reportsToggle.checked;
+        emailPrefMsg(err.message || 'Could not save that', 'error');
+      }
+    });
+    marketSelect.addEventListener('change', async () => {
+      try {
+        const r = await api('/api/email/preferences', { method: 'PUT', body: JSON.stringify({ home_market: marketSelect.value || null }) });
+        showReportSchedule(r);
+        emailPrefMsg(`Reports are timed for ${r.report.market_label}.`);
+      } catch (err) {
+        emailPrefMsg(err.message || 'Could not save that', 'error');
+      }
+    });
+    // Pressing it shows it is working ("Sending…", greyed out), then holds it greyed for a
+    // short countdown so it is clear the press registered and when another try is possible.
+    const VERIFY_LABEL = btn.textContent;
+    const VERIFY_COOLDOWN_SECONDS = 30;
+    let verifyTimer = null;
+    const verifyCooldown = (seconds) => {
+      clearInterval(verifyTimer);
+      let left = seconds;
+      const tick = () => {
+        if (left <= 0) {
+          clearInterval(verifyTimer);
+          btn.disabled = false;
+          btn.textContent = VERIFY_LABEL;
+          return;
+        }
+        btn.textContent = `Send again in ${left}s`;
+        left--;
+      };
+      tick();
+      verifyTimer = setInterval(tick, 1000);
+    };
     btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
       btn.disabled = true;
+      btn.textContent = 'Sending…';
+      emailPrefMsg('Sending the verification link…');
       try {
         const r = await api('/api/auth/resend-verification', { method: 'POST' });
         emailPrefMsg(r.message);
+        if (r.email_verified) {
+          clearInterval(verifyTimer);
+          btn.classList.add('hidden');
+          status.textContent = 'Verified';
+          status.className = 'email-verify-status ok';
+          return;
+        }
       } catch (err) {
         emailPrefMsg(err.message || 'Could not send the link', 'error');
-      } finally { btn.disabled = false; }
+      }
+      verifyCooldown(VERIFY_COOLDOWN_SECONDS);
     });
   }
   try {
     const p = await api('/api/email/preferences');
     toggle.checked = !!p.email_alerts;
+    reportsToggle.checked = !!p.email_reports;
+    marketSelect.value = p.home_market || '';
+    showReportSchedule(p);
     document.getElementById('email-verify-row').classList.remove('hidden');
-    status.textContent = p.email_verified ? 'Verified' : 'Not verified — alert emails are only sent to a verified address';
+    status.textContent = p.email_verified ? 'Verified' : 'Not verified — alert and report emails are only sent to a verified address';
     status.className = `email-verify-status ${p.email_verified ? 'ok' : 'warn'}`;
     btn.classList.toggle('hidden', !!p.email_verified);
   } catch { /* leave the controls as they are */ }
@@ -1299,6 +1550,20 @@ let cachedFollows = new Set(); // `${type}:${ref}`
 let openInstSlug = null;
 
 const followKey = (type, ref) => `${type}:${ref}`;
+
+// India side of the two tabs (NSE bulk/block deals + insider trades). The US/India switch
+// is shared by both tabs and only shown when the server has INDIA_SMART_MONEY on.
+let smMarket = 'us';
+let indiaSmartMoneyOn = false;
+let inDealsScope = 'mine';
+let inInsidersScope = 'mine';
+let cachedInInvestors = [];
+let cachedInDeals = [];
+let cachedInInsiders = [];
+let inDealsTeaser = null;
+let inInsidersTeaser = null;
+let inDealsSearchQuery = '';
+let inInsidersSearchQuery = '';
 // Normalize a politician name to the same key the server emitter uses.
 const polKey = (name) => String(name).toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '');
 
@@ -1321,7 +1586,160 @@ function lagDays(a, b) {
 }
 
 async function loadSmartMoney() {
-  await Promise.all([loadFollows(), loadInstitutions(), loadCongress(), loadSmartMoneyMeta()]);
+  await Promise.all([loadFollows(), loadInstitutions(), loadCongress(), loadSmartMoneyMeta(), loadIndiaMeta()]);
+  if (smMarket === 'in') loadIndiaSmartMoney();
+}
+
+// ── India: bulk/block deals + insider trades ──
+// ₹ in crore (1e7) and lakh (1e5), the units Indian readers use.
+function fmtInr(n) {
+  const v = Number(n);
+  if (n == null || !Number.isFinite(v)) return '—';
+  if (v >= 1e7) return `₹${(v / 1e7).toFixed(v >= 1e9 ? 0 : 1)} Cr`;
+  if (v >= 1e5) return `₹${(v / 1e5).toFixed(1)} L`;
+  return `₹${Math.round(v).toLocaleString('en-IN')}`;
+}
+function fmtIndianCount(n) {
+  const v = Number(n);
+  if (n == null || !Number.isFinite(v)) return '—';
+  if (v >= 1e7) return `${(v / 1e7).toFixed(2)} Cr`;
+  if (v >= 1e5) return `${(v / 1e5).toFixed(2)} L`;
+  return Math.round(v).toLocaleString('en-IN');
+}
+
+async function loadIndiaMeta() {
+  try {
+    const meta = await api('/api/smart-money/india/meta');
+    indiaSmartMoneyOn = !!meta.enabled;
+  } catch (err) { indiaSmartMoneyOn = false; }
+  document.querySelectorAll('.market-switch').forEach(el => el.classList.toggle('hidden', !indiaSmartMoneyOn));
+  if (!indiaSmartMoneyOn && smMarket !== 'us') setSmartMoneyMarket('us');
+}
+
+function setSmartMoneyMarket(market) {
+  smMarket = market === 'in' ? 'in' : 'us';
+  document.querySelectorAll('.market-btn').forEach(b => b.classList.toggle('active', b.dataset.market === smMarket));
+  document.querySelectorAll('[data-market-pane]').forEach(el => el.classList.toggle('hidden', el.dataset.marketPane !== smMarket));
+  if (smMarket === 'in') loadIndiaSmartMoney();
+}
+
+async function loadIndiaSmartMoney() {
+  await Promise.all([loadIndiaInvestors(), loadIndiaDeals(), loadIndiaInsiders()]);
+}
+
+async function loadIndiaInvestors() {
+  try {
+    const data = await api('/api/smart-money/india/investors');
+    cachedInInvestors = data.investors || [];
+    renderIndiaInvestors();
+  } catch (err) { console.error('India investors load error:', err); }
+}
+
+function renderIndiaInvestors() {
+  const box = document.getElementById('in-investors');
+  if (!box) return;
+  box.innerHTML = cachedInInvestors.map(i => {
+    const following = cachedFollows.has(followKey('in_investor', i.slug));
+    const title = i.deals ? `${i.deals} deal${i.deals === 1 ? '' : 's'} on record, latest ${fmtDate(i.latest_deal)}` : 'No deals on record yet';
+    return `<button class="congress-follow ${following ? 'following' : ''}" title="${escapeHtml(title)}"
+      onclick="toggleFollow('in_investor','${i.slug}', ${JSON.stringify(i.name).replace(/"/g, '&quot;')}, this)">${following ? '✓' : '+'} ${escapeHtml(i.name)}</button>`;
+  }).join('');
+}
+
+async function loadIndiaDeals() {
+  try {
+    const data = await api(`/api/smart-money/india/deals?scope=${inDealsScope}&limit=200`);
+    cachedInDeals = data.deals || [];
+    inDealsTeaser = data.teaser ? { total: data.total } : null;
+    renderIndiaDeals();
+  } catch (err) { console.error('India deals load error:', err); }
+}
+
+function renderIndiaDeals() {
+  const list = document.getElementById('in-deals-list');
+  if (!list) return;
+  if (cachedInDeals.length === 0) {
+    list.innerHTML = `<div class="empty-state small"><p>${inDealsScope === 'mine' ? 'No bulk or block deals in your Indian holdings or by investors you follow yet. Switch to "All" or follow an investor above.' : 'No bulk or block deals ingested yet.'}</p></div>`;
+    return;
+  }
+  const q = inDealsSearchQuery.toLowerCase();
+  const deals = q
+    ? cachedInDeals.filter(d => `${d.client_name || ''} ${d.investor_name || ''} ${d.ticker || ''} ${d.security_name || ''}`.toLowerCase().includes(q))
+    : cachedInDeals;
+  if (deals.length === 0) {
+    list.innerHTML = `<div class="empty-state small"><p>No deals match “${escapeHtml(inDealsSearchQuery)}”.</p></div>`;
+    return;
+  }
+  list.innerHTML = deals.map(d => {
+    const side = d.side === 'sell' ? 'sell' : 'buy';
+    return `
+      <div class="congress-item">
+        <span class="trade-side ${side}">${side}</span>
+        <div class="congress-main">
+          <div class="congress-pol">${escapeHtml(d.client_name)} <span class="pol-meta">· ${d.deal_type === 'block' ? 'block' : 'bulk'} deal</span>${d.investor_name ? ` <span class="in-tracked">${escapeHtml(d.investor_name)}</span>` : ''}</div>
+          <div class="congress-sub">
+            <span class="ct-ticker">${escapeHtml(d.ticker)}</span> — ${escapeHtml(d.security_name || '')} · ${fmtIndianCount(d.quantity)} shares at ₹${escapeHtml(String(d.price))} · ${fmtInr(d.value)}
+          </div>
+        </div>
+        <div class="congress-dates">traded ${fmtDate(d.deal_date)}</div>
+      </div>`;
+  }).join('');
+  if (inDealsTeaser && !inDealsSearchQuery) {
+    list.insertAdjacentHTML('beforeend', upgradeNote(`Showing ${cachedInDeals.length} of ${inDealsTeaser.total} deals — unlock the full feed on Plus.`));
+  }
+}
+
+async function loadIndiaInsiders() {
+  try {
+    const data = await api(`/api/smart-money/india/insiders?scope=${inInsidersScope}&limit=200`);
+    cachedInInsiders = data.trades || [];
+    inInsidersTeaser = data.teaser ? { total: data.total } : null;
+    renderIndiaInsiders();
+  } catch (err) { console.error('India insider trades load error:', err); }
+}
+
+function renderIndiaInsiders() {
+  const list = document.getElementById('in-insiders-list');
+  if (!list) return;
+  if (cachedInInsiders.length === 0) {
+    list.innerHTML = `<div class="empty-state small"><p>${inInsidersScope === 'mine' ? 'No insider trades disclosed in your Indian holdings yet. Switch to "All" to see every company we track.' : 'No insider trades ingested yet.'}</p></div>`;
+    return;
+  }
+  const q = inInsidersSearchQuery.toLowerCase();
+  const trades = q
+    ? cachedInInsiders.filter(t => `${t.person || ''} ${t.ticker || ''} ${t.company || ''} ${t.category || ''}`.toLowerCase().includes(q))
+    : cachedInInsiders;
+  if (trades.length === 0) {
+    list.innerHTML = `<div class="empty-state small"><p>No insider trades match “${escapeHtml(inInsidersSearchQuery)}”.</p></div>`;
+    return;
+  }
+  list.innerHTML = trades.map(t => {
+    // pledge / other reuse the neutral badge colour
+    const badge = t.side === 'buy' || t.side === 'sell' ? t.side : 'exchange';
+    const lag = lagDays(t.trade_to || t.trade_from, t.disclosed_at);
+    // Insiders also report debentures, warrants and the like — name the security when it is not a share.
+    const unit = !t.security_type || /equity/i.test(t.security_type) ? 'shares'
+      : /^any other/i.test(t.security_type) ? 'units' : escapeHtml(t.security_type.toLowerCase());
+    const stake = t.pct_before != null && t.pct_after != null && (t.pct_before || t.pct_after)
+      ? ` · stake ${Number(t.pct_before).toFixed(2)}% → ${Number(t.pct_after).toFixed(2)}%` : '';
+    return `
+      <div class="congress-item">
+        <span class="trade-side ${badge}">${escapeHtml(t.side)}</span>
+        <div class="congress-main">
+          <div class="congress-pol">${escapeHtml(t.person)} <span class="pol-meta">${t.category ? `(${escapeHtml(t.category)})` : ''}${t.mode ? ` · ${escapeHtml(t.mode)}` : ''}</span></div>
+          <div class="congress-sub">
+            <span class="ct-ticker">${escapeHtml(t.ticker)}</span> — ${escapeHtml(t.company || '')}${t.quantity != null ? ` · ${fmtIndianCount(t.quantity)} ${unit}` : ''}${Number(t.value) > 0 ? ` · ${fmtInr(t.value)}` : ''}${stake}
+          </div>
+        </div>
+        <div class="congress-dates">
+          traded ${fmtDate(t.trade_from)}<br>
+          disclosed ${fmtDate(t.disclosed_at)}${lag != null && lag >= 0 ? ` <span class="lag">(+${lag}d)</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+  if (inInsidersTeaser && !inInsidersSearchQuery) {
+    list.insertAdjacentHTML('beforeend', upgradeNote(`Showing ${cachedInInsiders.length} of ${inInsidersTeaser.total} insider trades — unlock the full feed on Plus.`));
+  }
 }
 
 async function loadFollows() {
@@ -1499,11 +1917,17 @@ async function toggleFollow(type, ref, label, btnEl) {
       cachedFollows.delete(key);
       showToast(`Unfollowed ${label}`, 'info');
     } else {
-      await api('/api/smart-money/follow', { method: 'POST', body: JSON.stringify({ entity_type: type, entity_ref: type === 'institution' ? ref : label, label }) });
+      await api('/api/smart-money/follow', { method: 'POST', body: JSON.stringify({ entity_type: type, entity_ref: type === 'politician' ? label : ref, label }) });
       cachedFollows.add(key);
       showToast(`Following ${label}`, 'success');
     }
     renderInstitutions();
+    if (type === 'in_investor') {
+      // Following an Indian investor changes the "mine" list of deals.
+      renderIndiaInvestors();
+      loadIndiaDeals();
+      return;
+    }
     // A follow change affects the congress "mine" scope — refresh it if visible.
     if (!document.getElementById('page-congress')?.classList.contains('hidden')) loadCongress();
   } catch (err) { showToast(err.message, 'error'); }
@@ -1557,7 +1981,7 @@ function switchToPage(page) {
   if (STRATEGY_PAGES.includes(page) && !strategiesEnabled()) page = 'dashboard';
   document.querySelectorAll('.main-tab').forEach(t => t.classList.toggle('active', t.dataset.page === page));
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('hidden', p.id !== `page-${page}`));
-  if (page === 'analytics') updateSentimentChart(activeFilter && cachedSentiments[activeFilter] ? { [activeFilter]: cachedSentiments[activeFilter] } : cachedSentiments);
+  if (page === 'analytics') loadAnalytics();
   if (page === 'ai') { loadDailyBrief(); loadAskThreads(); }
   if (page === 'profile') { populateProfilePage(currentUser); loadPlans(); loadApiKeys(); loadEmailPrefs(); }
   if (page === 'backtest') initBacktestPage();
@@ -2760,7 +3184,7 @@ function renderDashboardSummary() {
       ? top5.map(a => {
           const urgency = a.alert_type.includes('negative') ? 'high' : a.alert_type.includes('positive') ? 'medium' : 'low';
           const msg = a.article_url
-            ? `<a href="${escapeHtml(a.article_url)}" target="_blank" rel="noopener noreferrer" class="alert-title-link">${escapeHtml(a.message)}</a>`
+            ? `<a href="${safeUrl(a.article_url)}" target="_blank" rel="noopener noreferrer" class="alert-title-link">${escapeHtml(a.message)}</a>`
             : escapeHtml(a.message);
           return `<div class="alert-item ${urgency}${a.read ? ' read' : ''}"><div>${msg}</div><div class="alert-time">${timeAgo(new Date(a.created_at))}</div></div>`;
         }).join('')
@@ -2769,12 +3193,18 @@ function renderDashboardSummary() {
 }
 
 function initSmartMoney() {
-  document.querySelectorAll('.scope-btn').forEach(btn => {
+  // Each Mine/All toggle drives its own list; data-scope-for says which (default: congress).
+  document.querySelectorAll('.scope-btn[data-scope]').forEach(btn => {
     btn.addEventListener('click', () => {
-      congressScope = btn.dataset.scope;
-      document.querySelectorAll('.scope-btn').forEach(b => b.classList.toggle('active', b === btn));
-      loadCongress();
+      btn.parentElement.querySelectorAll('.scope-btn').forEach(b => b.classList.toggle('active', b === btn));
+      const target = btn.dataset.scopeFor || 'congress';
+      if (target === 'in-deals') { inDealsScope = btn.dataset.scope; loadIndiaDeals(); }
+      else if (target === 'in-insiders') { inInsidersScope = btn.dataset.scope; loadIndiaInsiders(); }
+      else { congressScope = btn.dataset.scope; loadCongress(); }
     });
+  });
+  document.querySelectorAll('.market-btn').forEach(btn => {
+    btn.addEventListener('click', () => setSmartMoneyMarket(btn.dataset.market));
   });
   const whBtn = document.getElementById('webhook-add-btn');
   if (whBtn) whBtn.addEventListener('click', addWebhook);
@@ -2784,6 +3214,8 @@ function initSmartMoney() {
   // Client-side search filters (no refetch — filters the already-loaded list).
   wireSmartMoneySearch('inst-search', 'inst-search-clear', (v) => { instSearchQuery = v; renderInstitutions(); });
   wireSmartMoneySearch('congress-search', 'congress-search-clear', (v) => { congressSearchQuery = v; renderCongress(); });
+  wireSmartMoneySearch('in-deals-search', 'in-deals-search-clear', (v) => { inDealsSearchQuery = v; renderIndiaDeals(); });
+  wireSmartMoneySearch('in-insiders-search', 'in-insiders-search-clear', (v) => { inInsidersSearchQuery = v; renderIndiaInsiders(); });
 }
 
 // Wire a search input + its clear button to a setter, debounced.
@@ -2819,10 +3251,15 @@ function timeAgo(date) {
   return `${days}d ago`;
 }
 
+// Safe inside element text AND inside a quoted attribute (quotes are escaped too).
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  return String(text ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+}
+
+// For href="…": only http(s) links from feeds are followed; anything else becomes "#".
+function safeUrl(url) {
+  return /^https?:\/\//i.test(String(url || '').trim()) ? escapeHtml(String(url).trim()) : '#';
 }
 
 // Format a USD price: 2 decimals for ≥$1, up to 6 for sub-dollar (small-cap crypto).
@@ -2830,6 +3267,14 @@ function fmtUsd(n) {
   if (n == null || isNaN(n)) return '—';
   const d = Number(n) >= 1 ? 2 : 6;
   return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+
+// Format a price in its own currency (₹ for NSE/BSE holdings); USD when none is given.
+function fmtPrice(n, currency) {
+  if (!currency || currency === 'USD') return fmtUsd(n);
+  if (n == null || isNaN(n)) return '—';
+  const num = Number(n).toLocaleString(currency === 'INR' ? 'en-IN' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return currency === 'INR' ? '₹' + num : `${num} ${escapeHtml(currency)}`;
 }
 
 // ─── Company Brief (E4 onboarding) ───────────────────────────
@@ -2948,8 +3393,6 @@ async function loadDailyBrief() {
   }
 }
 
-const WRITER_LABEL = { claude: 'Written by Claude', ollama: 'Local model', deterministic: 'Auto-generated' };
-
 function renderDailyBrief(brief) {
   const el = document.getElementById('daily-brief');
   if (!el) return;
@@ -2967,11 +3410,10 @@ function renderDailyBrief(brief) {
   } else {
     chips.push('<span class="brief-chip quiet">First brief</span>');
   }
-  const dateStr = brief.brief_date ? new Date(brief.brief_date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+  const dateStr = brief.brief_date ? new Date(brief.brief_date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }) : '';
   el.innerHTML = `
     <div class="brief-top">
       <span class="brief-date">${escapeHtml(dateStr)}</span>
-      <span class="brief-writer" title="${escapeHtml(brief.model || '')}">${WRITER_LABEL[brief.writer] || 'Brief'}</span>
     </div>
     <div class="brief-headline">${escapeHtml(brief.headline || '')}</div>
     <div class="brief-changes">${chips.join('')}</div>
@@ -3291,8 +3733,17 @@ async function createApiKey() {
   const nameInput = document.getElementById('api-key-name');
   const msgEl = document.getElementById('api-key-msg');
   const btn = document.getElementById('api-key-create-btn');
+  const reauthRow = document.getElementById('api-key-reauth');
+  const reauthInput = document.getElementById('api-key-reauth-pw');
   try {
     btn.disabled = true;
+    // Asked for the password on the last try: confirm it first, then create the key.
+    if (!reauthRow.classList.contains('hidden')) {
+      if (!reauthInput.value) return showProfileMsg(msgEl, 'Enter your password to create a key with write access.', 'error');
+      await api('/api/auth/reauth', { method: 'POST', body: JSON.stringify({ password: reauthInput.value }) });
+      reauthInput.value = '';
+      reauthRow.classList.add('hidden');
+    }
     const created = await api('/api/keys', {
       method: 'POST',
       body: JSON.stringify({ name: nameInput.value.trim(), can_write: document.getElementById('api-key-write').checked }),
@@ -3317,6 +3768,10 @@ async function createApiKey() {
     if (err.status === 402) {
       showProfileMsg(msgEl, err.message || 'API keys require the Pro plan.', 'error');
       goToPlans();
+    } else if (err.status === 403 && err.data && err.data.reauth) {
+      // A key with write access needs the password confirmed in the last few minutes.
+      if (err.data.can_use_password) { reauthRow.classList.remove('hidden'); reauthInput.focus(); }
+      showProfileMsg(msgEl, err.data.can_use_password ? 'Confirm your password, then press Create Key again.' : err.message, 'error');
     } else {
       showProfileMsg(msgEl, err.message, 'error');
     }
@@ -3392,13 +3847,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Phase 5 boot: OAuth return, OAuth errors, reset + verify links ──
   {
     const qp = new URLSearchParams(location.search);
-    const oauthTok = qp.get('oauth');
-    if (oauthTok) {
-      // Callback landed with a fresh SenIQ JWT — adopt it and clean the URL.
-      token = oauthTok;
-      localStorage.setItem('copilot_token', token);
-      history.replaceState({}, '', '/app');
-    }
     const oauthErr = qp.get('oauth_error');
     if (oauthErr) {
       const errEl = document.getElementById('auth-error');
@@ -3420,15 +3868,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // Check for existing session
-  if (token) {
-    try {
-      const data = await api('/api/auth/me');
-      currentUser = data.user;
-      showDashboard();
-    } catch (err) {
-      token = null;
-      localStorage.removeItem('copilot_token');
-    }
+  // Check for an existing session. Always asked, hint or not: a Google/GitHub sign-in
+  // returns here with only the cookie set.
+  try {
+    const data = await api('/api/auth/me');
+    currentUser = data.user;
+    localStorage.setItem(SIGNED_IN_HINT, '1');
+    showDashboard();
+  } catch (err) {
+    localStorage.removeItem(SIGNED_IN_HINT);
   }
 });

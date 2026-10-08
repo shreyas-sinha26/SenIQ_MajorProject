@@ -9,7 +9,7 @@
  * The guardrails (the user is firm: never let the Claude key run a bill):
  *   - server-scheduled only — generateDailyBriefs() runs from cron; the manual route hits
  *     the SAME per-user quota, so there is no loopable on-demand "generate" path.
- *   - per-user daily quota — checked BEFORE any Claude call (count of today's claude_calls).
+ *   - per-user daily quota — checked BEFORE any Claude call (count of today's daily_brief calls).
  *   - global daily spend kill-switch — stop calling Claude past the day's USD ceiling.
  *   - hard output-token cap per call (in briefWriter) + a trimmed/clamped packet.
  *   - every Claude call logged with tokens + estimated cost.
@@ -21,7 +21,10 @@ const { REPORTS, FEATURES } = require('../config');
 const { buildGroundingPacket } = require('./grounding');
 const { writeBrief } = require('./briefWriter');
 
+// What a call cost. A router reports the exact charge (usage.cost_usd); otherwise it is
+// estimated from token counts at config pricing.
 function estimateCost(usage) {
+  if (usage.cost_usd > 0) return usage.cost_usd;
   return (usage.input / 1e6) * REPORTS.PRICE_PER_MTOK.input + (usage.output / 1e6) * REPORTS.PRICE_PER_MTOK.output;
 }
 
@@ -38,6 +41,11 @@ function guardCheck(state) {
   if (userCallsToday >= quota) return { allow: false, reason: 'user_quota_exceeded' };
   return { allow: true, reason: 'ok' };
 }
+
+// brief_date is a DATE: selected as text so it reaches the browser as the stored day (pg would
+// otherwise return a local-midnight Date). Listed after `*`, it replaces that column in the row.
+// The alias makes a bare `ORDER BY brief_date` ambiguous — qualify it with the table name.
+const BRIEF_COLS = '*, brief_date::text AS brief_date';
 
 // Most recent stored packet for a user STRICTLY before `date` — the diff baseline.
 async function loadPrevPacket(userId, date) {
@@ -59,7 +67,7 @@ async function generateBriefForUser(userId, { force = false, now = new Date() } 
   const date = now.toISOString().slice(0, 10);
 
   if (!force) {
-    const existing = await queryOne('SELECT * FROM daily_briefs WHERE user_id = $1 AND brief_date = $2', [userId, date]);
+    const existing = await queryOne(`SELECT ${BRIEF_COLS} FROM daily_briefs WHERE user_id = $1 AND brief_date = $2`, [userId, date]);
     if (existing) return { ...existing, cached: true };
   }
 
@@ -69,7 +77,7 @@ async function generateBriefForUser(userId, { force = false, now = new Date() } 
   // ── Guardrails: decide whether Claude is allowed for this run ──
   const dayStart = `${date} 00:00:00+00`;
   const callRow = await queryOne(
-    'SELECT count(*) c FROM claude_calls WHERE user_id = $1 AND created_at >= $2',
+    "SELECT count(*) c FROM claude_calls WHERE user_id = $1 AND kind = 'daily_brief' AND created_at >= $2",
     [userId, dayStart]
   );
   const spendRow = await queryOne(
@@ -78,7 +86,7 @@ async function generateBriefForUser(userId, { force = false, now = new Date() } 
   );
   const guard = guardCheck({
     flagOn: FEATURES.CLAUDE_REPORTS,
-    hasKey: !!process.env.ANTHROPIC_API_KEY,
+    hasKey: require('./llmClient').llmConfigured(),
     userCallsToday: Number(callRow.c),
     quota: REPORTS.PER_USER_DAILY_QUOTA,
     globalSpendToday: Number(spendRow.s),
@@ -105,7 +113,7 @@ async function generateBriefForUser(userId, { force = false, now = new Date() } 
      ON CONFLICT (user_id, brief_date)
      DO UPDATE SET packet = EXCLUDED.packet, narrative = EXCLUDED.narrative, headline = EXCLUDED.headline,
                    writer = EXCLUDED.writer, model = EXCLUDED.model, generated_at = now()
-     RETURNING *`,
+     RETURNING ${BRIEF_COLS}`,
     [userId, date, packet, brief.narrative, brief.headline, brief.writer, brief.model]
   );
   return { ...saved, guard: guard.reason, cached: false };
@@ -129,7 +137,7 @@ async function generateDailyBriefs(now = new Date()) {
 
 async function getLatestBrief(userId) {
   const { queryOne } = require('../db');
-  return queryOne('SELECT * FROM daily_briefs WHERE user_id = $1 ORDER BY brief_date DESC LIMIT 1', [userId]);
+  return queryOne(`SELECT ${BRIEF_COLS} FROM daily_briefs WHERE user_id = $1 ORDER BY daily_briefs.brief_date DESC LIMIT 1`, [userId]);
 }
 
 module.exports = { generateBriefForUser, generateDailyBriefs, getLatestBrief, guardCheck, estimateCost };

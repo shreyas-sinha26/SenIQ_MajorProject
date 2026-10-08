@@ -28,7 +28,11 @@ async function getUserTier(userId) {
 // Attach req.tier / req.isAdmin / req.tierCfg. Use after authMiddleware on gated routers.
 async function attachTier(req, res, next) {
   if (!req.user || !req.user.id) return next();
-  const { tier, isAdmin } = await getUserTier(req.user.id);
+  // authMiddleware has already read this user's row; fall back to a lookup without it.
+  const row = req.userRow;
+  const { tier, isAdmin } = row
+    ? { tier: TIERS[row.subscription_tier] ? row.subscription_tier : 'free', isAdmin: !!row.is_admin }
+    : await getUserTier(req.user.id);
   req.tier = tier;
   req.isAdmin = isAdmin;
   req.tierCfg = tierConfig(tier);

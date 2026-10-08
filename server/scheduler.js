@@ -11,7 +11,7 @@
 
 const cron = require('node-cron');
 const { query, queryOne, execute } = require('./db');
-const { FEATURES, SMART_MONEY } = require('./config');
+const { FEATURES, SMART_MONEY, INDIA_SMART_MONEY } = require('./config');
 const { gatherArticles } = require('./services/ingest');
 const { loadIndex } = require('./services/entityResolver');
 const { analyzeSentiment } = require('./services/sentiment');
@@ -22,12 +22,14 @@ const { generateAlerts } = require('./services/materiality');
 const { recomputeImpacts } = require('./services/impactScoring');
 const { logEventFeatures, resolveOutcomes } = require('./services/outcomes');
 const { pollSmartMoney } = require('./services/smartMoney');
+const { pollIndiaSmartMoney } = require('./services/smartMoney/india');
 const { syncDisclosures } = require('./services/disclosures');
 const { generateDailyBriefs } = require('./services/reports');
 const { embedPendingArticles } = require('./services/newsSearch');
 const { purgeOldThreads } = require('./services/askThreads');
+const { runReportEmails } = require('./services/reportEmails');
 const { captureException } = require('./observability');
-const { REPORTS, QA } = require('./config');
+const { REPORTS, QA, REPORT_EMAIL } = require('./config');
 
 let isRunning = false;
 
@@ -193,6 +195,18 @@ async function runDailyBriefs() {
   }
 }
 
+// India smart money — NSE bulk/block deals + insider trades, once a day.
+async function runIndiaSmartMoneyPoll() {
+  if (!FEATURES.INDIA_SMART_MONEY) return;
+  try {
+    console.log(`\n🇮🇳 [${new Date().toLocaleTimeString()}] Polling India smart money (NSE deals + insider trades)...`);
+    await pollIndiaSmartMoney();
+  } catch (err) {
+    console.error('India smart-money poll error:', err);
+    captureException(err);
+  }
+}
+
 // Ask thread retention — drop conversations untouched for QA.THREAD_RETENTION_DAYS.
 async function runThreadPurge() {
   try {
@@ -202,6 +216,13 @@ async function runThreadPurge() {
     console.error('Ask thread purge error:', err);
     captureException(err);
   }
+}
+
+// Report emails — whoever is inside their morning (or Sunday-evening) window and has not had
+// that day's report. The service never throws; this only logs what went out.
+async function runReportEmailJob() {
+  const r = await runReportEmails();
+  if (r.due) console.log(`📬 Report emails: ${r.sent} sent, ${r.failed} failed`);
 }
 
 function startScheduler() {
@@ -218,10 +239,20 @@ function startScheduler() {
     console.log(`⏰ Smart-money poller started — ${SMART_MONEY.POLL_CRON}`);
   }
 
+  // India smart money: once a day after the NSE close, never on boot — the routes are
+  // unofficial, so a restart loop must not turn into a burst of requests.
+  if (FEATURES.INDIA_SMART_MONEY) {
+    tasks.push(cron.schedule(INDIA_SMART_MONEY.CRON, runIndiaSmartMoneyPoll, { timezone: INDIA_SMART_MONEY.TIMEZONE }));
+    console.log(`⏰ India smart-money poller started — ${INDIA_SMART_MONEY.CRON} ${INDIA_SMART_MONEY.TIMEZONE}`);
+  }
+
   tasks.push(cron.schedule(REPORTS.CRON, runDailyBriefs));
   console.log(`⏰ Daily-brief generator started — ${REPORTS.CRON}`);
 
   tasks.push(cron.schedule(QA.THREAD_PURGE_CRON, runThreadPurge));
+
+  tasks.push(cron.schedule(REPORT_EMAIL.CRON, runReportEmailJob));
+  console.log(`⏰ Report emails started — ${REPORT_EMAIL.CRON}`);
 
   return tasks;
 }
