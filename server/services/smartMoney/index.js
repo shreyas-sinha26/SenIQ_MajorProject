@@ -36,7 +36,12 @@ async function emitEvent({ event, entityType, entityRef, tickers = [], alertTick
   }
 
   const recipients = [...new Set([...followers, ...holders].map((r) => Number(r.user_id)))];
-  for (const userId of recipients) {
+  return notifyUsers(recipients, { event, alertTicker, message });
+}
+
+// One alert row + outbound webhooks for each user. Returns how many users were reached.
+async function notifyUsers(userIds, { event, alertTicker = null, message }) {
+  for (const userId of userIds) {
     await execute(
       `INSERT INTO alerts (user_id, ticker, alert_type, message, delivery) VALUES ($1, $2, $3, $4, $5)`,
       [userId, alertTicker, 'smart_money', message, await deliveryForDiscreteAlert(userId)]
@@ -47,7 +52,7 @@ async function emitEvent({ event, entityType, entityRef, tickers = [], alertTick
       console.warn(`   ⚠️  webhook dispatch failed for user ${userId}: ${err.message}`);
     }
   }
-  return recipients.length;
+  return userIds.length;
 }
 
 // ─── Institutions (13F via EDGAR) ─────────────────────────────────────────────
@@ -300,4 +305,4 @@ async function pollSmartMoney() {
   }
 }
 
-module.exports = { pollSmartMoney, pollInstitutions, pollCongress, backfillHoldingTickers, emitEvent, polKey };
+module.exports = { pollSmartMoney, pollInstitutions, pollCongress, backfillHoldingTickers, emitEvent, notifyUsers, polKey };

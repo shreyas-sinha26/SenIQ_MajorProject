@@ -84,6 +84,9 @@ const FEATURES = {
   X_INGEST: false,       // deferred — interface stubbed only
   FINBERT_CLASSIFY: process.env.FINBERT_CLASSIFY === '1', // HF Inference API batch classifier (needs HF_API_TOKEN)
   SMART_MONEY: true,     // Phase 3: 13F (EDGAR) + Congress tabs + instant filing alerts
+  // India side of those tabs: NSE bulk/block deals + insider trades. Opt-in
+  // (INDIA_SMART_MONEY=1): the NSE routes are unofficial and their terms are unchecked.
+  INDIA_SMART_MONEY: process.env.INDIA_SMART_MONEY === '1',
   // Claude writes the daily brief, Ask answers and the Pro alert narrative. Off unless
   // CLAUDE_REPORTS=1 — a key alone never starts spending.
   CLAUDE_REPORTS: process.env.CLAUDE_REPORTS === '1',
@@ -498,6 +501,28 @@ const SMART_MONEY = {
   MAX_WEBHOOKS_PER_USER: 5,
 };
 
+// ─── India smart money (NSE bulk/block deals + insider trades) ───
+// The Indian side of the Institutions and Congress tabs. Runs only when
+// FEATURES.INDIA_SMART_MONEY is on. NSE's routes are public but unofficial, so the poller
+// asks once a day after the market closes (never on boot) and gives up quietly when refused.
+const INDIA_SMART_MONEY = {
+  CRON: '30 19 * * 1-5',         // weekdays 19:30, in TIMEZONE — the deal files are out by then
+  TIMEZONE: 'Asia/Kolkata',
+  // Sent on every NSE request. Says who we are; override with NSE_USER_AGENT.
+  USER_AGENT: process.env.NSE_USER_AGENT || 'Mozilla/5.0 (compatible; SenIQ/1.0; admin@xynthis.com)',
+  BULK_DEALS_URL: 'https://nsearchives.nseindia.com/content/equities/bulk.csv',
+  BLOCK_DEALS_URL: 'https://nsearchives.nseindia.com/content/equities/block.csv',
+  INSIDER_URL: 'https://www.nseindia.com/api/corporates-pit',
+  TIMEOUT_MS: 25000,             // the archive host is slow; a first probe timed out at 15s
+  REQUEST_DELAY_MS: 1500,        // gap between two NSE requests
+  INSIDER_MAX_HELD: 25,          // held Indian tickers checked every run
+  INSIDER_ROTATING: 15,          // plus this many other universe names, least recently checked first
+  INSIDER_LOOKBACK_DAYS: 365,    // how far back one symbol's disclosures are kept — large caps can go months without one
+  ALERT_MAX_AGE_DAYS: 7,         // an older deal/disclosure fetched late is stored, never alerted
+  INSIDER_ALERT_MIN_INR: 1e7,    // ₹1 crore — smaller insider trades are stored but do not alert
+  LIST_WINDOW: 500,              // newest rows a list route looks at before filtering
+};
+
 // ─── Strategy service (Phase 7) ──────────────────────────────
 // The Python backtest engine runs as its own HTTP service; SenIQ proxies to it.
 // When the service isn't running, strategy routes return 503 and the rest of the
@@ -564,4 +589,4 @@ const AUTH_LIMITS = {
   MAX_PASSWORD_CHARS: 72,                            // bcrypt reads only the first 72 bytes
 };
 
-module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
+module.exports = { DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };

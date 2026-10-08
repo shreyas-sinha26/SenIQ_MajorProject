@@ -551,6 +551,11 @@
         <!-- Institutions panel -->
         <div class="intel-panel hidden" id="intel-panel-institutions">
           <section class="smartmoney-section">
+            <div class="scope-toggle market-switch hidden">
+              <button class="scope-btn market-btn active" data-market="us">US</button>
+              <button class="scope-btn market-btn" data-market="in">India</button>
+            </div>
+            <div data-market-pane="us">
             <div class="section-header">
               <h2>Institutions — 13F Filings</h2>
               <span class="impact-subtitle">Quarterly 13F holdings of the funds you follow</span>
@@ -572,12 +577,47 @@
               </div>
               <div class="inst-detail glass hidden" id="inst-detail"></div>
             </div>
+            </div>
+            <div data-market-pane="in" class="hidden">
+            <div class="section-header">
+              <h2>Institutions — Bulk &amp; Block Deals</h2>
+              <span class="impact-subtitle">Large trades on NSE, with the buyer or seller named</span>
+            </div>
+            <div class="sm-freshness">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>NSE publishes bulk and block deals the same evening. Names appear as the exchange reports them, so a fund trading under another name is not matched.</span>
+            </div>
+            <div class="sm-pane">
+              <div class="in-investors" id="in-investors"></div>
+              <div class="congress-controls">
+                <div class="scope-toggle">
+                  <button class="scope-btn active" data-scope="mine" data-scope-for="in-deals">My holdings &amp; follows</button>
+                  <button class="scope-btn" data-scope="all" data-scope-for="in-deals">All</button>
+                </div>
+              </div>
+              <div class="news-search-bar sm-search">
+                <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                <input type="text" id="in-deals-search" placeholder="Search client, ticker, or company…" autocomplete="off">
+                <button class="news-search-clear hidden" id="in-deals-search-clear" title="Clear search">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <div class="congress-list" id="in-deals-list">
+                <div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+              </div>
+            </div>
+            </div>
           </section>
         </div>
 
         <!-- Congress panel -->
         <div class="intel-panel hidden" id="intel-panel-congress">
           <section class="smartmoney-section">
+            <div class="scope-toggle market-switch hidden">
+              <button class="scope-btn market-btn active" data-market="us">US</button>
+              <button class="scope-btn market-btn" data-market="in">India</button>
+            </div>
+            <div data-market-pane="us">
             <div class="section-header">
               <h2>Congress — STOCK Act Disclosures</h2>
               <span class="impact-subtitle">STOCK Act disclosures from politicians you follow</span>
@@ -604,6 +644,35 @@
               <div class="congress-list" id="congress-list">
                 <div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
               </div>
+            </div>
+            </div>
+            <div data-market-pane="in" class="hidden">
+            <div class="section-header">
+              <h2>Insiders &amp; Promoters — SEBI Disclosures</h2>
+              <span class="impact-subtitle">Trades by promoters, directors and key managers in their own company</span>
+            </div>
+            <div class="sm-freshness">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>India has no equivalent of congressional trade reports. These are trades company insiders must disclose under SEBI's insider-trading rules, usually within two trading days.</span>
+            </div>
+            <div class="sm-pane">
+              <div class="congress-controls">
+                <div class="scope-toggle">
+                  <button class="scope-btn active" data-scope="mine" data-scope-for="in-insiders">My holdings</button>
+                  <button class="scope-btn" data-scope="all" data-scope-for="in-insiders">All</button>
+                </div>
+              </div>
+              <div class="news-search-bar sm-search">
+                <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                <input type="text" id="in-insiders-search" placeholder="Search person, ticker, or company…" autocomplete="off">
+                <button class="news-search-clear hidden" id="in-insiders-search-clear" title="Clear search">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <div class="congress-list" id="in-insiders-list">
+                <div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+              </div>
+            </div>
             </div>
             <details class="sm-webhooks" id="sm-webhooks">
               <summary>Developer · Outbound webhooks <span class="badge pro-badge">Pro</span></summary>

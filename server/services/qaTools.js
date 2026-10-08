@@ -187,7 +187,7 @@ const TOOLS = [
   },
   {
     name: 'get_smart_money',
-    description: 'Congressional trades and institutional 13F position changes touching the user\'s holdings (or one held ticker). These disclosures lag by weeks — always state the dates.',
+    description: 'Congressional trades and institutional 13F position changes touching the user\'s holdings (or one held ticker); for Indian stocks, NSE bulk/block deals and insider (promoter, director) trades. Disclosures lag the trades — always state the dates.',
     input_schema: { type: 'object', properties: { ticker: { ...tickerProp, description: 'Optional: limit to one held ticker.' } } },
   },
   {
@@ -362,12 +362,34 @@ const EXECUTORS = {
     );
     const congressRows = congress.map((c) => ({ politician: c.politician, chamber: c.chamber, party: c.party, action: c.transaction_type, ticker: c.ticker, traded: day(c.transaction_date), disclosed: day(c.disclosure_date) }));
     const institutionRows = institutions.map((r) => ({ fund: r.name, ticker: r.ticker, change: r.change_type, shares: Number(r.shares), value_usd: Number(r.value), quarter_end: day(r.period_of_report), filed: day(r.filed_at) }));
+    // India: NSE bulk/block deals and insider trades. The keys appear only when there are rows.
+    const deals = await query(
+      `SELECT deal_type, deal_date::text AS deal_date, ticker, client_name, side, quantity, price, value
+         FROM india_deals WHERE ticker = ANY($1)
+        ORDER BY deal_date DESC, value DESC LIMIT 10`,
+      [tickers]
+    );
+    const insiders = await query(
+      `SELECT ticker, person, category, mode, side, quantity, value, trade_from::text AS trade_from, disclosed_at::text AS disclosed_at
+         FROM india_insider_trades WHERE ticker = ANY($1) AND side IN ('buy','sell')
+        ORDER BY disclosed_at DESC NULLS LAST, value DESC NULLS LAST LIMIT 10`,
+      [tickers]
+    );
+    const dealRows = deals.map((d) => ({ client: d.client_name, deal: d.deal_type, action: d.side, ticker: d.ticker, shares: Number(d.quantity), price_inr: Number(d.price), value_inr: Number(d.value), traded: d.deal_date }));
+    const insiderRows = insiders.map((t) => ({ person: t.person, category: t.category, how: t.mode, action: t.side, ticker: t.ticker, shares: t.quantity == null ? null : Number(t.quantity), value_inr: t.value == null ? null : Number(t.value), traded: t.trade_from, disclosed: t.disclosed_at }));
+    const india = dealRows.length || insiderRows.length ? {
+      india_note: 'Indian stocks: bulk/block deals are large trades NSE publishes the same day with the client named; insider trades are SEBI disclosures by promoters, directors and key managers, usually within two trading days. India has no congressional-trade disclosures.',
+      india_deals: dealRows,
+      india_insider_trades_summary: tallyBy(insiderRows, 'action'),
+      india_insider_trades: insiderRows,
+    } : {};
     return {
       note: 'Disclosures lag the actual trades (13F up to 45 days after quarter end; congress up to 45 days after the trade). Each row\'s "action"/"change" is exactly what was disclosed — repeat it as written.',
       congress_summary: tallyBy(congressRows, 'action'),
       congress: congressRows,
       institutions_summary: tallyBy(institutionRows, 'change'),
       institutions: institutionRows,
+      ...india,
     };
   },
 
