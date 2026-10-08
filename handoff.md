@@ -61,10 +61,12 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 ## 3. Current state
 
 - **Git** *(checked 2026-10-08)*: on `main`, level with `origin/main`, no other branch, no
-  open pull request. Latest tags **`v1.9` / `v2.9`** on `55c5fe3`, the merge of pull request #9
-  (in-page confirm dialog; the README restored and rewritten is in it too). The commits
-  after it on `main` are handoff notes and the README's "latest tag" line. Untracked and never pushed: `samples/` and `.github/` (see §11).
-- **Tests** *(checked 2026-10-08)*: `npm test` passes — 22 files, 530 checks, offline
+  open pull request *(checked 2026-10-09)*. Latest tags **`v1.9` / `v2.9`** on `55c5fe3`, the merge of pull request #9
+  (in-page confirm dialog; the README restored and rewritten is in it too). After it,
+  **untagged**: pull request #10 (`839df81`, the final sentiment refinement and the
+  corrected README results); the rest are handoff notes. The next pair would be
+  `v1.10` / `v2.10` on `839df81`. Untracked and never pushed: `samples/` and `.github/` (see §11).
+- **Tests** *(checked 2026-10-09)*: `npm test` passes — 22 files, 537 checks, offline
   (no database or API calls).
 - **Dev database** *(checked)*: Postgres `seniq`, all 30 migration files applied (latest
   `0029_user_time_zone`). 1,960 articles, 334 events (2026-10-08, late).
@@ -684,6 +686,11 @@ request, and the branch deleted. Tagged `v1.9` / `v2.9`. The five buttons that a
 with the browser's `confirm()` (delete an Ask conversation, delete a strategy, stop or delete
 a paper deployment, revoke an API key) now use an in-page dialog, `confirmAction()` in
 `public/js/app.js`.
+
+**Pull request #10** (`sentiment-agreement`) was merged on 2026-10-09 as `839df81`, at Annas's
+request, and the branch deleted. **Not tagged.** The local model reads every new story and
+its agreement with FinBERT is the reading's confidence; an optional fine-tuned FinBERT is
+wired but off; the README's results section now carries both label sheets (§8).
 
 ---
 
