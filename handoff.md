@@ -72,6 +72,26 @@ rests on that — the strategy engine behind the app in this round, the Pro end-
 Google/GitHub sign-in end to end on the new sessions, and the alert narrative through the
 router. Indian prices now work through Yahoo; the Upstox token is still unused.
 
+### Reddit and X — parked (2026-10-08, night)
+- **X:** not free. Pay-per-use since February 2026 (about $0.005 per post read, per third-party
+  write-ups); stays deferred.
+- **Reddit: parked by Annas until Reddit replies.** Self-service API access is closed: the
+  "create app" form at reddit.com/prefs/apps just reloads, and Reddit's API page says new Data
+  API apps need a request and ties it to "a valid moderation use case" — SenIQ's is not one, so
+  approval is uncertain. Annas is to submit the request truthfully (non-commercial college
+  project, read-only, a few finance subreddits). No scraping around it. `REDDIT_CLIENT_ID` /
+  `REDDIT_CLIENT_SECRET` stay empty, so `ingest/reddit.js` keeps returning nothing.
+- **If access comes, do not just switch it on.** Today a Reddit post goes through the news
+  pipeline unchanged: one naming a holding can create an event, a report card and an alert by
+  itself; upvotes, comments and post type are not read; the Plus/Pro-only rule for Reddit is
+  not enforced in the feed. The plan proposed (not yet agreed point by point): Reddit can
+  attach to a story a news source already reported but never create one; an intake filter
+  (names a knowledge-base company, minimum upvotes and comments, no memes / gain-loss posts /
+  daily threads / bare questions); a separate "retail chatter" reading per holding instead of
+  blending into the sentiment score; universe and large holdings only; add r/IndianStreetBets
+  and r/IndiaInvestments; enforce the tier rule.
+- Not investigated: third-party services that publish aggregated ticker-mention counts.
+
 ### User time zones and the end-of-day report (2026-10-08, night) — merged (pull request #3, `308b1bc`), tagged `v1.4` / `v2.4`
 Each user now has their own clock (`server/services/userTime.js`, migration `0029`, applied on
 the dev database). Checked in a browser with the throwaway account: the browser's zone is
