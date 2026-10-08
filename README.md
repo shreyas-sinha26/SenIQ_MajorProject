@@ -50,7 +50,8 @@ off, `v2.N` with them on. The latest is `v1.9` / `v2.9`.
 - **Per-company sentiment** — a story naming several companies is read once per company, from
   the sentences that name it, so "the market fell, while Nike advanced" is not negative for
   Nike. An optional language model (a local Ollama model, or Claude Haiku) reads a clause
-  that names two or more companies. Market wraps and "stocks to watch" lists are treated as
+  that names two or more companies; the local model also reads every story, and how far it
+  agrees with FinBERT becomes that reading's confidence. Market wraps and "stocks to watch" lists are treated as
   market stories, not as news about each company they list.
 - **Sentiment per ticker** — computed on read: an acute score over 24–72 hours with a 7-day
   half-life, momentum (this week against last), and a z-score against the ticker's own
@@ -191,8 +192,8 @@ The tests run offline: no database, no API calls, no model downloads.
 
 - **Sentiment history is short.** It is only as long as the app has been recording, so the
   "90-day normal" rests on less than that until the store fills.
-- **Sentiment has been checked on one small hand-labelled set only** (below). Treat the
-  readings as a signal, not a measurement.
+- **Sentiment has been checked on two small hand-labelled sheets only** (below), and matches
+  the labels on about two pairs in three. Treat the readings as a signal, not a measurement.
 - **Nothing is hosted.** `DEPLOY.md` and `render.yaml` describe a deployment that has not
   been carried out.
 - **Payments are not wired.** Upgrading a tier works only through the development stub.
@@ -201,33 +202,45 @@ The tests run offline: no database, no API calls, no model downloads.
 
 ## How the sentiment readings were checked
 
-One person labelled 100 (story, company) pairs from the stored news by hand: positive,
-neutral or negative for that company, or "not about this company". 65 pairs came from
-stories naming two or more companies and 35 from single-company stories. The stories were
-kept out of the work of writing the rules.
+One person labelled (story, company) pairs from the stored news by hand: positive, neutral
+or negative for that company, or "not about this company". There are two sheets, about two
+thirds of each from stories naming several companies.
 
-| How the story is read | Pairs matching the label (of 100) | Multi-company pairs (of 65) | Opposite direction |
-|---|---|---|---|
-| One FinBERT reading for the whole story, given to every company named | 54 | 32 | 11 |
-| FinBERT per company (the sentences that name it) | 55 | 34 | 8 |
-| + a local model (Qwen 2.5 7B through Ollama) for shared clauses | 65 | 44 | 3 |
-| + Claude Haiku 4.5 for shared clauses | 70 | 49 | 3 |
+- **Sheet 1** (100 pairs) was used to choose between designs and settings, so its figures
+  flatter whatever was chosen.
+- **Sheet 2** (101 pairs) was labelled afterwards, from stories never looked at during
+  development, and scored once. It is the fairer test.
 
-"Opposite direction" counts readings that said positive where the label said negative, or
-the reverse.
+| How the story is read | Sheet 1: match | Sheet 1: opposite | Sheet 2: match | Sheet 2: opposite |
+|---|---|---|---|---|
+| One FinBERT reading for the whole story, given to every company named | 54 of 100 | 11 | 66 of 101 | 5 |
+| FinBERT per company (the sentences that name it) | 56 | 8 | 69 | 5 |
+| **FinBERT + a local model (Qwen 2.5 7B), as shipped** | 66 | 3 | 66 | 3 |
+| FinBERT fine-tuned on SEntFiN + the local model (tried, not adopted) | 69 | 1 | 62 | 2 |
 
-What this does and does not show:
+"Opposite" counts readings that said positive where the label said negative, or the reverse.
 
-- The gain is in multi-company stories and comes from the language-model step. Reading per
-  company with FinBERT alone made no measurable difference.
-- Single-company stories are read by FinBERT alone, which matched the label on 21 or 22 of
-  35 pairs.
-- 18 of the 100 pairs were labelled "not about this company". The Claude run recognised 8
-  of them. The local model's "not about" answers were not reliable enough to act on, so they
-  are stored as neutral readings.
-- This is one labeller, one run and 100 pairs, and the same pairs were used to choose
-  between settings, so the figures are indicative, not a benchmark. No comparison against
-  price moves has been made.
+What this shows:
+
+- **The gain in matches on sheet 1 did not repeat on sheet 2.** On fresh stories no way of
+  reading matched clearly more labels than the plain whole-story reading; the differences
+  are within what 100 pairs can resolve (roughly ±9 points).
+- **Two things did repeat.** Opposite-direction readings fell on both sheets (11 → 3 and
+  5 → 3). And with the shipped setup more of the *weight* sits on readings that match: each
+  reading carries a confidence, which is its weight in a ticker's score, and the share of
+  confidence on matching readings rose from 56% to 72% on sheet 1 and from 67% to 74% on
+  sheet 2. That comes from asking the local model about every story and treating its
+  agreement with FinBERT as confidence.
+- **Fine-tuning helped on its own data, not on ours.** Trained on SEntFiN (Indian headlines
+  labelled per company, MIT licence), FinBERT went from 65% to 88% on held-out SEntFiN
+  pairs. On the hand-labelled stories it did not beat plain FinBERT on sheet 2, so it is
+  left off (`training/train_target_sentiment.py` rebuilds it).
+- **"Not about this company"** is caught only by the language model. Across both sheets its
+  "not about" answers were right about two times in three, so they are stored as neutral
+  readings at the lowest confidence and the tag is kept.
+- On sheet 1 only, Claude Haiku in place of the local model matched 70 with 3 opposite.
+- One labeller, about 100 pairs a sheet, and no comparison against price moves. Treat all of
+  it as indicative, not as a benchmark.
 
 `scripts/sentiment_label_sheet.js` writes such a sheet and `scripts/score_sentiment_labels.js`
 scores it.
