@@ -13,7 +13,8 @@ key, real embeddings, or the real strategy engine behind the app.
 **Latest (2026-10-08, night):** two more pull requests are merged into `main` with merge
 commits and tagged on those commits, tags pushed: **#3** (user time zones + the Pro end-of-day
 report) = `308b1bc` = **`v1.4` / `v2.4`**; **#4** (India deals and insider trades in the reports
-and the brief) = `f5d2605` = **`v1.5` / `v2.5`**. `npm test` is green on `f5d2605`. The dev
+and the brief) = `f5d2605` = **`v1.5` / `v2.5`**; **#5** (local FinBERT sentiment) = `7af294a` = **`v1.6` / `v2.6`**.
+`npm test` is green on `7af294a`. The dev
 database is on migration **0029**. The branches `user-time-zones` and
 `india-smart-money-in-reports` still exist, on GitHub and locally. See the first section below.
 
@@ -72,7 +73,7 @@ rests on that — the strategy engine behind the app in this round, the Pro end-
 Google/GitHub sign-in end to end on the new sessions, and the alert narrative through the
 router. Indian prices now work through Yahoo; the Upstox token is still unused.
 
-### Sentiment scorer — local FinBERT, switched on locally and stored stories re-scored (2026-10-08, night; pull request #5)
+### Sentiment scorer — local FinBERT, switched on locally and stored stories re-scored (2026-10-08, night; pull request #5 merged, `v1.6` / `v2.6`)
 - **Why:** the word-list scorer (`services/sentiment.js`) scores a story by the share of
   matched words that are positive, so one ambiguous word decides it. "Apple Reportedly
   Partners With LG Electronics…" was stored negative at score 0 (confidence 0.13) because the
@@ -550,6 +551,8 @@ workflow file is rejected until the token has the `workflow` scope (see §8).
 | `v2.4` | `308b1bc` | same code as v1.4, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
 | `v1.5` | `f5d2605` | v1.4 + India deals and insider trades in the reports and the brief | `npm start` |
 | `v2.5` | `f5d2605` | same code as v1.5, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
+| `v1.6` | `7af294a` | v1.5 + local FinBERT sentiment (`FINBERT_CLASSIFY=1`), new stories only, re-score script | `npm start` |
+| `v2.6` | `7af294a` | same code as v1.6, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
 
 History since the July push (`ac6d217`), newest first:
 ```
@@ -938,6 +941,9 @@ The immediate queue is the "Next, in order" list at the top. Behind it:
   with a merge commit (`308b1bc`), tagged that commit `v1.4` + `v2.4` and pushed the tags.
 - **2026-10-08, night:** the same for `india-smart-money-in-reports`: pull request #4, merge
   commit `f5d2605`, tags `v1.5` + `v2.5`.
+- **2026-10-08, night:** the same for `local-finbert`: pull request #5, merge commit `7af294a`,
+  tags `v1.6` + `v2.6`. Done from a second checkout (`git worktree`), because another session
+  had switched the main folder to its own branch `commodity-company-names`.
 - **2026-10-08, evening:** fetched, merged `origin/main` (`ffa4fde`) into
   `hardening-email-reports`, ran `npm test`, pushed the branch and the tags `v1.3` + `v2.3`, and
   opened pull request #2 against `main`, then merged it with a merge commit (`06006bf`). The
