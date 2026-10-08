@@ -10,7 +10,7 @@ in `RAG_PLAN.md`; the matching engine edits live only in the gitignored `strateg
 Every commit passes `npm test` on its own. Nothing in the merge has run with a real model
 key, real embeddings, or the real strategy engine behind the app.
 
-**Committed on the branch `hardening-email-reports` (`be98ba8`, 2026-10-08, not pushed):** a
+**Committed on the branch `hardening-email-reports` (from `be98ba8`, 2026-10-08, not pushed):** a
 hardening pass, Gmail sending, report emails as PDF attachments, and Claude through AIRouter
 (the three sections below) — 51 files, `npm test` green (351 checks). The dev database is on
 migration 0025. `origin/main` has since gained one commit from Shreyas (`ffa4fde`, README
@@ -118,6 +118,55 @@ A read-through of the whole Node app, then fixes. Nothing here changes a feature
 - Note: shells started from Claude Code carry their own `ANTHROPIC_BASE_URL`; it is not in
   `.env` and does not matter while the router key is set.
 - `eval/ask/run.js` still constructs the Anthropic SDK directly (needs `ANTHROPIC_API_KEY`).
+
+### First Ask eval run (2026-10-08) — `eval/ask/runs/2026-10-08T06-49-53/` (gitignored)
+- 30 cases × 1 rep, answers by Haiku 4.5 and judge Sonnet 5.5, both through AIRouter.
+  `eval/ask/run.js` now uses the router when `AIROUTER_API_KEY` is set (**uncommitted**).
+  Judge self-test passed first. Spent $0.48 ($0.20 answers, $0.29 judge). No infra errors.
+- **Automatic checks: 26/30.** Right tools 19/19, scope refusals 5/5, no data leak 6/6, no
+  advice 28/28, concise 28/28, no markdown. Grounded 24/28 — of the four misses, `edu-02` is a
+  general 13F explanation (the checker should not count it), `move-01`/`smart-02` are figures
+  the model computed or reformatted, `news-05` has two dates not in the evidence.
+- **Judge: 2/28 pass every line**; per line: no-advice 27/28, concise 27/28, case-specific
+  36/51, honest-gaps 8/20, grounded 4/27. The judge is strict and not yet checked against a
+  human read. What it keeps finding: news answers give dates but not source names; causal
+  claims the tools never made ("market-wide sell-off"); unpriced TCS/RELIANCE and truncated
+  tool results not flagged; smart-money rows without each disclosure date; `followup-02`
+  invents where to add a holding. `news-04` ("last month") only had one day of events — a
+  data-depth limit, not the model.
+- One rep only; the runner's own noise floor is 0.18, so do not read small differences.
+- Gotcha: a freshly created fixture user has no impact rows until the pipeline runs — run
+  `recomputeImpactsForUser(<id>)` first (done by hand this time; the runner should do it).
+- **Second run, same day** (`runs/2026-10-08T07-05-09`, $0.48) after tightening the prompt on
+  those five points (sources + dates per story, no asserted causes, flag missing data, dates
+  on every smart-money trade, "Add Asset on the Portfolio page") and making `ensureFixture`
+  compute impacts: **no real change overall.** Automatic 26/30 → 26/30; judge full-pass 2/28 →
+  2/28; honest-gaps 8/20 → 12/19 (better); grounded 4/27 → 2/28, no-advice 27 → 25, concise
+  27 → 24, case lines 36/51 → 37/50 (all inside the 0.18 noise floor). `followup-02` now points
+  to the Portfolio page. What is left is factual slips by Haiku 4.5, not missing rules: calls
+  the third-largest holding "largest", gets a congressional trade's direction wrong, says
+  results were "released" when only previews exist, adds its own interpretation.
+- **Conclusion so far:** guardrails (scope, tools, no advice, length) are solid; precision on
+  facts is the weak spot and prompt wording alone does not move it. Options, none run yet:
+  try a different answer model through the router for the eval only (`AIROUTER_MODEL`), give
+  tools pre-ranked fields so the model does not rank by itself, and have Annas read ~10 judged
+  answers — the judge fails a whole line for one loose phrase and has not been checked
+  against a human. Eval spend today ≈ $1.00.
+- Annas's account (id 36) was marked verified by hand at his request.
+- **Tools now state the comparisons** (no model call needed to build this; not yet re-evaluated):
+  `get_portfolio_overview` returns holdings largest-first with `rank`, `largest`,
+  `order_by_exposure` and `unpriced`; `get_attribution` adds `biggest_drag`, `biggest_lift`,
+  both totals and `offsetting`; `get_top_events` adds `rank`; `get_smart_money` adds a tally
+  per action ("4 rows: 3 sell, 1 buy"). Aimed at the ranking and buy/sell slips above.
+- **Annas has asked for no Claude API calls until he says so (2026-10-08).** The rerun to
+  measure the tool change, and any trial of another answer model, wait for his go-ahead.
+  Note the running app can still call Claude by itself while `CLAUDE_REPORTS=1`: Ask and the
+  brief when he uses them, the 05:30 brief job, and a Pro alert narrative when a realtime
+  alert fires for a verified Pro account (his is one).
+- Profile: the "Send verification link" button now shows "Sending…" greyed out, then a 30 s
+  "Send again in Ns" countdown.
+- Also seen today: this network blocks outgoing mail ports, so the verification email to
+  Annas's new account (id 36, now Pro, five demo holdings) failed three times — not a code bug.
 
 ### The 2026-10-07 session at a glance (details in §3; merged in pull request #1)
 | Area | What changed | Migration |

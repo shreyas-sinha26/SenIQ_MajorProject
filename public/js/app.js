@@ -1300,14 +1300,46 @@ async function loadEmailPrefs() {
         emailPrefMsg(err.message || 'Could not save that', 'error');
       }
     });
+    // Pressing it shows it is working ("Sending…", greyed out), then holds it greyed for a
+    // short countdown so it is clear the press registered and when another try is possible.
+    const VERIFY_LABEL = btn.textContent;
+    const VERIFY_COOLDOWN_SECONDS = 30;
+    let verifyTimer = null;
+    const verifyCooldown = (seconds) => {
+      clearInterval(verifyTimer);
+      let left = seconds;
+      const tick = () => {
+        if (left <= 0) {
+          clearInterval(verifyTimer);
+          btn.disabled = false;
+          btn.textContent = VERIFY_LABEL;
+          return;
+        }
+        btn.textContent = `Send again in ${left}s`;
+        left--;
+      };
+      tick();
+      verifyTimer = setInterval(tick, 1000);
+    };
     btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
       btn.disabled = true;
+      btn.textContent = 'Sending…';
+      emailPrefMsg('Sending the verification link…');
       try {
         const r = await api('/api/auth/resend-verification', { method: 'POST' });
         emailPrefMsg(r.message);
+        if (r.email_verified) {
+          clearInterval(verifyTimer);
+          btn.classList.add('hidden');
+          status.textContent = 'Verified';
+          status.className = 'email-verify-status ok';
+          return;
+        }
       } catch (err) {
         emailPrefMsg(err.message || 'Could not send the link', 'error');
-      } finally { btn.disabled = false; }
+      }
+      verifyCooldown(VERIFY_COOLDOWN_SECONDS);
     });
   }
   try {

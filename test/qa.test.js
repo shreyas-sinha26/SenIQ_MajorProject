@@ -6,7 +6,7 @@
 
 const assert = require('node:assert');
 const { QA } = require('../server/config');
-const { computeAttribution, findMentionedTickers, scopeCheck, outOfScopeAnswer, runTool, TOOLS, EXECUTORS } = require('../server/services/qaTools');
+const { computeAttribution, rankHoldings, tallyBy, findMentionedTickers, scopeCheck, outOfScopeAnswer, runTool, TOOLS, EXECUTORS } = require('../server/services/qaTools');
 const { sanitizeHistory, runAgent, agentSetup, deterministicAnswer, buildOllamaPrompt, ollamaAnswer, SYSTEM_PROMPT } = require('../server/services/qa');
 const ST = require('../server/services/strategyTools');
 const { checkGrounding, extractClaims } = require('../server/services/answerCheck');
@@ -100,6 +100,40 @@ check('nothing priced → null move + explanatory note', () => {
   const a = computeAttribution([{ ticker: 'RELIANCE', weight_pct: null, change_pct: null }]);
   assert.strictEqual(a.portfolio_change_pct, null);
   assert.ok(/No live prices/.test(a.note));
+  assert.strictEqual(a.biggest_drag, null);
+  assert.strictEqual(a.offsetting, false);
+});
+check('the comparison is stated: biggest drag and lift, both totals, and whether they offset', () => {
+  const a = computeAttribution(holdings);
+  assert.deepStrictEqual(a.biggest_drag, { ticker: 'AAPL', contribution_pct: -1.2 });
+  assert.deepStrictEqual(a.biggest_lift, { ticker: 'BTC', contribution_pct: 0.4 });
+  assert.strictEqual(a.detractors_total_pct, -1.2);
+  assert.strictEqual(a.contributors_total_pct, 0.4);
+  assert.strictEqual(a.offsetting, true); // the drag (-1.2) is larger than the net move (-0.8)
+  const allDown = computeAttribution([{ ticker: 'A', weight_pct: 50, change_pct: -1 }, { ticker: 'B', weight_pct: 50, change_pct: -3 }]);
+  assert.strictEqual(allDown.offsetting, false);
+  assert.strictEqual(allDown.biggest_lift, null);
+  assert.strictEqual(allDown.biggest_drag.ticker, 'B');
+});
+
+section('\nrankHoldings / tallyBy (facts stated, not left to the model):');
+check('holdings come back largest first with ranks, the largest named, unpriced listed', () => {
+  const r = rankHoldings([
+    { ticker: 'BTC', exposure_pct: 18.2, price: 60000 },
+    { ticker: 'XAU', exposure_pct: 36.5, price: 2400 },
+    { ticker: 'TCS', exposure_pct: 7.9, price: null },
+    { ticker: 'AAPL', exposure_pct: 29.6, price: 200 },
+  ]);
+  assert.deepStrictEqual(r.holdings.map((h) => `${h.rank}:${h.ticker}`), ['1:XAU', '2:AAPL', '3:BTC', '4:TCS']);
+  assert.deepStrictEqual(r.largest, { ticker: 'XAU', exposure_pct: 36.5 });
+  assert.strictEqual(r.order_by_exposure, '1. XAU 36.5%, 2. AAPL 29.6%, 3. BTC 18.2%, 4. TCS 7.9%');
+  assert.deepStrictEqual(r.unpriced, ['TCS']);
+  assert.deepStrictEqual(rankHoldings([]), { holdings: [], largest: null, order_by_exposure: '', unpriced: [] });
+});
+check('a tally counts each action as disclosed', () => {
+  assert.strictEqual(tallyBy([{ action: 'Sell' }, { action: 'sell' }, { action: 'buy' }, { action: 'sell' }], 'action'), '4 rows: 3 sell, 1 buy');
+  assert.strictEqual(tallyBy([{ change: 'reduced' }], 'change'), '1 row: 1 reduced');
+  assert.strictEqual(tallyBy([], 'action'), '0 rows');
 });
 check('deterministic "down" answer leads with attribution when priced', () => {
   const ctx = {

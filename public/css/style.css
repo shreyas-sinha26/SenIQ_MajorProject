@@ -1703,3 +1703,8 @@ body input::placeholder, body textarea::placeholder { color: #94A3B8; }
 .bt-compare-note { font-size: .78rem; color: var(--text-secondary); margin-top: 10px; }
 .bt-compare-note.warn { color: var(--amber); }
 .bt-compare-caveats { margin: 8px 0 0; padding-left: 18px; font-size: .76rem; line-height: 1.5; color: var(--amber); }
+
+/* Verification-link button while it is sending or cooling down: clearly inactive, and wide
+   enough that the label changing ("Sending…", "Send again in 30s") does not shift the row. */
+#email-verify-btn { min-width: 150px; justify-content: center; white-space: nowrap; }
+#email-verify-btn:disabled { opacity: .55; cursor: not-allowed; background: rgba(10,37,64,.08); color: var(--muted); }
