@@ -82,7 +82,7 @@ const FEATURES = {
   RSS_INGEST: true,      // Phase 2b: Indian financial RSS feeds
   REDDIT_INGEST: true,   // Phase 2b: Reddit (needs REDDIT_CLIENT_ID/SECRET to actually fetch)
   X_INGEST: false,       // deferred — interface stubbed only
-  FINBERT_CLASSIFY: process.env.FINBERT_CLASSIFY === '1', // HF Inference API batch classifier (needs HF_API_TOKEN)
+  FINBERT_CLASSIFY: process.env.FINBERT_CLASSIFY === '1', // FinBERT reads each new story (see FINBERT below); off = the word list
   SMART_MONEY: true,     // Phase 3: 13F (EDGAR) + Congress tabs + instant filing alerts
   // India side of those tabs: NSE bulk/block deals + insider trades. Opt-in
   // (INDIA_SMART_MONEY=1): the NSE routes are unofficial and their terms are unchecked.
@@ -102,6 +102,22 @@ const FEATURES = {
   // offline use, not the default.
   ASK_OLLAMA: process.env.ASK_OLLAMA === '1',
   BILLING: false,
+};
+
+// ─── FinBERT (services/finbertClassifier.js) ─────────────────
+// The finance-trained model that replaces the word list when FEATURES.FINBERT_CLASSIFY is on.
+const FINBERT = {
+  // local = run the model in this process (no token, no cost, a few hundred MB of memory);
+  // hosted = Hugging Face's Inference API (HF_API_TOKEN; a tiny free allowance).
+  MODE: process.env.FINBERT_MODE === 'hosted' ? 'hosted' : 'local',
+  LOCAL_MODEL: 'Xenova/finbert',   // the ONNX build of ProsusAI/finbert
+  LOCAL_DTYPE: 'q8',               // 8-bit weights: ~110 MB on disk, downloaded on first use
+  HOSTED_MODEL: 'ProsusAI/finbert',
+  BATCH: 16,                       // texts per pass through the local model
+  MAX_CHARS: 1500,                 // the model reads at most 512 tokens
+  RETRY_MINUTES: 10,               // after a failure, how long the word list stands in
+  // Score → label, on the bands the word list's labels fall in (0.5 = neutral).
+  BANDS: { POSITIVE: 0.6, NEGATIVE: 0.4 },
 };
 
 // ─── Sentiment v2 windows (Phase 2a) ─────────────────────────
@@ -658,4 +674,4 @@ const SESSION = {
   REAUTH_MINUTES: 10,    // how long a password confirmation covers sensitive actions
 };
 
-module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
+module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };

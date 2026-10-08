@@ -1,78 +1,113 @@
 /**
- * FinBERT classifier — via Hugging Face Inference API.
+ * FinBERT classifier — a finance-trained language model that reads the whole text.
  *
- * Uses ProsusAI/finbert on the HF Serverless Inference API instead of loading
- * the model locally, reducing memory from ~250MB to near zero.
+ * The word list (sentiment.js) scores a story by counting words, so one ambiguous word
+ * decides it: "…to challenge rivals Amazon and Google" read as the most negative score
+ * there is, because "challenge" was the only match. FinBERT reads the sentence.
  *
- * Requires HF_API_TOKEN (free at huggingface.co → Settings → Access Tokens).
- * Falls back to the lexicon classifier if the API is unavailable — never a hard fail.
+ * Two ways to run it (FINBERT.MODE):
+ *   local  — the model runs in this process (transformers.js, the Xenova/finbert ONNX build
+ *            of ProsusAI/finbert). Downloaded once (~110 MB), then no network, no token, no
+ *            usage limit. A few hundred MB of memory while loaded. The default.
+ *   hosted — Hugging Face's Inference API (needs HF_API_TOKEN). For a server too small to
+ *            hold the model; the free allowance is tiny, so it is not the default.
  *
- * Output matches the lexicon classifier: { label, score (0-1, 0.5=neutral), confidence }.
+ * On by FEATURES.FINBERT_CLASSIFY. If the model cannot be loaded or a call fails, the
+ * caller falls back to the word list for that run; the model is tried again after
+ * FINBERT.RETRY_MINUTES — never a hard fail, and never a silent switch for good.
+ *
+ * Output matches the word list's: { label, score (0–1, 0.5 = neutral), confidence, model }.
  */
 
-const { FEATURES, INGEST } = require('../config');
-
-let hf = null;
-let loadFailed = false;
-
-function getClient() {
-  if (!hf && process.env.HF_API_TOKEN) {
-    const { HfInference } = require('@huggingface/inference');
-    hf = new HfInference(process.env.HF_API_TOKEN);
-  }
-  return hf;
-}
-
-// FinBERT label + probability → the shared 0-1 sentiment scale.
-function toScore(label, prob) {
-  const l = String(label).toLowerCase();
-  if (l === 'positive') return { label: 'positive', score: 0.5 + 0.5 * prob, confidence: prob };
-  if (l === 'negative') return { label: 'negative', score: 0.5 - 0.5 * prob, confidence: prob };
-  return { label: 'neutral', score: 0.5, confidence: prob };
-}
+const { FEATURES, FINBERT, INGEST } = require('../config');
 
 const round = (n) => Math.round(n * 100) / 100;
 
 /**
- * Classify many texts. Returns an array aligned to `texts`, or null if FinBERT
- * isn't available (caller falls back to the lexicon).
+ * Pure: the model's three probabilities → our reading.
+ * probs = [{ label: 'positive'|'neutral'|'negative', score: probability }, …] in any order.
+ * score      = 0.5 + half the gap between positive and negative, so a text the model is
+ *              torn on lands near the middle instead of at an extreme.
+ * label      = from the score, on the same bands the word list uses (FINBERT.BANDS).
+ * confidence = the probability of the model's top label.
  */
-async function classifyBatch(texts) {
-  if (!FEATURES.FINBERT_CLASSIFY) return null;
-  if (loadFailed) return null;
-  const client = getClient();
-  if (!client) return null;
+function fromProbabilities(probs) {
+  const p = { positive: 0, neutral: 0, negative: 0 };
+  for (const r of probs || []) {
+    const l = String(r.label || '').toLowerCase();
+    if (l in p) p[l] = Number(r.score) || 0;
+  }
+  const score = Math.min(1, Math.max(0, 0.5 + 0.5 * (p.positive - p.negative)));
+  const label = score >= FINBERT.BANDS.POSITIVE ? 'positive' : score <= FINBERT.BANDS.NEGATIVE ? 'negative' : 'neutral';
+  return { label, score: round(score), confidence: round(Math.max(p.positive, p.neutral, p.negative)), model: 'finbert' };
+}
 
-  const inputs = texts.map((t) => String(t || '').slice(0, INGEST.MAX_TEXT_CHARS));
+// ── The two runners. Each takes texts and returns one list of probabilities per text. ──
+let localPipeline = null;
+async function runLocal(texts) {
+  if (!localPipeline) {
+    const { pipeline } = await import('@huggingface/transformers'); // ESM-only package
+    localPipeline = await pipeline('text-classification', FINBERT.LOCAL_MODEL, { dtype: FINBERT.LOCAL_DTYPE });
+  }
   const out = [];
-  const CHUNK = 8;
+  for (let i = 0; i < texts.length; i += FINBERT.BATCH) {
+    const res = await localPipeline(texts.slice(i, i + FINBERT.BATCH), { top_k: null });
+    out.push(...res);
+  }
+  return out;
+}
 
+let hostedClient = null;
+async function runHosted(texts) {
+  if (!process.env.HF_API_TOKEN) throw new Error('HF_API_TOKEN is not set');
+  if (!hostedClient) {
+    const { HfInference } = require('@huggingface/inference');
+    hostedClient = new HfInference(process.env.HF_API_TOKEN);
+  }
+  const out = [];
+  for (const text of texts) {
+    // One text per call: the reply is that text's list of { label, score }.
+    const res = await hostedClient.textClassification({ model: FINBERT.HOSTED_MODEL, inputs: text });
+    out.push(Array.isArray(res[0]) ? res[0] : res);
+  }
+  return out;
+}
+
+// After a failure the model is left alone until this time, then tried again.
+let retryAt = 0;
+let warned = false;
+
+/**
+ * Classify many texts. Returns an array aligned to `texts`, or null when FinBERT is off or
+ * unavailable right now (the caller uses the word list). deps for tests: { runFn, now }.
+ */
+async function classifyBatch(texts, deps = {}) {
+  if (!FEATURES.FINBERT_CLASSIFY) return null;
+  const now = deps.now != null ? deps.now : Date.now();
+  if (now < retryAt) return null;
+  if (!texts || !texts.length) return [];
+  const runFn = deps.runFn || (FINBERT.MODE === 'hosted' ? runHosted : runLocal);
+  // The model reads at most 512 tokens; a headline and summary rarely come near it.
+  const inputs = texts.map((t) => String(t || '').slice(0, Math.min(INGEST.MAX_TEXT_CHARS, FINBERT.MAX_CHARS)));
   try {
-    for (let i = 0; i < inputs.length; i += CHUNK) {
-      const slice = inputs.slice(i, i + CHUNK);
-      // textClassification returns [{label, score}] for single or an array of those for batch.
-      const res = await client.textClassification({
-        model: 'ProsusAI/finbert',
-        inputs: slice,
-      });
-      // Normalise: single input → wrap in array; batch → already array of arrays.
-      const rows = Array.isArray(res[0]) ? res : [res];
-      for (const row of rows) {
-        const top = Array.isArray(row) ? row[0] : row;
-        const { label, score, confidence } = toScore(top.label, top.score);
-        out.push({ label, score: round(score), confidence: round(confidence), model: 'finbert' });
-      }
-    }
-    return out;
+    const rows = await runFn(inputs);
+    if (!Array.isArray(rows) || rows.length !== inputs.length) throw new Error(`expected ${inputs.length} results, got ${rows && rows.length}`);
+    if (warned) { console.log('   ✅ FinBERT is back; using it again.'); warned = false; }
+    return rows.map(fromProbabilities);
   } catch (err) {
-    console.warn('   ⚠️  FinBERT API error, falling back to lexicon:', err.message);
-    loadFailed = true;
+    retryAt = now + FINBERT.RETRY_MINUTES * 60 * 1000;
+    warned = true;
+    console.warn(`   ⚠️  FinBERT (${FINBERT.MODE}) failed — using the word list for now, retrying in ${FINBERT.RETRY_MINUTES} min: ${err.message}`);
     return null;
   }
 }
 
+// Whether FinBERT is switched on (it may still be resting after a failure).
 function isEnabled() {
-  return FEATURES.FINBERT_CLASSIFY && !loadFailed && !!process.env.HF_API_TOKEN;
+  return FEATURES.FINBERT_CLASSIFY && (FINBERT.MODE !== 'hosted' || !!process.env.HF_API_TOKEN);
 }
 
-module.exports = { classifyBatch, isEnabled };
+// For tests: forget a failure.
+function resetForTests() { retryAt = 0; warned = false; }
+
+module.exports = { classifyBatch, isEnabled, fromProbabilities, resetForTests };
