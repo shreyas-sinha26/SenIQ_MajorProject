@@ -3219,7 +3219,7 @@ function renderDailyBrief(brief) {
   } else {
     chips.push('<span class="brief-chip quiet">First brief</span>');
   }
-  const dateStr = brief.brief_date ? new Date(brief.brief_date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+  const dateStr = brief.brief_date ? new Date(brief.brief_date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }) : '';
   el.innerHTML = `
     <div class="brief-top">
       <span class="brief-date">${escapeHtml(dateStr)}</span>

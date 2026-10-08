@@ -108,7 +108,7 @@ async function topHoldings(userId, limit = REPORTS.TOP_HOLDINGS, raw = null) {
 async function smartMoneyContext(userId) {
   const { query } = require('../db');
   const congress = await query(
-    `SELECT c.politician, c.transaction_type, c.ticker, c.transaction_date
+    `SELECT c.politician, c.transaction_type, c.ticker, c.transaction_date::text AS transaction_date
        FROM congress_trades c
       WHERE c.ticker IN (SELECT ticker FROM portfolio WHERE user_id = $1)
       ORDER BY c.disclosure_date DESC NULLS LAST, c.transaction_date DESC NULLS LAST
@@ -195,4 +195,4 @@ async function buildQAContext(userId, raw = null) {
   };
 }
 
-module.exports = { buildGroundingPacket, buildQAContext, buildDiff, clamp, topHoldings };
+module.exports = { smartMoneyContext, buildGroundingPacket, buildQAContext, buildDiff, clamp, topHoldings };

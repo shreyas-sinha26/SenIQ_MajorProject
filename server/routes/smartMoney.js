@@ -59,7 +59,8 @@ router.get('/institutions', async (req, res) => {
   try {
     const rows = await query(
       `SELECT i.id, i.cik, i.name, i.slug, i.manager,
-              f.accession, f.period_of_report, f.filed_at, f.holdings_count, f.total_value,
+              f.accession, f.period_of_report::text AS period_of_report, f.filed_at::text AS filed_at,
+              f.holdings_count, f.total_value,
               (fe.id IS NOT NULL) AS following
          FROM institutions i
          LEFT JOIN LATERAL (
@@ -91,7 +92,9 @@ router.get('/institutions/:slug', async (req, res) => {
     if (!inst) return res.status(404).json({ error: 'Institution not tracked' });
 
     const filing = await queryOne(
-      `SELECT * FROM institution_filings WHERE institution_id = $1
+      `SELECT id, accession, period_of_report::text AS period_of_report, filed_at::text AS filed_at,
+              holdings_count, total_value
+         FROM institution_filings WHERE institution_id = $1
         ORDER BY period_of_report DESC NULLS LAST, id DESC LIMIT 1`,
       [inst.id]
     );
@@ -135,7 +138,8 @@ router.get('/congress', async (req, res) => {
 
     const recent = await query(
       `SELECT politician, chamber, party, state, ticker, asset_description, transaction_type,
-              transaction_date, disclosure_date, amount_range, amount_min, amount_max, is_sample
+              transaction_date::text AS transaction_date, disclosure_date::text AS disclosure_date,
+              amount_range, amount_min, amount_max, is_sample
          FROM congress_trades
         ORDER BY disclosure_date DESC NULLS LAST, id DESC
         LIMIT 400`
