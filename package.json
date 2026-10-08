@@ -6,12 +6,13 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node test/entityResolver.test.js && node test/engine.test.js && node test/reports.test.js && node test/qa.test.js && node test/mcp.test.js && node test/auth.test.js && node test/alerts.test.js && node test/eval.test.js && node test/strategySignals.test.js && node test/disclosures.test.js && node test/strategyDraft.test.js && node test/hardening.test.js && node test/reportEmails.test.js && node test/llmClient.test.js && node test/sentimentBreakdown.test.js && node test/indiaSmartMoney.test.js && node test/userTime.test.js && node test/eveningReport.test.js && node test/dateColumns.test.js"
+    "test": "node test/entityResolver.test.js && node test/engine.test.js && node test/reports.test.js && node test/qa.test.js && node test/mcp.test.js && node test/auth.test.js && node test/alerts.test.js && node test/eval.test.js && node test/strategySignals.test.js && node test/disclosures.test.js && node test/strategyDraft.test.js && node test/hardening.test.js && node test/reportEmails.test.js && node test/llmClient.test.js && node test/sentimentBreakdown.test.js && node test/indiaSmartMoney.test.js && node test/userTime.test.js && node test/eveningReport.test.js && node test/finbert.test.js && node test/dateColumns.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
     "@expo-google-fonts/inter": "^0.4.2",
     "@huggingface/inference": "^4.13.19",
+    "@huggingface/transformers": "^4.3.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@sentry/node": "^8.55.0",
     "bcryptjs": "^2.4.3",

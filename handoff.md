@@ -72,31 +72,39 @@ rests on that — the strategy engine behind the app in this round, the Pro end-
 Google/GitHub sign-in end to end on the new sessions, and the alert narrative through the
 router. Indian prices now work through Yahoo; the Upstox token is still unused.
 
-### Sentiment scorer — the word list misreads single words; FinBERT not switched on (2026-10-08, night)
-- **Found:** "Apple Reportedly Partners With LG Electronics To Enter Smart Home Device Market" is
-  stored as negative for AAPL (score 0, confidence 0.13). The word-list scorer
-  (`services/sentiment.js`) matched one word in 40 — "challenge", in "challenge rivals Amazon
-  and Google" — and the score is the share of matched words that are positive, so one negative
-  word gives the most negative score there is. Same for "Apple Stock And Two Investment Grade
-  Issuers…" ("debt", confidence 0.06). The low confidence shrinks their weight in the ticker's
-  score, but the label on the story is still "negative".
-- The old news row ("Impact −100 · Confidence 0%") printed the sentiment score under the word
-  "Confidence"; that row was replaced in `2d151be` (v1.3). Annas saw the old row, so his
-  browser had a cached page or an older copy of the app open.
-- **Not fixed.** Two fixes were offered: (1) quick — read a story as neutral unless at least
-  two words match or a minimum confidence is cleared, and re-score what is stored; (2) FinBERT.
-  **Annas chose FinBERT and is getting a Hugging Face token** (`HF_API_TOKEN` in `.env`).
-- **Do not set `FINBERT_CLASSIFY=1` yet.** As written (`finbertClassifier.js`, never run):
-  the pipeline classifies every fetched story on every 10-minute run, stored or not — hundreds
-  of requests against a free allowance reported as under $0.10 a month; and after ONE error the
-  classifier falls back to the word list until the app restarts, silently. Before switching it
-  on: classify only new stories, retry after a pause instead of giving up, log which scorer
-  ran, score from all three probabilities, add tests, then trial on ~20 stored headlines
-  (needs Annas's go-ahead — it is a model call), then re-score stored stories.
-- Also offered, not chosen: running FinBERT locally (no token, no cost, a few hundred MB of
-  memory) — the app's original design before it moved to the hosted service.
-- FinBERT reads the tone of the whole text, not per company; a story tagged to two companies
-  gets one reading for both.
+### Sentiment scorer — local FinBERT built, NOT switched on (2026-10-08, night; branch `local-finbert`, pull request open)
+- **Why:** the word-list scorer (`services/sentiment.js`) scores a story by the share of
+  matched words that are positive, so one ambiguous word decides it. "Apple Reportedly
+  Partners With LG Electronics…" was stored negative at score 0 (confidence 0.13) because the
+  only match in 40 words was "challenge" ("challenge rivals Amazon and Google"). The old news
+  row printed that score under the word "Confidence" ("Impact −100 · Confidence 0%"); that row
+  was replaced in `2d151be` (v1.3) — Annas saw a cached or older page.
+- **Built:** `finbertClassifier.js` now runs FinBERT **locally** by default (transformers.js,
+  `Xenova/finbert`, 8-bit, ~110 MB downloaded on first use into
+  `node_modules/@huggingface/transformers/.cache/` — an `npm ci` downloads it again). No token,
+  no cost, no limit; about 18 s to load the first time, then ~10 ms a story on this Mac.
+  `FINBERT_MODE=hosted` keeps the Hugging Face API route (`HF_API_TOKEN`; free allowance
+  reported as under $0.10 a month). New dependency: `@huggingface/transformers`.
+- The reading uses all three probabilities: score = 0.5 + half of (positive − negative); the
+  label follows the score on the word list's bands (≥ 0.6 positive, ≤ 0.4 negative);
+  confidence = the top probability. A failure rests the model for 10 minutes and the word list
+  stands in, with a log line — it no longer falls back for good after one error.
+- The pipeline (`scheduler.js`) now has FinBERT read **only stories not stored yet** (it used
+  to classify everything fetched, every 10 minutes) and logs which scorer read the new ones.
+- **Trial, 2026-10-08, 20 stored stories (read-only):** the label changed on 8, three of them
+  positive↔negative. Apple–LG: negative 0.00 → positive 0.95. "Two Investment Grade Issuers"
+  ("debt"): negative 0.00 → neutral 0.45. Word-list "positive 1.00" on a single match became
+  neutral or negative in five cases.
+- **State:** `FINBERT_CLASSIFY` is still empty in `.env`, so the app is on the word list.
+  **Stored stories have not been re-scored** — Annas is to approve that after seeing the trial.
+  Until then the Apple–LG story still reads negative in the app.
+- **Limits:** FinBERT reads the tone of the whole text, not per company — in the trial a
+  "market wrap" naming Kotak Bank read negative for Kotak because the market fell. Switching
+  scorers changes the scale of the sentiment history; re-scoring what is stored is what keeps
+  it consistent. A few hundred MB of memory, which matters on a small cloud server.
+- **Seen in the trial, not fixed:** "Senco Gold" (a jeweller) stories are tagged to XAU, the
+  gold commodity (three of 20 rows) — an entity-resolver problem, separate from sentiment.
+- The quick fix offered first (neutral unless two words match) was not built.
 
 ### Reddit and X — parked (2026-10-08, night)
 - **X:** not free. Pay-per-use since February 2026 (about $0.005 per post read, per third-party

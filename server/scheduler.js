@@ -36,10 +36,16 @@ let isRunning = false;
 // Choose FinBERT (batch) when available, else the lexicon, for every article.
 // `held` = [{ticker, name}] portfolio holdings, so news about a user's holding outside
 // the curated universe still resolves (basic symbol/name match).
-async function classifyArticles(articles, held = []) {
+async function classifyArticles(articles, held = [], known = new Set()) {
   const texts = articles.map((a) => `${a.title} ${a.summary || ''}`.trim());
-  let finbert = null;
-  if (finbertEnabled()) finbert = await classifyBatch(texts);
+  // FinBERT reads only stories that are not stored yet: a stored story keeps the reading it
+  // has, and the copy fetched again this run is dropped at insert anyway.
+  const finbert = new Array(articles.length).fill(null);
+  if (finbertEnabled()) {
+    const fresh = articles.map((a, i) => i).filter((i) => !known.has(articles[i].external_id));
+    const read = fresh.length ? await classifyBatch(fresh.map((i) => texts[i])) : [];
+    if (read) fresh.forEach((i, k) => { finbert[i] = read[k]; });
+  }
   const resolver = await loadIndex(); // curated-universe entity resolver (cached)
 
   const enriched = articles.map((a, i) => {
@@ -91,11 +97,15 @@ async function runNewsPipeline() {
     console.log(`   📰 Fetched ${raw.length} articles ${JSON.stringify(counts)}`);
 
     // 2. Classify + entity-resolve (curated universe + held-holding fallback).
-    const articles = await classifyArticles(raw, held);
-    const model = finbertEnabled() ? 'finbert' : 'lexicon';
+    const ids = raw.map((a) => a.external_id).filter(Boolean);
+    const known = new Set(ids.length
+      ? (await query('SELECT external_id FROM articles WHERE external_id = ANY($1)', [ids])).map((r) => r.external_id)
+      : []);
+    const articles = await classifyArticles(raw, held, known);
 
     // 3. Persist new articles (+ relevance/cluster grade) + their per-ticker sentiment.
     let newArticles = 0;
+    let newByFinbert = 0;
     let relevantCount = 0;
     for (const a of articles) {
       const inserted = await queryOne(
@@ -109,6 +119,7 @@ async function runNewsPipeline() {
       );
       if (!inserted) continue;
       newArticles++;
+      if (a.sentiment.model === 'finbert') newByFinbert++;
       if (a.relevance.isRelevant) relevantCount++;
       for (const ticker of a.matchedTickers) {
         await execute(
@@ -119,11 +130,12 @@ async function runNewsPipeline() {
                          sentiment_score = EXCLUDED.sentiment_score,
                          confidence      = EXCLUDED.confidence,
                          model           = EXCLUDED.model`,
-          [inserted.id, ticker, a.sentiment.label, a.sentiment.score, a.sentiment.confidence || 0, a.sentiment.model || model]
+          [inserted.id, ticker, a.sentiment.label, a.sentiment.score, a.sentiment.confidence || 0, a.sentiment.model || 'lexicon']
         );
       }
     }
-    console.log(`   💾 ${newArticles} new articles stored, ${relevantCount} relevant (model: ${model})`);
+    // Which scorer read the new stories: FinBERT when it is on and working, else the word list.
+    console.log(`   💾 ${newArticles} new articles stored, ${relevantCount} relevant (read by ${newByFinbert ? `FinBERT: ${newByFinbert}, word list: ${newArticles - newByFinbert}` : 'the word list'})`);
 
     // 4. Roll articles up into durable events (E1b) — the unit impact/alerts key off.
     await upsertEvents();
