@@ -1533,7 +1533,8 @@ function renderIndiaInsiders() {
     const badge = t.side === 'buy' || t.side === 'sell' ? t.side : 'exchange';
     const lag = lagDays(t.trade_to || t.trade_from, t.disclosed_at);
     // Insiders also report debentures, warrants and the like — name the security when it is not a share.
-    const unit = !t.security_type || /equity/i.test(t.security_type) ? 'shares' : escapeHtml(t.security_type.toLowerCase());
+    const unit = !t.security_type || /equity/i.test(t.security_type) ? 'shares'
+      : /^any other/i.test(t.security_type) ? 'units' : escapeHtml(t.security_type.toLowerCase());
     const stake = t.pct_before != null && t.pct_after != null && (t.pct_before || t.pct_after)
       ? ` · stake ${Number(t.pct_before).toFixed(2)}% → ${Number(t.pct_after).toFixed(2)}%` : '';
     return `
