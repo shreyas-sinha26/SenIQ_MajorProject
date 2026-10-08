@@ -236,4 +236,4 @@ async function getQuotes(holdings) {
   return out;
 }
 
-module.exports = { getQuotes, usdRates, fetchYahoo, indianMarketOf, COMMODITY_YAHOO };
+module.exports = { getQuotes, usdRates, fetchYahoo, indianMarketOf, indianMarkets, COMMODITY_YAHOO };

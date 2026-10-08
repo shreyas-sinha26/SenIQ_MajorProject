@@ -2,12 +2,15 @@
  * Report emails — the scheduled read (config.REPORT_EMAIL).
  *
  *   Free       → weekly summary (Sunday evening, local time)
- *   Plus / Pro → the daily brief (weekday mornings, before the user's market opens)
+ *   Plus / Pro → the daily brief (weekday mornings)
+ *   Pro        → also the end-of-day report (every evening; eveningReport.js decides
+ *                whether there is anything to send)
  *
  * Who gets one: a verified address, report emails switched on, at least one holding.
- * When: decided per user from their market's local clock — users.home_market, or the
- * market most of their stocks trade in. The job runs every few minutes; a report is
- * claimed in report_sends before it is sent, so it goes out once per local day.
+ * When: decided per user from their own clock (userTime.js — users.time_zone, or their
+ * market's zone until that is known). The job runs every few minutes; a report is claimed
+ * in report_sends before it is sent, so it goes out once per local day. The user's MARKET
+ * (home_market, or where most of their stocks trade) still decides what the report covers.
  *
  * The report is a PDF attachment (reportPdf.js); the email body is one line saying what is
  * attached. The daily report is drawn from the same brief the app shows
@@ -17,46 +20,17 @@
  */
 
 const { REPORT_EMAIL } = require('../config');
-const { UNIVERSE } = require('../data/universe');
+const { guessMarket, localClock, zoneFor } = require('./userTime');
 
-const COUNTRY_BY_TICKER = new Map(UNIVERSE.map((c) => [c.ticker, c.country]));
-
-// ── Pure: which market is this portfolio mostly in? ──
-// Stocks only (crypto and commodities trade everywhere). A stored choice always wins.
-function guessMarket(holdings, stored = null) {
-  if (stored && REPORT_EMAIL.MARKETS[stored]) return stored;
-  let india = 0, us = 0;
-  for (const h of holdings || []) {
-    if (h.asset_class && h.asset_class !== 'equity') continue;
-    const exchange = String(h.exchange || '').toUpperCase();
-    const country = COUNTRY_BY_TICKER.get(h.ticker);
-    if (REPORT_EMAIL.IN_EXCHANGES.includes(exchange) || (!exchange && country === 'IN')) india++;
-    else us++;
-  }
-  if (india === us) return REPORT_EMAIL.DEFAULT_MARKET;
-  return india > us ? 'IN' : 'US';
-}
-
-// ── Pure: the wall clock in a time zone → { date:'YYYY-MM-DD', weekday:0–6, minutes } ──
-function localClock(now, timeZone) {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
-    timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', weekday: 'short',
-  }).formatToParts(now).map((p) => [p.type, p.value]));
-  return {
-    date: `${parts.year}-${parts.month}-${parts.day}`,
-    weekday: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(parts.weekday),
-    minutes: Number(parts.hour) * 60 + Number(parts.minute),
-  };
-}
-
-// ── Pure: which report, if any, is this user due right now? → 'daily' | 'weekly' | null ──
+// ── Pure: which report, if any, is this user due right now? → 'daily' | 'weekly' | 'evening' | null ──
 function dueReport(tier, clock) {
   const inWindow = (hour, minute) => {
     const start = hour * 60 + minute;
     return clock.minutes >= start && clock.minutes < start + REPORT_EMAIL.SEND_WINDOW_MINUTES;
   };
-  const { DAILY, WEEKLY } = REPORT_EMAIL;
+  const { DAILY, WEEKLY, EVENING } = REPORT_EMAIL;
+  // The evening window is checked first: it never overlaps the morning one.
+  if (EVENING.TIERS.includes(tier) && inWindow(EVENING.HOUR, EVENING.MINUTE)) return 'evening';
   if (tier === 'plus' || tier === 'pro') {
     return DAILY.WEEKDAYS.includes(clock.weekday) && inWindow(DAILY.HOUR, DAILY.MINUTE) ? 'daily' : null;
   }
@@ -65,7 +39,8 @@ function dueReport(tier, clock) {
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-const REPORT_NAME = { daily: 'daily brief', weekly: 'weekly summary' };
+const REPORT_NAME = { daily: 'daily brief', weekly: 'weekly summary', evening: 'end-of-day report' };
+const FILE_NAME = { daily: 'Daily-Brief', weekly: 'Weekly-Summary', evening: 'End-of-Day' };
 
 // 'YYYY-MM-DD' (the user's local date) → "Thursday, 8 October 2026". Pure.
 function dateLabel(date) {
@@ -87,8 +62,8 @@ function buildReportEmail(kind, { name, date, verdict = null }, { unsubscribeUrl
   // The subject carries the report's verdict when there is one, so it says whether to open it.
   const short = (t) => { const c = String(t || '').replace(/\s+/g, ' ').trim(); return c.length > 70 ? `${c.slice(0, 69).trimEnd()}…` : c; };
   const lead = !verdict ? `Your ${what}`
-    : verdict.level === 'check' ? `${verdict.text.replace(/ (today|this week)$/, '')}: ${short(verdict.detail)}`
-      : `Nothing needs your attention ${kind === 'weekly' ? 'this week' : 'today'}`;
+    : verdict.level === 'check' ? `${verdict.text.replace(/ (today|tonight|this week)$/, '')}: ${short(verdict.detail)}`
+      : `Nothing needs your attention ${kind === 'weekly' ? 'this week' : kind === 'evening' ? 'tonight' : 'today'}`;
   const subject = `${REPORT_EMAIL.SUBJECT_PREFIX} ${lead} — ${day.replace(/^\w+, /, '')}`;
   const text = [hello, '', line, ...(unsubscribeUrl ? ['', `${stop} Stop them: ${unsubscribeUrl}`] : [])].join('\n');
   const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:560px;color:#111;font-size:14px;line-height:1.55">
@@ -96,7 +71,7 @@ function buildReportEmail(kind, { name, date, verdict = null }, { unsubscribeUrl
   <p style="margin:0 0 12px">${esc(line)}</p>
   ${unsubscribeUrl ? `<p style="margin:20px 0 0;color:#999;font-size:12px">${esc(stop)} <a href="${esc(unsubscribeUrl)}" style="color:#999">Stop report emails</a></p>` : ''}
 </div>`;
-  const filename = `SenIQ-${kind === 'weekly' ? 'Weekly-Summary' : 'Daily-Brief'}-${date}.pdf`;
+  const filename = `SenIQ-${FILE_NAME[kind] || FILE_NAME.daily}-${date}.pdf`;
   return { subject, text, html, filename };
 }
 
@@ -174,12 +149,12 @@ async function weeklyReport(user, date, market) {
 async function runReportEmails(deps = {}) {
   const email = require('./emailService');
   const { now = new Date(), sendEmailFn = email.sendEmail, emailEnabledFn = email.emailEnabled, buildPdfFn = require('./reportPdf').buildReportPdf } = deps;
-  const summary = { sent: 0, failed: 0, due: 0 };
+  const summary = { sent: 0, failed: 0, due: 0, skipped: 0 };
   try {
     if (!emailEnabledFn()) return summary;
     const { query, queryOne, execute } = require('../db');
     const users = await query(
-      `SELECT u.id, u.email, u.name, u.subscription_tier, u.home_market
+      `SELECT u.id, u.email, u.name, u.subscription_tier, u.home_market, u.time_zone
          FROM users u
         WHERE u.email_verified AND u.email_reports
           AND EXISTS (SELECT 1 FROM portfolio p WHERE p.user_id = u.id)`);
@@ -191,7 +166,7 @@ async function runReportEmails(deps = {}) {
       try {
         const holdings = await query('SELECT ticker, exchange, asset_class FROM portfolio WHERE user_id = $1', [user.id]);
         const market = guessMarket(holdings, user.home_market);
-        const clock = localClock(now, REPORT_EMAIL.MARKETS[market].timeZone);
+        const clock = localClock(now, zoneFor(user, holdings).timeZone);
         const kind = dueReport(user.subscription_tier, clock);
         if (!kind) continue;
 
@@ -203,7 +178,17 @@ async function runReportEmails(deps = {}) {
         claimed = [user.id, kind, clock.date];
         summary.due++;
 
-        const report = kind === 'daily' ? await dailyReport(user, clock.date, market) : await weeklyReport(user, clock.date, market);
+        const report = kind === 'evening'
+          ? await require('./eveningReport').buildEveningReport(user, { dateLabel: dateLabel(clock.date), market, marketLabel: REPORT_EMAIL.MARKETS[market].label }, { now: new Date(now).getTime() })
+          : kind === 'daily' ? await dailyReport(user, clock.date, market) : await weeklyReport(user, clock.date, market);
+        if (report.outcome === 'skip') {
+          // Nothing traded and nothing new: no email tonight. The slot stays claimed so
+          // the day is decided once, not re-checked every run of the window.
+          await execute("UPDATE report_sends SET outcome = 'skipped' WHERE user_id = $1 AND kind = $2 AND report_date = $3", claimed);
+          summary.due--;
+          summary.skipped++;
+          continue;
+        }
         const pdf = await buildPdfFn(report);
         const unsub = email.unsubscribeUrl(user.id, 'reports');
         const { subject, text, html, filename } = buildReportEmail(kind, { name: user.name, date: clock.date, verdict: report.insights && report.insights.verdict }, { unsubscribeUrl: unsub });

@@ -482,12 +482,22 @@ async function generateAlerts(opts = {}) {
 
   // Apply per-user budgets: only the top few push in realtime, rest are digest.
   const cd = String(ALERT_BUDGET.PER_TICKER_COOLDOWN_HOURS);
-  const sentRows = opts.ignoreExisting ? [] : await query(
-    `SELECT user_id, count(*) c, count(*) FILTER (WHERE ticker = 'MARKET') broad FROM alerts
-      WHERE delivery = 'realtime' AND created_at >= date_trunc('day', now()) GROUP BY user_id`
+  // "Today" is each user's own day (userTime.js), so the rows of the last day and a bit are
+  // read and counted per user from that user's midnight.
+  const recentRows = opts.ignoreExisting ? [] : await query(
+    `SELECT user_id, ticker, created_at FROM alerts
+      WHERE delivery = 'realtime' AND created_at >= now() - interval '26 hours'`
   );
-  const sentTodayByUser = Object.fromEntries(sentRows.map((r) => [r.user_id, Number(r.c)]));
-  const sentBroadTodayByUser = Object.fromEntries(sentRows.map((r) => [r.user_id, Number(r.broad)]));
+  const { userDayStart } = require('./userTime');
+  const sentTodayByUser = {};
+  const sentBroadTodayByUser = {};
+  const dayStartByUser = {};
+  for (const r of recentRows) {
+    if (!(r.user_id in dayStartByUser)) dayStartByUser[r.user_id] = (await userDayStart(r.user_id)).getTime();
+    if (new Date(r.created_at).getTime() < dayStartByUser[r.user_id]) continue;
+    sentTodayByUser[r.user_id] = (sentTodayByUser[r.user_id] || 0) + 1;
+    if (r.ticker === 'MARKET') sentBroadTodayByUser[r.user_id] = (sentBroadTodayByUser[r.user_id] || 0) + 1;
+  }
   const cdRows = opts.ignoreExisting ? [] : await query(
     `SELECT DISTINCT user_id, ticker FROM alerts
       WHERE delivery = 'realtime' AND ticker <> 'MARKET'
@@ -530,9 +540,10 @@ async function generateAlerts(opts = {}) {
  */
 async function deliveryForDiscreteAlert(userId) {
   const { queryOne } = require('../db');
+  const dayStart = await require('./userTime').userDayStart(userId);
   const row = await queryOne(
     `SELECT count(*)::int AS n FROM alerts
-      WHERE user_id = $1 AND delivery = 'realtime' AND created_at >= date_trunc('day', now())`, [userId]);
+      WHERE user_id = $1 AND delivery = 'realtime' AND created_at >= $2`, [userId, dayStart.toISOString()]);
   return row.n < ALERT_BUDGET.MAX_REALTIME_PER_DAY ? 'realtime' : 'digest';
 }
 

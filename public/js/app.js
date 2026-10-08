@@ -313,6 +313,7 @@ async function showDashboard() {
   renderTierControl();
 
   // Load all data
+  syncBrowserTimeZone();
   await Promise.all([loadPortfolio(), loadNewsFeed(), loadAlerts(), loadPortfolioSentiment(), loadImpactFeed(), loadDailyBrief(), loadSmartMoney(), loadAskThreads()]);
 
   // Auto-refresh every 60s
@@ -1447,13 +1448,54 @@ function showReportSchedule(p) {
   const r = p.report;
   if (!r) return;
   const when = r.kind === 'daily' ? `The daily brief, weekdays at ${r.time}` : `A weekly summary, Sundays at ${r.time}`;
+  // The time is on the user's own clock; say which, and whether it was set or guessed.
+  const zone = r.time_zone_source === 'user' ? `your time (${zoneLabel(r.time_zone)})` : `${r.market_label} time`;
+  const evening = r.evening_time ? ` An end-of-day report every evening at ${r.evening_time}, when there is something to report.` : '';
   document.getElementById('email-reports-hint').textContent =
-    `${when} ${r.market_label} time${r.kind === 'weekly' ? '. Plus and Pro get the daily brief.' : '.'}`;
+    `${when} ${zone}${r.kind === 'weekly' ? '. Plus and Pro get the daily brief.' : '.'}${evening}`;
+  const hint = document.getElementById('email-timezone-hint');
+  if (hint) hint.textContent = r.time_zone_source === 'user'
+    ? 'Reports arrive, and daily limits reset, on this clock.'
+    : `Not set, so ${r.market_label} time (${zoneLabel(r.time_zone)}) is used. Reports arrive, and daily limits reset, on this clock.`;
+}
+// "Asia/Kolkata" → "Asia / Kolkata"; "America/Argentina/Buenos_Aires" → "America / Argentina / Buenos Aires".
+const zoneLabel = (tz) => String(tz || '').replace(/_/g, ' ').replace(/\//g, ' / ');
+const browserTimeZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { return null; } };
+// Fill the time-zone list once: every zone the browser knows, the browser's own first.
+function fillTimeZoneSelect(select, current) {
+  if (select.options.length <= 1) {
+    let zones = [];
+    try { zones = Intl.supportedValuesOf('timeZone'); } catch { /* older browser: only the two below */ }
+    const mine = browserTimeZone();
+    const list = [...new Set([mine, current, ...zones].filter(Boolean))];
+    for (const tz of list) {
+      const o = document.createElement('option');
+      o.value = tz;
+      o.textContent = tz === mine ? `${zoneLabel(tz)} (this device)` : zoneLabel(tz);
+      select.appendChild(o);
+    }
+  }
+  if (current && ![...select.options].some(o => o.value === current)) {
+    const o = document.createElement('option');
+    o.value = current; o.textContent = zoneLabel(current);
+    select.appendChild(o);
+  }
+  select.value = current || '';
+}
+// Once per page load: tell the server this device's zone. It only fills an empty setting.
+let browserZoneSent = false;
+async function syncBrowserTimeZone() {
+  if (browserZoneSent) return;
+  browserZoneSent = true;
+  const tz = browserTimeZone();
+  if (!tz || tz === 'UTC' || !tz.includes('/')) return;
+  try { await api('/api/email/preferences', { method: 'PUT', body: JSON.stringify({ time_zone_if_unset: tz }) }); } catch { /* not important enough to show */ }
 }
 async function loadEmailPrefs() {
   const toggle = document.getElementById('email-alerts-toggle');
   const reportsToggle = document.getElementById('email-reports-toggle');
   const marketSelect = document.getElementById('email-market-select');
+  const zoneSelect = document.getElementById('email-timezone-select');
   const status = document.getElementById('email-verify-status');
   const btn = document.getElementById('email-verify-btn');
   if (!emailPrefsBound) {
@@ -1481,6 +1523,15 @@ async function loadEmailPrefs() {
         const r = await api('/api/email/preferences', { method: 'PUT', body: JSON.stringify({ home_market: marketSelect.value || null }) });
         showReportSchedule(r);
         emailPrefMsg(`Reports are timed for ${r.report.market_label}.`);
+      } catch (err) {
+        emailPrefMsg(err.message || 'Could not save that', 'error');
+      }
+    });
+    zoneSelect.addEventListener('change', async () => {
+      try {
+        const r = await api('/api/email/preferences', { method: 'PUT', body: JSON.stringify({ time_zone: zoneSelect.value || null }) });
+        showReportSchedule(r);
+        emailPrefMsg(r.time_zone ? `Your time zone is ${zoneLabel(r.time_zone)}.` : `Your time zone follows your main market (${r.report.market_label}).`);
       } catch (err) {
         emailPrefMsg(err.message || 'Could not save that', 'error');
       }
@@ -1532,6 +1583,7 @@ async function loadEmailPrefs() {
     toggle.checked = !!p.email_alerts;
     reportsToggle.checked = !!p.email_reports;
     marketSelect.value = p.home_market || '';
+    fillTimeZoneSelect(zoneSelect, p.time_zone);
     showReportSchedule(p);
     document.getElementById('email-verify-row').classList.remove('hidden');
     status.textContent = p.email_verified ? 'Verified' : 'Not verified — alert and report emails are only sent to a verified address';

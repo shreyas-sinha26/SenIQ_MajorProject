@@ -18,7 +18,7 @@ const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne } = require('../db');
 const { authMiddleware } = require('./auth');
 const { verifyUnsubscribeToken, emailEnabled } = require('../services/emailService');
-const { guessMarket } = require('../services/reportEmails');
+const { guessMarket, zoneFor, isValidTimeZone, forgetUserZone } = require('../services/userTime');
 const { REPORT_EMAIL } = require('../config');
 
 const router = asyncRouter();
@@ -88,21 +88,27 @@ router.post('/resubscribe', async (req, res) => {
 // The signed-in user's email settings, plus what the report schedule works out to for them.
 async function preferences(userId) {
   const u = await queryOne(
-    'SELECT email, email_verified, email_alerts, email_reports, home_market, subscription_tier FROM users WHERE id = $1', [userId]);
+    'SELECT email, email_verified, email_alerts, email_reports, home_market, time_zone, subscription_tier FROM users WHERE id = $1', [userId]);
   if (!u) return null;
   const holdings = await query('SELECT ticker, exchange, asset_class FROM portfolio WHERE user_id = $1', [userId]);
   const market = guessMarket(holdings, u.home_market);
   const paid = u.subscription_tier === 'plus' || u.subscription_tier === 'pro';
   const at = paid ? REPORT_EMAIL.DAILY : REPORT_EMAIL.WEEKLY;
+  const zone = zoneFor(u, holdings);
   return {
     email: u.email, email_verified: u.email_verified, email_alerts: u.email_alerts, provider: emailEnabled(),
     email_reports: u.email_reports,
     home_market: u.home_market,                       // null = follow the portfolio
+    time_zone: u.time_zone,                           // null = not set: the market's zone is used
     report: {
       market, market_label: REPORT_EMAIL.MARKETS[market].label,
       kind: paid ? 'daily' : 'weekly',
       time: `${String(at.HOUR).padStart(2, '0')}:${String(at.MINUTE).padStart(2, '0')}`,
-      time_zone: REPORT_EMAIL.MARKETS[market].timeZone,
+      time_zone: zone.timeZone,
+      time_zone_source: zone.source,                  // 'user' = their own setting, 'market' = guessed
+      // Pro also gets the end-of-day report, every evening on the same clock.
+      evening_time: REPORT_EMAIL.EVENING.TIERS.includes(u.subscription_tier)
+        ? `${String(REPORT_EMAIL.EVENING.HOUR).padStart(2, '0')}:${String(REPORT_EMAIL.EVENING.MINUTE).padStart(2, '0')}` : null,
     },
   };
 }
@@ -113,7 +119,10 @@ router.get('/preferences', authMiddleware, async (req, res) => {
   res.json(prefs);
 });
 
-// Body: any of { email_alerts: boolean, email_reports: boolean, home_market: 'IN' | 'US' | null }.
+// Body: any of { email_alerts: boolean, email_reports: boolean, home_market: 'IN' | 'US' | null,
+//                time_zone: an IANA name such as 'Asia/Kolkata' | null, time_zone_if_unset: the same }.
+// time_zone_if_unset is what the browser sends on its own at sign-in: it fills an empty
+// setting and never replaces one the user chose.
 router.put('/preferences', authMiddleware, async (req, res) => {
   const body = req.body || {};
   const sets = [];
@@ -131,9 +140,21 @@ router.put('/preferences', authMiddleware, async (req, res) => {
     params.push(body.home_market);
     sets.push(`home_market = $${params.length}`);
   }
+  if (body.time_zone !== undefined) {
+    if (body.time_zone !== null && !isValidTimeZone(body.time_zone)) {
+      return res.status(400).json({ error: 'time_zone must be a zone name such as Asia/Kolkata or America/New_York, or null to follow your market' });
+    }
+    params.push(body.time_zone);
+    sets.push(`time_zone = $${params.length}`);
+  } else if (body.time_zone_if_unset !== undefined) {
+    if (!isValidTimeZone(body.time_zone_if_unset)) return res.status(400).json({ error: 'time_zone_if_unset must be a zone name such as Asia/Kolkata' });
+    params.push(body.time_zone_if_unset);
+    sets.push(`time_zone = COALESCE(time_zone, $${params.length})`);
+  }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to change' });
   params.push(req.user.id);
   await queryOne(`UPDATE users SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING id`, params);
+  forgetUserZone(req.user.id);
   res.json(await preferences(req.user.id));
 });
 
