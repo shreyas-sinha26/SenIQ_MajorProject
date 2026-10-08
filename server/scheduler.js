@@ -11,7 +11,7 @@
 
 const cron = require('node-cron');
 const { query, queryOne, execute } = require('./db');
-const { FEATURES, SMART_MONEY } = require('./config');
+const { FEATURES, SMART_MONEY, INDIA_SMART_MONEY } = require('./config');
 const { gatherArticles } = require('./services/ingest');
 const { loadIndex } = require('./services/entityResolver');
 const { analyzeSentiment } = require('./services/sentiment');
@@ -22,6 +22,7 @@ const { generateAlerts } = require('./services/materiality');
 const { recomputeImpacts } = require('./services/impactScoring');
 const { logEventFeatures, resolveOutcomes } = require('./services/outcomes');
 const { pollSmartMoney } = require('./services/smartMoney');
+const { pollIndiaSmartMoney } = require('./services/smartMoney/india');
 const { syncDisclosures } = require('./services/disclosures');
 const { generateDailyBriefs } = require('./services/reports');
 const { embedPendingArticles } = require('./services/newsSearch');
@@ -194,6 +195,18 @@ async function runDailyBriefs() {
   }
 }
 
+// India smart money — NSE bulk/block deals + insider trades, once a day.
+async function runIndiaSmartMoneyPoll() {
+  if (!FEATURES.INDIA_SMART_MONEY) return;
+  try {
+    console.log(`\n🇮🇳 [${new Date().toLocaleTimeString()}] Polling India smart money (NSE deals + insider trades)...`);
+    await pollIndiaSmartMoney();
+  } catch (err) {
+    console.error('India smart-money poll error:', err);
+    captureException(err);
+  }
+}
+
 // Ask thread retention — drop conversations untouched for QA.THREAD_RETENTION_DAYS.
 async function runThreadPurge() {
   try {
@@ -224,6 +237,13 @@ function startScheduler() {
     setTimeout(runSmartMoneyPoll, 8000); // stagger after the news pipeline kicks off
     tasks.push(cron.schedule(SMART_MONEY.POLL_CRON, runSmartMoneyPoll));
     console.log(`⏰ Smart-money poller started — ${SMART_MONEY.POLL_CRON}`);
+  }
+
+  // India smart money: once a day after the NSE close, never on boot — the routes are
+  // unofficial, so a restart loop must not turn into a burst of requests.
+  if (FEATURES.INDIA_SMART_MONEY) {
+    tasks.push(cron.schedule(INDIA_SMART_MONEY.CRON, runIndiaSmartMoneyPoll, { timezone: INDIA_SMART_MONEY.TIMEZONE }));
+    console.log(`⏰ India smart-money poller started — ${INDIA_SMART_MONEY.CRON} ${INDIA_SMART_MONEY.TIMEZONE}`);
   }
 
   tasks.push(cron.schedule(REPORTS.CRON, runDailyBriefs));

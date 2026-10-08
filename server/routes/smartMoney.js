@@ -17,8 +17,10 @@ const { query, queryOne, execute } = require('../db');
 const { authMiddleware } = require('./auth');
 const { attachTier, requireTier, requireAdmin } = require('../middleware/tier');
 const { assertPublicUrl, UnsafeUrlError } = require('../services/safeFetch');
-const { SMART_MONEY, DISCLAIMER } = require('../config');
+const { SMART_MONEY, INDIA_SMART_MONEY, FEATURES, DISCLAIMER } = require('../config');
 const { pollSmartMoney, polKey } = require('../services/smartMoney');
+const { pollIndiaSmartMoney } = require('../services/smartMoney/india');
+const { INDIA_INVESTORS, INVESTOR_BY_SLUG } = require('../data/indiaInvestors');
 
 const router = asyncRouter();
 router.use(authMiddleware, attachTier);
@@ -179,8 +181,8 @@ router.get('/follows', async (req, res) => {
 router.post('/follow', async (req, res) => {
   try {
     const { entity_type, entity_ref, label } = req.body || {};
-    if (!['institution', 'politician'].includes(entity_type)) {
-      return res.status(400).json({ error: 'entity_type must be institution or politician' });
+    if (!['institution', 'politician', 'in_investor'].includes(entity_type)) {
+      return res.status(400).json({ error: 'entity_type must be institution, politician or in_investor' });
     }
     if (!entity_ref) return res.status(400).json({ error: 'entity_ref is required' });
 
@@ -191,6 +193,11 @@ router.post('/follow', async (req, res) => {
       const inst = await queryOne('SELECT name, slug FROM institutions WHERE slug = $1', [ref]);
       if (!inst) return res.status(404).json({ error: 'Unknown institution slug' });
       resolvedLabel = inst.name;
+    } else if (entity_type === 'in_investor') {
+      // Indian investors are the curated list — the ref must be one of its slugs.
+      const inv = INVESTOR_BY_SLUG[ref];
+      if (!inv) return res.status(404).json({ error: 'Unknown investor slug' });
+      resolvedLabel = inv.name;
     } else {
       // Normalize politician names to the same key the emitter uses.
       resolvedLabel = label || ref;
@@ -281,6 +288,125 @@ router.delete('/webhooks/:id', async (req, res) => {
     console.error('Webhook delete error:', err);
     res.status(500).json({ error: 'Failed to delete webhook' });
   }
+});
+
+// ─── India: bulk/block deals + insider trades ─────────────────────────────────
+// The Indian side of the two tabs. FEATURES.INDIA_SMART_MONEY gates the fetching and the
+// UI switch; the list routes below simply serve whatever is stored.
+// Dates are selected as text: a DATE read through the driver becomes local midnight and
+// prints as the previous day east of GMT.
+const INDIA_NOTE =
+  'Bulk and block deals are published by NSE the same evening, with the client named as ' +
+  'the exchange reports it. Insider trades are disclosed under SEBI\'s insider-trading ' +
+  'rules, usually within two trading days. India has no equivalent of congressional ' +
+  'trade reports.';
+
+// Tickers the user holds as Indian stocks (same rule as prices: the holding's exchange,
+// else the company reference).
+async function heldIndianTickers(userId) {
+  const rows = await query(
+    `SELECT DISTINCT p.ticker
+       FROM portfolio p LEFT JOIN companies c ON c.ticker = p.ticker
+      WHERE p.user_id = $1
+        AND (upper(coalesce(p.exchange, '')) IN ('NSE', 'BSE')
+             OR (coalesce(p.exchange, '') = '' AND c.country = 'IN'))`,
+    [userId]
+  );
+  return new Set(rows.map((r) => r.ticker));
+}
+
+async function followedInvestors(userId) {
+  const rows = await query(
+    `SELECT entity_ref FROM followed_entities WHERE user_id = $1 AND entity_type = 'in_investor'`,
+    [userId]
+  );
+  return new Set(rows.map((r) => r.entity_ref));
+}
+
+function sendIndiaList(req, res, key, rows, scope) {
+  const limit = Math.min(Number(req.query.limit) || 50, 200);
+  if (isTeaser(req)) {
+    return res.json({ [key]: rows.slice(0, TEASER_LIMIT), scope, freshnessNote: INDIA_NOTE,
+      teaser: true, total: rows.length, upgrade: { requiredTier: 'plus', requiredLabel: 'Plus' } });
+  }
+  res.json({ [key]: rows.slice(0, limit), scope, freshnessNote: INDIA_NOTE });
+}
+
+router.get('/india/meta', async (req, res) => {
+  const deals = await queryOne('SELECT count(*)::int AS n, max(deal_date)::text AS latest FROM india_deals');
+  const insiders = await queryOne('SELECT count(*)::int AS n, max(disclosed_at)::text AS latest FROM india_insider_trades');
+  res.json({
+    enabled: FEATURES.INDIA_SMART_MONEY,
+    freshnessNote: INDIA_NOTE,
+    disclaimer: DISCLAIMER,
+    deals: { count: deals.n, latest: deals.latest },
+    insiders: { count: insiders.n, latest: insiders.latest },
+  });
+});
+
+// The curated investors, with how many stored deals each matched and whether the user follows them.
+router.get('/india/investors', async (req, res) => {
+  const counts = await query(
+    `SELECT investor_slug, count(*)::int AS n, max(deal_date)::text AS latest
+       FROM india_deals WHERE investor_slug IS NOT NULL GROUP BY investor_slug`
+  );
+  const bySlug = Object.fromEntries(counts.map((c) => [c.investor_slug, c]));
+  const followed = await followedInvestors(req.user.id);
+  res.json({
+    investors: INDIA_INVESTORS.map((i) => ({
+      slug: i.slug, name: i.name, kind: i.kind,
+      deals: bySlug[i.slug] ? bySlug[i.slug].n : 0,
+      latest_deal: bySlug[i.slug] ? bySlug[i.slug].latest : null,
+      following: followed.has(i.slug),
+    })),
+  });
+});
+
+// scope=mine (default): deals in held Indian stocks + deals by followed investors.
+// scope=all: every stored deal — the whole market, mostly small caps.
+router.get('/india/deals', async (req, res) => {
+  const scope = req.query.scope === 'all' ? 'all' : 'mine';
+  const recent = await query(
+    `SELECT deal_type, deal_date::text AS deal_date, ticker, security_name, client_name, investor_slug, side, quantity, price, value
+       FROM india_deals
+      ORDER BY deal_date DESC, value DESC, id DESC
+      LIMIT $1`,
+    [INDIA_SMART_MONEY.LIST_WINDOW]
+  );
+  let deals = recent;
+  if (scope === 'mine') {
+    const [held, followed] = await Promise.all([heldIndianTickers(req.user.id), followedInvestors(req.user.id)]);
+    deals = recent.filter((d) => held.has(d.ticker) || (d.investor_slug && followed.has(d.investor_slug)));
+  }
+  deals = deals.map((d) => ({ ...d, investor_name: d.investor_slug && INVESTOR_BY_SLUG[d.investor_slug] ? INVESTOR_BY_SLUG[d.investor_slug].name : null }));
+  sendIndiaList(req, res, 'deals', deals, scope);
+});
+
+// scope=mine (default): insider trades in held Indian stocks. scope=all: every stored one.
+router.get('/india/insiders', async (req, res) => {
+  const scope = req.query.scope === 'all' ? 'all' : 'mine';
+  const recent = await query(
+    `SELECT ticker, company, person, category, security_type, mode, side, quantity, value,
+            shares_before, shares_after, pct_before, pct_after, trade_from::text AS trade_from,
+            trade_to::text AS trade_to, intimated_at::text AS intimated_at, disclosed_at::text AS disclosed_at
+       FROM india_insider_trades
+      ORDER BY disclosed_at DESC NULLS LAST, value DESC NULLS LAST, id DESC
+      LIMIT $1`,
+    [INDIA_SMART_MONEY.LIST_WINDOW]
+  );
+  let trades = recent;
+  if (scope === 'mine') {
+    const held = await heldIndianTickers(req.user.id);
+    trades = recent.filter((t) => held.has(t.ticker));
+  }
+  sendIndiaList(req, res, 'trades', trades, scope);
+});
+
+// Manual trigger. Admin only: each run sends a batch of requests to NSE under SenIQ's name.
+router.post('/india/poll', requireAdmin, async (req, res) => {
+  if (!FEATURES.INDIA_SMART_MONEY) return res.status(409).json({ error: 'India smart money is off — set INDIA_SMART_MONEY=1' });
+  const result = await pollIndiaSmartMoney();
+  res.json({ ok: true, result });
 });
 
 // ─── POST /api/smart-money/poll ───────────────────────────────────────────────

@@ -1365,6 +1365,20 @@ let cachedFollows = new Set(); // `${type}:${ref}`
 let openInstSlug = null;
 
 const followKey = (type, ref) => `${type}:${ref}`;
+
+// India side of the two tabs (NSE bulk/block deals + insider trades). The US/India switch
+// is shared by both tabs and only shown when the server has INDIA_SMART_MONEY on.
+let smMarket = 'us';
+let indiaSmartMoneyOn = false;
+let inDealsScope = 'mine';
+let inInsidersScope = 'mine';
+let cachedInInvestors = [];
+let cachedInDeals = [];
+let cachedInInsiders = [];
+let inDealsTeaser = null;
+let inInsidersTeaser = null;
+let inDealsSearchQuery = '';
+let inInsidersSearchQuery = '';
 // Normalize a politician name to the same key the server emitter uses.
 const polKey = (name) => String(name).toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '');
 
@@ -1387,7 +1401,159 @@ function lagDays(a, b) {
 }
 
 async function loadSmartMoney() {
-  await Promise.all([loadFollows(), loadInstitutions(), loadCongress(), loadSmartMoneyMeta()]);
+  await Promise.all([loadFollows(), loadInstitutions(), loadCongress(), loadSmartMoneyMeta(), loadIndiaMeta()]);
+  if (smMarket === 'in') loadIndiaSmartMoney();
+}
+
+// ── India: bulk/block deals + insider trades ──
+// ₹ in crore (1e7) and lakh (1e5), the units Indian readers use.
+function fmtInr(n) {
+  const v = Number(n);
+  if (n == null || !Number.isFinite(v)) return '—';
+  if (v >= 1e7) return `₹${(v / 1e7).toFixed(v >= 1e9 ? 0 : 1)} Cr`;
+  if (v >= 1e5) return `₹${(v / 1e5).toFixed(1)} L`;
+  return `₹${Math.round(v).toLocaleString('en-IN')}`;
+}
+function fmtIndianCount(n) {
+  const v = Number(n);
+  if (n == null || !Number.isFinite(v)) return '—';
+  if (v >= 1e7) return `${(v / 1e7).toFixed(2)} Cr`;
+  if (v >= 1e5) return `${(v / 1e5).toFixed(2)} L`;
+  return Math.round(v).toLocaleString('en-IN');
+}
+
+async function loadIndiaMeta() {
+  try {
+    const meta = await api('/api/smart-money/india/meta');
+    indiaSmartMoneyOn = !!meta.enabled;
+  } catch (err) { indiaSmartMoneyOn = false; }
+  document.querySelectorAll('.market-switch').forEach(el => el.classList.toggle('hidden', !indiaSmartMoneyOn));
+  if (!indiaSmartMoneyOn && smMarket !== 'us') setSmartMoneyMarket('us');
+}
+
+function setSmartMoneyMarket(market) {
+  smMarket = market === 'in' ? 'in' : 'us';
+  document.querySelectorAll('.market-btn').forEach(b => b.classList.toggle('active', b.dataset.market === smMarket));
+  document.querySelectorAll('[data-market-pane]').forEach(el => el.classList.toggle('hidden', el.dataset.marketPane !== smMarket));
+  if (smMarket === 'in') loadIndiaSmartMoney();
+}
+
+async function loadIndiaSmartMoney() {
+  await Promise.all([loadIndiaInvestors(), loadIndiaDeals(), loadIndiaInsiders()]);
+}
+
+async function loadIndiaInvestors() {
+  try {
+    const data = await api('/api/smart-money/india/investors');
+    cachedInInvestors = data.investors || [];
+    renderIndiaInvestors();
+  } catch (err) { console.error('India investors load error:', err); }
+}
+
+function renderIndiaInvestors() {
+  const box = document.getElementById('in-investors');
+  if (!box) return;
+  box.innerHTML = cachedInInvestors.map(i => {
+    const following = cachedFollows.has(followKey('in_investor', i.slug));
+    const title = i.deals ? `${i.deals} deal${i.deals === 1 ? '' : 's'} on record, latest ${fmtDate(i.latest_deal)}` : 'No deals on record yet';
+    return `<button class="congress-follow ${following ? 'following' : ''}" title="${escapeHtml(title)}"
+      onclick="toggleFollow('in_investor','${i.slug}', ${JSON.stringify(i.name).replace(/"/g, '&quot;')}, this)">${following ? '✓' : '+'} ${escapeHtml(i.name)}</button>`;
+  }).join('');
+}
+
+async function loadIndiaDeals() {
+  try {
+    const data = await api(`/api/smart-money/india/deals?scope=${inDealsScope}&limit=200`);
+    cachedInDeals = data.deals || [];
+    inDealsTeaser = data.teaser ? { total: data.total } : null;
+    renderIndiaDeals();
+  } catch (err) { console.error('India deals load error:', err); }
+}
+
+function renderIndiaDeals() {
+  const list = document.getElementById('in-deals-list');
+  if (!list) return;
+  if (cachedInDeals.length === 0) {
+    list.innerHTML = `<div class="empty-state small"><p>${inDealsScope === 'mine' ? 'No bulk or block deals in your Indian holdings or by investors you follow yet. Switch to "All" or follow an investor above.' : 'No bulk or block deals ingested yet.'}</p></div>`;
+    return;
+  }
+  const q = inDealsSearchQuery.toLowerCase();
+  const deals = q
+    ? cachedInDeals.filter(d => `${d.client_name || ''} ${d.investor_name || ''} ${d.ticker || ''} ${d.security_name || ''}`.toLowerCase().includes(q))
+    : cachedInDeals;
+  if (deals.length === 0) {
+    list.innerHTML = `<div class="empty-state small"><p>No deals match “${escapeHtml(inDealsSearchQuery)}”.</p></div>`;
+    return;
+  }
+  list.innerHTML = deals.map(d => {
+    const side = d.side === 'sell' ? 'sell' : 'buy';
+    return `
+      <div class="congress-item">
+        <span class="trade-side ${side}">${side}</span>
+        <div class="congress-main">
+          <div class="congress-pol">${escapeHtml(d.client_name)} <span class="pol-meta">· ${d.deal_type === 'block' ? 'block' : 'bulk'} deal</span>${d.investor_name ? ` <span class="in-tracked">${escapeHtml(d.investor_name)}</span>` : ''}</div>
+          <div class="congress-sub">
+            <span class="ct-ticker">${escapeHtml(d.ticker)}</span> — ${escapeHtml(d.security_name || '')} · ${fmtIndianCount(d.quantity)} shares at ₹${escapeHtml(String(d.price))} · ${fmtInr(d.value)}
+          </div>
+        </div>
+        <div class="congress-dates">traded ${fmtDate(d.deal_date)}</div>
+      </div>`;
+  }).join('');
+  if (inDealsTeaser && !inDealsSearchQuery) {
+    list.insertAdjacentHTML('beforeend', upgradeNote(`Showing ${cachedInDeals.length} of ${inDealsTeaser.total} deals — unlock the full feed on Plus.`));
+  }
+}
+
+async function loadIndiaInsiders() {
+  try {
+    const data = await api(`/api/smart-money/india/insiders?scope=${inInsidersScope}&limit=200`);
+    cachedInInsiders = data.trades || [];
+    inInsidersTeaser = data.teaser ? { total: data.total } : null;
+    renderIndiaInsiders();
+  } catch (err) { console.error('India insider trades load error:', err); }
+}
+
+function renderIndiaInsiders() {
+  const list = document.getElementById('in-insiders-list');
+  if (!list) return;
+  if (cachedInInsiders.length === 0) {
+    list.innerHTML = `<div class="empty-state small"><p>${inInsidersScope === 'mine' ? 'No insider trades disclosed in your Indian holdings yet. Switch to "All" to see every company we track.' : 'No insider trades ingested yet.'}</p></div>`;
+    return;
+  }
+  const q = inInsidersSearchQuery.toLowerCase();
+  const trades = q
+    ? cachedInInsiders.filter(t => `${t.person || ''} ${t.ticker || ''} ${t.company || ''} ${t.category || ''}`.toLowerCase().includes(q))
+    : cachedInInsiders;
+  if (trades.length === 0) {
+    list.innerHTML = `<div class="empty-state small"><p>No insider trades match “${escapeHtml(inInsidersSearchQuery)}”.</p></div>`;
+    return;
+  }
+  list.innerHTML = trades.map(t => {
+    // pledge / other reuse the neutral badge colour
+    const badge = t.side === 'buy' || t.side === 'sell' ? t.side : 'exchange';
+    const lag = lagDays(t.trade_to || t.trade_from, t.disclosed_at);
+    // Insiders also report debentures, warrants and the like — name the security when it is not a share.
+    const unit = !t.security_type || /equity/i.test(t.security_type) ? 'shares' : escapeHtml(t.security_type.toLowerCase());
+    const stake = t.pct_before != null && t.pct_after != null && (t.pct_before || t.pct_after)
+      ? ` · stake ${Number(t.pct_before).toFixed(2)}% → ${Number(t.pct_after).toFixed(2)}%` : '';
+    return `
+      <div class="congress-item">
+        <span class="trade-side ${badge}">${escapeHtml(t.side)}</span>
+        <div class="congress-main">
+          <div class="congress-pol">${escapeHtml(t.person)} <span class="pol-meta">${t.category ? `(${escapeHtml(t.category)})` : ''}${t.mode ? ` · ${escapeHtml(t.mode)}` : ''}</span></div>
+          <div class="congress-sub">
+            <span class="ct-ticker">${escapeHtml(t.ticker)}</span> — ${escapeHtml(t.company || '')}${t.quantity != null ? ` · ${fmtIndianCount(t.quantity)} ${unit}` : ''}${Number(t.value) > 0 ? ` · ${fmtInr(t.value)}` : ''}${stake}
+          </div>
+        </div>
+        <div class="congress-dates">
+          traded ${fmtDate(t.trade_from)}<br>
+          disclosed ${fmtDate(t.disclosed_at)}${lag != null && lag >= 0 ? ` <span class="lag">(+${lag}d)</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+  if (inInsidersTeaser && !inInsidersSearchQuery) {
+    list.insertAdjacentHTML('beforeend', upgradeNote(`Showing ${cachedInInsiders.length} of ${inInsidersTeaser.total} insider trades — unlock the full feed on Plus.`));
+  }
 }
 
 async function loadFollows() {
@@ -1565,11 +1731,17 @@ async function toggleFollow(type, ref, label, btnEl) {
       cachedFollows.delete(key);
       showToast(`Unfollowed ${label}`, 'info');
     } else {
-      await api('/api/smart-money/follow', { method: 'POST', body: JSON.stringify({ entity_type: type, entity_ref: type === 'institution' ? ref : label, label }) });
+      await api('/api/smart-money/follow', { method: 'POST', body: JSON.stringify({ entity_type: type, entity_ref: type === 'politician' ? label : ref, label }) });
       cachedFollows.add(key);
       showToast(`Following ${label}`, 'success');
     }
     renderInstitutions();
+    if (type === 'in_investor') {
+      // Following an Indian investor changes the "mine" list of deals.
+      renderIndiaInvestors();
+      loadIndiaDeals();
+      return;
+    }
     // A follow change affects the congress "mine" scope — refresh it if visible.
     if (!document.getElementById('page-congress')?.classList.contains('hidden')) loadCongress();
   } catch (err) { showToast(err.message, 'error'); }
@@ -2835,12 +3007,18 @@ function renderDashboardSummary() {
 }
 
 function initSmartMoney() {
-  document.querySelectorAll('.scope-btn').forEach(btn => {
+  // Each Mine/All toggle drives its own list; data-scope-for says which (default: congress).
+  document.querySelectorAll('.scope-btn[data-scope]').forEach(btn => {
     btn.addEventListener('click', () => {
-      congressScope = btn.dataset.scope;
-      document.querySelectorAll('.scope-btn').forEach(b => b.classList.toggle('active', b === btn));
-      loadCongress();
+      btn.parentElement.querySelectorAll('.scope-btn').forEach(b => b.classList.toggle('active', b === btn));
+      const target = btn.dataset.scopeFor || 'congress';
+      if (target === 'in-deals') { inDealsScope = btn.dataset.scope; loadIndiaDeals(); }
+      else if (target === 'in-insiders') { inInsidersScope = btn.dataset.scope; loadIndiaInsiders(); }
+      else { congressScope = btn.dataset.scope; loadCongress(); }
     });
+  });
+  document.querySelectorAll('.market-btn').forEach(btn => {
+    btn.addEventListener('click', () => setSmartMoneyMarket(btn.dataset.market));
   });
   const whBtn = document.getElementById('webhook-add-btn');
   if (whBtn) whBtn.addEventListener('click', addWebhook);
@@ -2850,6 +3028,8 @@ function initSmartMoney() {
   // Client-side search filters (no refetch — filters the already-loaded list).
   wireSmartMoneySearch('inst-search', 'inst-search-clear', (v) => { instSearchQuery = v; renderInstitutions(); });
   wireSmartMoneySearch('congress-search', 'congress-search-clear', (v) => { congressSearchQuery = v; renderCongress(); });
+  wireSmartMoneySearch('in-deals-search', 'in-deals-search-clear', (v) => { inDealsSearchQuery = v; renderIndiaDeals(); });
+  wireSmartMoneySearch('in-insiders-search', 'in-insiders-search-clear', (v) => { inInsidersSearchQuery = v; renderIndiaInsiders(); });
 }
 
 // Wire a search input + its clear button to a setter, debounced.

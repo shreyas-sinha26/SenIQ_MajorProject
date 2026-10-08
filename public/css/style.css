@@ -1031,6 +1031,11 @@ tr:hover .ht-info { opacity: 1; }
 .congress-dates .lag { color: var(--amber); }
 .congress-follow { padding: 3px 9px; font-size: .68rem; font-weight: 600; border-radius: 999px; flex-shrink: 0; border: 1px solid var(--glass-brd); background: transparent; color: var(--muted); cursor: pointer; font-family: var(--mono); }
 .congress-follow.following { background: var(--grad); color: #fff; border-color: transparent; }
+/* India side of the Institutions / Congress tabs */
+.market-switch { margin-bottom: 14px; }
+.in-investors { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.in-investors .congress-follow { padding: 4px 11px; }
+.in-tracked { font-size: .68rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(30,64,175,.1); color: var(--electric); font-family: var(--mono); }
 
 /* ═══════════════════════════════════════════════════════════════
    WEBHOOKS
