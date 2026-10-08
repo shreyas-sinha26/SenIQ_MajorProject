@@ -171,10 +171,12 @@ async function generateProNarrative(userId, alert) {
   const { queryOne, execute } = require('../db');
   const facts = buildFacts(alert);
 
+  // The user's limit counts from their own midnight; the global ceiling from midnight UTC.
   const dayStart = `${new Date().toISOString().slice(0, 10)} 00:00:00+00`;
+  const userDay = (await require('./userTime').userDayStart(userId)).toISOString();
   const madeRow = await queryOne(
     "SELECT count(*) c FROM claude_calls WHERE user_id = $1 AND kind = 'alert_narrative' AND created_at >= $2",
-    [userId, dayStart]
+    [userId, userDay]
   );
   const spendRow = await queryOne('SELECT COALESCE(sum(cost_usd),0) s FROM claude_calls WHERE created_at >= $1', [dayStart]);
   const guard = guardCheck({

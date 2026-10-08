@@ -308,7 +308,11 @@ const ONBOARDING = {
 // ships every day; Claude is the upgrade.
 const REPORTS = {
   MODEL: 'claude-haiku-4-5',     // cheapest-viable; Sonnet/Opus reserved for major events later
-  CRON: '30 5 * * *',            // server-scheduled daily (05:30 server time); never user-triggered on demand
+  // Server-scheduled, never user-triggered on demand. The job runs every few minutes and
+  // writes a user's brief once their own clock passes LOCAL_TIME (services/userTime.js).
+  CRON: '*/15 * * * *',
+  LOCAL_TIME: { HOUR: 5, MINUTE: 30 },
+  LOCAL_WINDOW_MINUTES: 180,     // a late start still writes it; the morning email writes it if this never ran
   MAX_OUTPUT_TOKENS: 1800,       // hard per-call output cap
   TOP_HOLDINGS: 12,              // trim the packet to the top-N holdings by exposure
   TOP_EVENTS: 6,                 // and the top-N impact events
@@ -447,14 +451,18 @@ const LLM = {
 // ─── Report emails (scheduled summaries) ─────────────────────
 // Anything that can't wait is an alert; reports are the calm, scheduled read.
 //   Free       → a weekly summary, Sunday evening.
-//   Plus / Pro → the daily brief on weekday mornings, before the user's market opens.
-// "The user's market" is users.home_market, or worked out from what they hold. The job runs
-// every few minutes and sends to whoever is inside their send window and has not had that
-// day's report (report_sends), so a restart or a late start still delivers once.
+//   Plus / Pro → the daily brief on weekday mornings.
+//   Pro        → also an end-of-day report every evening (skipped on a day with no trading
+//                and no new news about the user's holdings).
+// All times are on the USER's clock (users.time_zone; until that is known, the zone of their
+// market — users.home_market, or worked out from what they hold). The job runs every few
+// minutes and sends to whoever is inside their send window and has not had that day's
+// report (report_sends), so a restart or a late start still delivers once.
 const REPORT_EMAIL = {
   CRON: '*/15 * * * *',
   DAILY: { HOUR: 8, MINUTE: 30, WEEKDAYS: [1, 2, 3, 4, 5] },  // local time, Mon–Fri
   WEEKLY: { HOUR: 18, MINUTE: 0, WEEKDAY: 0 },                // local time, Sunday
+  EVENING: { HOUR: 20, MINUTE: 0, TIERS: ['pro'] },           // local time, every day
   SEND_WINDOW_MINUTES: 180,     // how long after the send time a late report still goes out
   MARKETS: {
     IN: { label: 'India', timeZone: 'Asia/Kolkata' },

@@ -183,12 +183,13 @@ async function runSmartMoneyPoll() {
   }
 }
 
-// Daily analyst brief (E5) — server-scheduled only; cost guardrails live in reports.js.
+// Daily analyst brief (E5) — server-scheduled only, on each user's own clock; cost guardrails
+// live in reports.js.
 async function runDailyBriefs() {
   try {
-    console.log(`\n📝 [${new Date().toLocaleTimeString()}] Generating daily briefs...`);
+    // Runs every few minutes; a user's brief is written when their own morning comes.
     const r = await generateDailyBriefs();
-    console.log(`   ✅ Briefs: ${r.users} user(s) — ${r.claude} via Claude, ${r.fallback} via fallback writer`);
+    if (r.due) console.log(`📝 Briefs: ${r.due} written — ${r.claude} via Claude, ${r.fallback} via fallback writer`);
   } catch (err) {
     console.error('Daily brief run error:', err);
     captureException(err);
@@ -247,7 +248,7 @@ function startScheduler() {
   }
 
   tasks.push(cron.schedule(REPORTS.CRON, runDailyBriefs));
-  console.log(`⏰ Daily-brief generator started — ${REPORTS.CRON}`);
+  console.log(`⏰ Daily-brief generator started — ${REPORTS.CRON}, each user at ${String(REPORTS.LOCAL_TIME.HOUR).padStart(2, '0')}:${String(REPORTS.LOCAL_TIME.MINUTE).padStart(2, '0')} their time`);
 
   tasks.push(cron.schedule(QA.THREAD_PURGE_CRON, runThreadPurge));
 
