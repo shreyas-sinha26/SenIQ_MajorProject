@@ -1,4 +1,4 @@
-# Handoff — SenIQ (updated 2026-10-08, evening)
+# Handoff — SenIQ (updated 2026-10-08, night)
 
 **Current state in one paragraph:** v1 (Dashboard → Portfolio → Intelligence → Analytics →
 AI Workspace) and v2 (+ Strategy Builder, Your Strategies, Backtest, Paper Trade, MCP, public
@@ -605,6 +605,8 @@ workflow file is rejected until the token has the `workflow` scope (see §8).
 | `v2.5` | `f5d2605` | same code as v1.5, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
 | `v1.6` | `7af294a` | v1.5 + local FinBERT sentiment (`FINBERT_CLASSIFY=1`), new stories only, re-score script | `npm start` |
 | `v2.6` | `7af294a` | same code as v1.6, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
+| `v1.7` | `898314c` | v1.6 + a commodity word inside a company name ("Senco Gold") no longer tags the commodity, script to remove stored commodity tags that no longer resolve | `npm start` |
+| `v2.7` | `898314c` | same code as v1.7, strategies on | `FEATURES_STRATEGIES=1 PORT=3030 npm start` + strategy engine |
 
 History since the July push (`ac6d217`), newest first:
 ```
@@ -999,6 +1001,13 @@ The immediate queue is the "Next, in order" list at the top. Behind it:
 - **2026-10-08, night:** deleted the merged branches `local-finbert`, `user-time-zones` and
   `india-smart-money-in-reports` on GitHub and locally (each checked as contained in `main`
   first).
+- **2026-10-08, night:** `commodity-company-names` (the "Senco Gold" fix): pull request #6
+  was closed by GitHub when its base `local-finbert` was deleted, so the branch was rebased
+  onto `main` (force-pushed; one conflict, in `handoff.md`) and reopened as pull request #7.
+  Annas merged it himself with `gh pr merge 7 --merge --delete-branch` (merge commit
+  `898314c`) — the session was not permitted to merge or to delete database rows. Tagged
+  `v1.7` + `v2.7` on that commit, tags pushed. The handoff commits after it went straight to
+  `main`.
 - **2026-10-08, evening:** fetched, merged `origin/main` (`ffa4fde`) into
   `hardening-email-reports`, ran `npm test`, pushed the branch and the tags `v1.3` + `v2.3`, and
   opened pull request #2 against `main`, then merged it with a merge commit (`06006bf`). The
