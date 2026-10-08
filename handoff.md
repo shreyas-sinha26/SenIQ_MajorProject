@@ -57,16 +57,19 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ## 3. Current state
 
-- **Git** *(checked)*: on `main`, level with `origin/main`, no other branch, no open pull
-  request. Latest tags **`v1.7` / `v2.7`** on `898314c`. Untracked and never pushed:
-  `samples/` and `.github/` (see §11).
-- **Tests** *(checked 2026-10-08)*: `npm test` passes — 20 files, about 500 checks, offline
+- **Git** *(checked 2026-10-08)*: on `main`, level with `origin/main`, no other branch, no
+  open pull request. `main` is at `d13a560`, the merge of pull request #8 (per-company
+  sentiment), which is **not tagged yet**: the latest tags are still **`v1.7` / `v2.7`** on
+  `898314c`. Untracked and never pushed: `samples/` and `.github/` (see §11).
+- **Tests** *(checked 2026-10-08)*: `npm test` passes — 22 files, 530 checks, offline
   (no database or API calls).
 - **Dev database** *(checked)*: Postgres `seniq`, all 30 migration files applied (latest
   `0029_user_time_zone`). 1,917 articles, 308 events.
 - **Nothing is running.** Nothing is hosted.
 - **Local `.env` switches that differ from the defaults** *(checked)*: `CLAUDE_REPORTS=0`,
-  `INDIA_SMART_MONEY=1`, `FINBERT_CLASSIFY=1`, plus Annas's own `NSE_USER_AGENT`.
+  `INDIA_SMART_MONEY=1`, `FINBERT_CLASSIFY=1`, `COMPANY_SENTIMENT_LLM=ollama` (the local
+  model reads multi-company stories, §8; it needs `ollama serve`, which is **not** running),
+  plus Annas's own `NSE_USER_AGENT`.
 
 ### Next, in order
 
@@ -366,7 +369,7 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   about 100 stored stories and score both methods.
 - FinBERT reads the tone of the whole text, not per company (a market wrap that names a bank
   reads negative for the bank when the market fell). **Partly fixed for new stories
-  (2026-10-08, pull request #8):** `newsRelevance.subjectTickers` stores the reading only
+  (2026-10-08, pull request #8, merged):** `newsRelevance.subjectTickers` stores the reading only
   against the companies a story is about. A roundup headline ("market wrap", "top gainers
   and losers", "stocks to watch" — `NEWS_RELEVANCE.ROUNDUP_PHRASES`) is about none of the
   companies it lists; a broad-market headline (Sensex, Nifty, Wall Street — not sector
@@ -376,7 +379,7 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   this.
   - Stored stories keep their old tags: a dry run of `scripts/retag_roundups.js` found 65
     company tags on 37 stories (of 848). `--write` has not been run.
-- **Per-company reading (2026-10-08, pull request #8; `services/targetedSentiment.js`).** A new
+- **Per-company reading (2026-10-08, pull request #8, merged; `services/targetedSentiment.js`).** A new
   story naming two or more companies is read once per company. Step 1: FinBERT reads each
   company from the sentences and clauses that name it (clauses end at "while", "but"… —
   `TARGETED.CLAUSE_BREAKS`); when every company sits in the same units the whole-text
@@ -416,8 +419,10 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
     rule-tuning, but they have now been used to choose between these, so they flatter the
     choice a little; fresh labels would be needed for a clean figure. No further tuning is
     planned.
-  - Needs `ollama serve` running with `qwen2.5:7b-instruct-q4_0` pulled. If it is not, the
-    call fails, a warning is logged, and FinBERT's per-company readings stand.
+  - Needs `ollama serve` running with `qwen2.5:7b-instruct-q4_0` pulled. **FinBERT is the
+    fallback when it is not** *(checked 2026-10-08 with Ollama stopped)*: the call fails at
+    once, one warning is logged, and every company keeps FinBERT's per-company reading. No
+    tag is removed and the pipeline run carries on.
   - Single-company stories never reach the model: FinBERT alone matched 21–22 of 35 there.
   - **Stored stories re-read (2026-10-08):** `reread_companies.js --write` updated 257
     readings on 140 multi-company stories (226 by the local model, none removed). Old rows:
@@ -603,9 +608,10 @@ Changes made by hand to the dev database on 2026-10-08, with backups in `samples
 
 Pull request #6 was closed by GitHub when its base branch was deleted; #7 replaced it.
 
-**Pull request #8** (`per-company-sentiment`, commit `a52518c`) is open, **not merged, not
-tagged**: roundups as market stories, per-company sentiment, the local-model step and the
-labelling scripts. `main` does not have it until Annas merges.
+**Pull request #8** (`per-company-sentiment`) was merged on 2026-10-08 as `d13a560`, at
+Annas's request from a session, and the branch deleted: roundups as market stories,
+per-company sentiment, the local-model step and the labelling scripts. **Not tagged** — the
+next pair would be `v1.8` / `v2.8` on `d13a560`.
 
 ---
 
