@@ -16,18 +16,16 @@ report) = `308b1bc` = **`v1.4` / `v2.4`**; **#4** (India deals and insider trade
 and the brief) = `f5d2605` = **`v1.5` / `v2.5`**; **#5** (local FinBERT sentiment) = `7af294a` = **`v1.6` / `v2.6`**.
 `npm test` is green on `7af294a`. The dev database is on migration **0029**.
 **#7** (the "Senco Gold" fix: a commodity word inside a company name no longer tags the
-commodity) is **open, not merged** — ready to merge: rebased onto `main`, no conflicts,
-`npm test` green. It replaces #6, which GitHub closed by itself when `local-finbert` was
-deleted. Annas is to merge it (the session was not allowed to), then delete the branch.
+commodity) is merged = `898314c`, **not tagged**. It replaces #6, which GitHub closed by
+itself when `local-finbert` was deleted. `npm test` was green on the branch before the merge.
 **Every merged branch has been deleted**, on GitHub and locally (`hardening-email-reports`,
-`user-time-zones`, `india-smart-money-in-reports`, `local-finbert`); only `main` and
-`commodity-company-names` remain. See the sections below, newest first.
-- **The working folder is on `commodity-company-names`**, not `main`. After #7 is merged:
-  `git checkout main && git pull`.
-- **Still to do by Annas:** remove the 41 stored commodity tags that no longer resolve —
-  `node scripts/retag_commodities.js` to look, then
-  `node scripts/retag_commodities.js --write --backup samples/removed-commodity-tags-2026-10-08.json`.
-  Details in the FinBERT section below ("Seen in the trial, fixed for new stories").
+`user-time-zones`, `india-smart-money-in-reports`, `local-finbert`,
+`commodity-company-names`); only `main` remains, and the working folder is on it. See the
+sections below, newest first.
+- **Stored commodity tags cleaned (Annas ran it):** `scripts/retag_commodities.js --write`
+  removed the 41 tags that no longer resolve; 87 commodity tags remain and a dry run now
+  finds none. Removed rows are saved in `samples/removed-commodity-tags-2026-10-08.json`
+  (untracked).
 - Local `.env` now has `CLAUDE_REPORTS=0`, `INDIA_SMART_MONEY=1`, `FINBERT_CLASSIFY=1` and
   Annas's own `NSE_USER_AGENT`. None of these are the defaults.
 
@@ -143,16 +141,16 @@ router. Indian prices now work through Yahoo; the Upstox token is still unused.
   by "Ltd"/"Inc", or a Capitalised word right after another Capitalised word in a
   sentence-case line ("Thangam Gold shares…"). Real gold/silver/oil headlines still resolve,
   and "Senco Gold falls as gold prices hit a record" still counts for gold.
-  - **Stored stories keep their old tags until Annas runs the clean-up.** A dry run on
-    2026-10-08 found 41 of 128 stored commodity tags that today's resolver would not give: 5
-    Senco Gold under XAU, 6 "Goldman"-type under XAU, and 30 where the commodity is only
-    mentioned in the summary (the older headline-only rule). One of the 41 is arguably a real
-    gold story whose headline never says gold (#3903, "India swings to premium on price
-    retreat"). `node scripts/retag_commodities.js` lists them (dry run);
-    `--write --backup samples/removed-commodity-tags-2026-10-08.json` saves and removes them.
-    **Not run with `--write` yet** — the session could not delete from the database, so Annas
-    is to run it. It removes tags only; alerts, briefs and outcomes already made are not
-    re-made.
+  - **Stored tags were cleaned the same night.** A story is tagged once, when stored, so the
+    fix alone left old tags in place. `node scripts/retag_commodities.js` (dry run) lists
+    stored commodity tags today's resolver would not give; `--write --backup <file>` saves
+    and removes them. Annas ran it: 41 of 128 removed — 5 Senco Gold under XAU, 6
+    "Goldman"-type under XAU, and 30 where the commodity is only mentioned in the summary
+    (the older headline-only rule). One of the 41 was arguably a real gold story whose
+    headline never says gold (#3903, "India swings to premium on price retreat"). Backup:
+    `samples/removed-commodity-tags-2026-10-08.json`. Tags only — alerts, briefs and
+    outcomes already made from them were not re-made. Run the script again after any later
+    change to the commodity rules.
   - **Limits:** a Title Case Headline gives no capital-letter clue, so an unlisted name there
     ("Xyz Gold Hits Upper Circuit") still tags the commodity — add it to the list when seen.
     Gas utilities (Mahanagar Gas, Gujarat Gas) are not on the list.
