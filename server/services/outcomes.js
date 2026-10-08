@@ -7,10 +7,10 @@
  *  logEventFeatures()  — snapshot, per event, the features that drove our decision
  *                        (type, severity, source_count, sentiment, z, max_impact) plus
  *                        the primary ticker's price right now (price_at_event).
- *  resolveOutcomes()   — for events 1–3 days old, capture the later price and compute
- *                        the move; |move| ≥ OUTCOMES.MATERIAL_MOVE_PCT ⇒ "materially
- *                        moved" (the label). Price only resolves where we have a feed
- *                        (US equities w/ Finnhub key + crypto); India equities stay null.
+ *  resolveOutcomes()   — 1 and 3 days after that snapshot, capture the later price and
+ *                        compute the move; |move| ≥ OUTCOMES.MATERIAL_MOVE_PCT ⇒
+ *                        "materially moved" (the label). Price only resolves where
+ *                        priceService has a quote for the ticker.
  *
  * Engagement labels (did the user open/dismiss) live on the alerts table (read/dismissed)
  * and are joined at training time.
@@ -71,7 +71,7 @@ async function resolveOutcomes() {
   const { getQuotes } = require('./priceService');
 
   const rows = await query(
-    `SELECT eo.event_id, eo.primary_ticker, eo.price_at_event, eo.first_seen, eo.price_1d, eo.price_3d,
+    `SELECT eo.event_id, eo.primary_ticker, eo.price_at_event, eo.logged_at, eo.price_1d, eo.price_3d,
             c.asset_class
        FROM event_outcomes eo
        LEFT JOIN companies c ON c.ticker = eo.primary_ticker
@@ -88,7 +88,9 @@ async function resolveOutcomes() {
   for (const r of rows) {
     const cur = quotes[r.primary_ticker] ? quotes[r.primary_ticker].price : null;
     if (cur == null) continue;
-    const ageDays = (now - new Date(r.first_seen).getTime()) / 86_400_000;
+    // Measured from when the starting price was captured, not from when the story first
+    // appeared: an older story logged late would otherwise resolve at once with a 0% move.
+    const ageDays = (now - new Date(r.logged_at).getTime()) / 86_400_000;
     const base = Number(r.price_at_event);
     if (base <= 0) continue;
 

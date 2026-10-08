@@ -9,6 +9,7 @@
 const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne } = require('../db');
 const { authMiddleware } = require('./auth');
+const { requireRecentAuth } = require('../services/sessions');
 const { attachTier, requireTier } = require('../middleware/tier');
 const { generateKey } = require('../services/apiKeys');
 
@@ -38,7 +39,10 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/keys — create a key (Pro). Response carries the full key ONCE.
-router.post('/', requireTier('pro'), async (req, res) => {
+router.post('/', requireTier('pro'), (req, res, next) => (
+  // A key that can place orders and change holdings needs the password proven recently.
+  (req.body || {}).can_write === true ? requireRecentAuth(req, res, next) : next()
+), async (req, res) => {
   const name = String((req.body || {}).name || '').trim().slice(0, 60) || 'MCP key';
 
   const active = await queryOne(

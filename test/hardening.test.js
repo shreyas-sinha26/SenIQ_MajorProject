@@ -3,31 +3,56 @@
  *   - asyncRouter: a rejected async handler becomes a 500, not a dead process
  *   - safeFetch: private / loopback / metadata addresses are refused
  *   - ticker validation
- *   - authMiddleware: only a live session token for an existing user gets through
+ *   - sessions: only a live server-side session gets through; sign-out, password change,
+ *     idle and absolute limits end it; cross-site writes and stale re-auth are refused
  * Run: node test/hardening.test.js   (also chained into `npm test`)
  */
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://offline:offline@localhost:5432/offline';
 
 const assert = require('assert');
 const express = require('express');
-const jwt = require('jsonwebtoken');
 
-// A stand-in for server/db.js, installed before anything requires the real one.
+// A stand-in for server/db.js, installed before anything requires the real one. It keeps
+// users and sessions in memory and answers the handful of statements sessions.js sends.
 const users = new Map();
+const sessionRows = []; // { id, user_id, token_hash, last_used_at, expires_at, reauth_at, revoked_at }
+const DAY = 86_400_000;
 const dbPath = require.resolve('../server/db');
-require.cache[dbPath] = {
-  id: dbPath, filename: dbPath, loaded: true,
-  exports: {
-    queryOne: async (sql, params) => (/FROM users WHERE id/.test(sql) ? users.get(params[0]) || null : null),
-    query: async () => [],
-    execute: async () => ({ rowCount: 0, rows: [] }),
+const fakeDb = {
+  queryOne: async (sql, params) => {
+    if (/FROM sessions s JOIN users u/.test(sql)) {
+      const idleDays = Number(params[1]);
+      const s = sessionRows.find((r) => r.token_hash === params[0] && !r.revoked_at &&
+        r.expires_at > Date.now() && r.last_used_at > Date.now() - idleDays * DAY);
+      const u = s && users.get(s.user_id);
+      return u ? { id: s.id, user_id: s.user_id, last_used_at: new Date(s.last_used_at), reauth_at: s.reauth_at && new Date(s.reauth_at),
+        email: u.email, name: u.name, subscription_tier: u.subscription_tier, is_admin: u.is_admin, has_password: !!u.password_hash } : null;
+    }
+    if (/INSERT INTO sessions/.test(sql)) {
+      const row = { id: sessionRows.length + 1, user_id: params[0], token_hash: params[1], last_used_at: Date.now(),
+        expires_at: Date.now() + Number(params[2]) * DAY, reauth_at: Date.now(), revoked_at: null };
+      sessionRows.push(row);
+      return { id: row.id };
+    }
+    return /FROM users WHERE id/.test(sql) ? users.get(params[0]) || null : null;
+  },
+  query: async () => [],
+  execute: async (sql, params) => {
+    if (/SET revoked_at = now\(\) WHERE id/.test(sql)) sessionRows.filter((r) => r.id === params[0]).forEach((r) => { r.revoked_at = Date.now(); });
+    else if (/SET revoked_at = now\(\) WHERE user_id/.test(sql)) sessionRows.filter((r) => r.user_id === params[0] && r.id !== params[1]).forEach((r) => { r.revoked_at = Date.now(); });
+    else if (/SET reauth_at/.test(sql)) sessionRows.filter((r) => r.id === params[0]).forEach((r) => { r.reauth_at = Date.now(); });
+    else if (/SET last_used_at/.test(sql)) sessionRows.filter((r) => r.id === params[0]).forEach((r) => { r.last_used_at = Date.now(); });
+    return { rowCount: 0, rows: [] };
   },
 };
+require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: fakeDb };
 
 const { asyncRouter } = require('../server/middleware/asyncRouter');
 const { isBlockedAddress, assertPublicUrl, UnsafeUrlError } = require('../server/services/safeFetch');
 const { isValidTicker, resolveAsset } = require('../server/services/assetRegistry');
-const { authMiddleware, signSession } = require('../server/routes/auth');
+const { authMiddleware } = require('../server/routes/auth');
+const sessions = require('../server/services/sessions');
+const { SESSION } = require('../server/config');
 
 let passed = 0, failed = 0;
 async function check(name, fn) {
@@ -126,36 +151,100 @@ function appWith(router) {
     assert.strictEqual(isValidTicker(undefined), false);
   });
 
-  console.log('authMiddleware:');
-  const SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+  console.log('sessions:');
   const router = asyncRouter();
+  router.use(sessions.sameOriginGuard);
+  router.post('/login/:id', async (req, res) => { await sessions.startSession(res, Number(req.params.id), req); res.json({ ok: true }); });
   router.get('/me', authMiddleware, (req, res) => res.json({ id: req.user.id, tier: req.userRow.subscription_tier }));
-  const call = (base, token) => fetch(`${base}/me`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-  const now = Math.floor(Date.now() / 1000);
+  router.post('/logout', authMiddleware, async (req, res) => { await sessions.endSession(req.session.id); res.json({ ok: true }); });
+  router.post('/password/:id', authMiddleware, async (req, res) => { await sessions.endUserSessions(req.user.id, req.session.id); res.json({ ok: true }); });
+  router.post('/reauth', authMiddleware, async (req, res) => { await sessions.markReauthenticated(req.session.id); res.json({ ok: true }); });
+  router.post('/sensitive', authMiddleware, sessions.requireRecentAuth, (req, res) => res.json({ ok: true }));
+  const cookieOf = (res) => (res.headers.get('set-cookie') || '').split(';')[0];
+  const call = (base, path, cookie, opts = {}) => fetch(`${base}${path}`, { ...opts, headers: { ...(cookie ? { Cookie: cookie } : {}), ...(opts.headers || {}) } });
+  users.set(1, { email: 'a@b.co', name: 'A', subscription_tier: 'plus', is_admin: false, password_hash: 'x' });
+  users.set(2, { email: 'c@d.co', name: 'C', subscription_tier: 'free', is_admin: false, password_hash: null });
 
   await withServer(appWith(router), async (base) => {
-    await check('a session token for an existing user passes and carries the user row', async () => {
-      users.set(1, { subscription_tier: 'plus', is_admin: false, password_changed_at: null });
-      const res = await call(base, signSession({ id: 1, email: 'a@b.co', name: 'A' }));
+    const signIn = async (id) => cookieOf(await call(base, `/login/${id}`, null, { method: 'POST' }));
+
+    await check('signing in sets an HttpOnly, SameSite=Lax cookie; the table holds only its hash', async () => {
+      const res = await call(base, '/login/1', null, { method: 'POST' });
+      const header = res.headers.get('set-cookie');
+      assert.match(header, new RegExp(`^${SESSION.COOKIE}=[A-Za-z0-9_-]{43};`));
+      assert.ok(/HttpOnly/i.test(header) && /SameSite=Lax/i.test(header) && /Path=\//i.test(header));
+      const raw = cookieOf(res).split('=')[1];
+      const row = sessionRows[sessionRows.length - 1];
+      assert.ok(row.token_hash === sessions.hashId(raw) && row.token_hash !== raw);
+    });
+    await check('a live session passes and carries the user and tier', async () => {
+      const res = await call(base, '/me', await signIn(1));
       assert.strictEqual(res.status, 200);
       assert.deepStrictEqual(await res.json(), { id: 1, tier: 'plus' });
     });
-    await check('no token, a garbage token, and a token for a deleted user are refused', async () => {
-      assert.strictEqual((await call(base, null)).status, 401);
-      assert.strictEqual((await call(base, 'nope')).status, 401);
-      assert.strictEqual((await call(base, signSession({ id: 999, email: 'x@y.co', name: 'X' }))).status, 401);
+    await check('no cookie, a made-up cookie, an old bearer token and a deleted user are refused', async () => {
+      assert.strictEqual((await call(base, '/me')).status, 401);
+      assert.strictEqual((await call(base, '/me', `${SESSION.COOKIE}=${'a'.repeat(43)}`)).status, 401);
+      assert.strictEqual((await call(base, '/me', `${SESSION.COOKIE}=nope`)).status, 401);
+      assert.strictEqual((await call(base, '/me', null, { headers: { Authorization: 'Bearer anything' } })).status, 401);
+      users.set(9, { email: 'x@y.co', name: 'X', subscription_tier: 'free', is_admin: false });
+      const cookie = await signIn(9);
+      users.delete(9);
+      assert.strictEqual((await call(base, '/me', cookie)).status, 401);
     });
-    await check('an OAuth state token (same secret, no user) is not a session', async () => {
-      const state = jwt.sign({ purpose: 'oauth-state', provider: 'google', nonce: 'abc' }, SECRET, { expiresIn: '10m' });
-      assert.strictEqual((await call(base, state)).status, 401);
-      const tagged = jwt.sign({ id: 1, purpose: 'oauth-state' }, SECRET, { expiresIn: '10m' });
-      assert.strictEqual((await call(base, tagged)).status, 401);
+    await check('signing out ends the session on the server: a copy of the cookie stops working', async () => {
+      const cookie = await signIn(1);
+      const copy = cookie;
+      assert.strictEqual((await call(base, '/logout', cookie, { method: 'POST' })).status, 200);
+      assert.strictEqual((await call(base, '/me', copy)).status, 401);
     });
-    await check('a password change ends older sessions and keeps the one issued with it', async () => {
-      const user = { id: 2, email: 'c@d.co', name: 'C' };
-      users.set(2, { subscription_tier: 'free', is_admin: false, password_changed_at: new Date(now * 1000) });
-      assert.strictEqual((await call(base, signSession(user, now - 60))).status, 401);
-      assert.strictEqual((await call(base, signSession(user, now))).status, 200);
+    await check('a password change ends every other session and keeps the one that made it', async () => {
+      const here = await signIn(1);
+      const elsewhere = await signIn(1);
+      assert.strictEqual((await call(base, '/password/1', here, { method: 'POST' })).status, 200);
+      assert.strictEqual((await call(base, '/me', here)).status, 200);
+      assert.strictEqual((await call(base, '/me', elsewhere)).status, 401);
+    });
+    await check('idle for longer than the limit, or past the absolute limit, is signed out', async () => {
+      const idle = await signIn(1);
+      sessionRows[sessionRows.length - 1].last_used_at = Date.now() - (SESSION.IDLE_DAYS * DAY + 60_000);
+      assert.strictEqual((await call(base, '/me', idle)).status, 401);
+      const old = await signIn(1);
+      sessionRows[sessionRows.length - 1].expires_at = Date.now() - 1000;
+      assert.strictEqual((await call(base, '/me', old)).status, 401);
+    });
+    await check('using a session pushes its idle clock back, at most once per touch interval', async () => {
+      const cookie = await signIn(1);
+      const row = sessionRows[sessionRows.length - 1];
+      const fresh = row.last_used_at;
+      await call(base, '/me', cookie);
+      assert.strictEqual(row.last_used_at, fresh);
+      row.last_used_at = Date.now() - (SESSION.IDLE_DAYS - 1) * DAY;
+      await call(base, '/me', cookie);
+      await new Promise((r) => setTimeout(r, 20));
+      assert.ok(Date.now() - row.last_used_at < 5000);
+    });
+    await check('a state-changing request from another site is refused; this site and non-browser callers pass', async () => {
+      const cookie = await signIn(1);
+      const post = (origin) => call(base, '/reauth', cookie, { method: 'POST', headers: origin ? { Origin: origin } : {} });
+      assert.strictEqual((await post('https://evil.example')).status, 403);
+      assert.strictEqual((await post(base)).status, 200);
+      assert.strictEqual((await post(null)).status, 200);
+      assert.strictEqual((await call(base, '/me', cookie, { headers: { Origin: 'https://evil.example' } })).status, 200);
+    });
+    await check('a sensitive action needs the password proven recently, then passes after confirming it', async () => {
+      const cookie = await signIn(1);
+      const row = sessionRows[sessionRows.length - 1];
+      assert.strictEqual((await call(base, '/sensitive', cookie, { method: 'POST' })).status, 200);
+      row.reauth_at = Date.now() - (SESSION.REAUTH_MINUTES + 1) * 60_000;
+      const stale = await call(base, '/sensitive', cookie, { method: 'POST' });
+      assert.strictEqual(stale.status, 403);
+      assert.deepStrictEqual((({ reauth, can_use_password }) => ({ reauth, can_use_password }))(await stale.json()), { reauth: true, can_use_password: true });
+      await call(base, '/reauth', cookie, { method: 'POST' });
+      assert.strictEqual((await call(base, '/sensitive', cookie, { method: 'POST' })).status, 200);
+      const social = await signIn(2);
+      sessionRows[sessionRows.length - 1].reauth_at = 0;
+      assert.strictEqual((await (await call(base, '/sensitive', social, { method: 'POST' })).json()).can_use_password, false);
     });
   });
 

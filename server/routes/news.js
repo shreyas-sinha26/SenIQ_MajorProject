@@ -8,10 +8,13 @@ const { generateDigest, summarizeArticle } = require('../services/summarizer');
 const { isUrl, scrapeArticle } = require('../services/articleScraper');
 const { explainForPortfolio } = require('../services/ollamaExplainer');
 const { scoreTicker } = require('../services/sentimentScoring');
-const { getImpactFeed } = require('../services/impactScoring');
+const { getImpactFeed, collapseStories, companyNamer } = require('../services/impactScoring');
+const { classifyStance } = require('../services/eventTyping');
+const { IMPACT } = require('../config');
 const { attachTier, requireTier } = require('../middleware/tier');
 const { userRateLimit, LIMITS } = require('../middleware/rateLimit');
 const { EXECUTORS: ASK_TOOLS, ScopeError } = require('../services/qaTools');
+const { loadSentimentBreakdown } = require('../services/sentimentBreakdown');
 
 const router = asyncRouter();
 router.use(authMiddleware, attachTier);
@@ -31,7 +34,7 @@ router.get('/feed', async (req, res) => {
 
     // One row per durable event (E1b), with its source count.
     const evs = await query(
-      `SELECT id, title, source, url, last_seen AS published_at, relevance_tier, importance, source_count
+      `SELECT id, title, source, url, last_seen AS published_at, relevance_tier, importance, source_count, primary_ticker
          FROM events
         WHERE relevance_tier <> 'none'
           AND last_seen > now() - ($1 || ' hours')::interval`,
@@ -54,14 +57,17 @@ router.get('/feed', async (req, res) => {
 
     // This user's exposure-weighted impact, to rank the holdings bucket.
     const impacts = await query(
-      `SELECT event_id, impact_score FROM event_portfolio_impact
+      `SELECT event_id, impact_score, exposure_pct, direction FROM event_portfolio_impact
         WHERE user_id = $1 AND event_id = ANY($2)`,
       [req.user.id, ids]
     );
     const impactByEvent = {};
-    for (const i of impacts) impactByEvent[i.event_id] = Number(i.impact_score);
+    const impactRowByEvent = {};
+    for (const i of impacts) { impactByEvent[i.event_id] = Number(i.impact_score); impactRowByEvent[i.event_id] = i; }
+    const levelOf = (score) => (score >= IMPACT.LEVELS.HIGH ? 'high' : score >= IMPACT.LEVELS.MEDIUM ? 'medium' : 'low');
 
     const heldSet = new Set(tickers);
+    const isCompany = await companyNamer();
     const shape = (e) => {
       const rows = sentByEvent[e.id] || [];
       const matched = [...new Set(rows.map(s => s.ticker).filter(t => t !== '__MARKET__'))];
@@ -75,11 +81,21 @@ router.get('/feed', async (req, res) => {
         url: e.url,
         published_at: e.published_at,
         tier: e.relevance_tier,
+        relevance_tier: e.relevance_tier,
+        primary_ticker: e.primary_ticker || null,
+        stance: classifyStance(e.title, isCompany),
         importance: Number(e.importance),
         source_count: Number(e.source_count),
         matchedTickers: matched,
         heldTickers: heldMatch,
         impact: impactByEvent[e.id] ?? null,
+        // The engine's figures for THIS user (null when the story does not touch them):
+        // how much it matters, which way it reads for their holdings, and how much of the
+        // portfolio it reaches. For a market-wide story the reach is weighted, not a
+        // plain share, so the card words it differently.
+        impact_level: impactByEvent[e.id] != null ? levelOf(impactByEvent[e.id]) : null,
+        direction: impactRowByEvent[e.id] ? impactRowByEvent[e.id].direction : null,
+        exposure_pct: impactRowByEvent[e.id] ? Number(impactRowByEvent[e.id].exposure_pct) : null,
         sentiment: {
           label: pick ? pick.sentiment_label : 'neutral',
           score: pick ? Number(pick.sentiment_score) : 0.5,
@@ -95,11 +111,14 @@ router.get('/feed', async (req, res) => {
       b.importance - a.importance || b.source_count - a.source_count ||
       new Date(b.published_at) - new Date(a.published_at);
 
+    // One row per story in each bucket: repeated headlines on the same story fold into the
+    // best-ranked one, which carries the count in `related` (the same folding as the
+    // impact feed on the Dashboard).
     const buckets = {
       // Holdings bucket = holding-tier stories about something THIS user owns.
-      holdings: shaped.filter(a => a.tier === 'holding' && a.heldTickers.length > 0).sort(byImpactThenTime),
-      market: shaped.filter(a => a.tier === 'market').sort(byImportanceThenTime),
-      world: shaped.filter(a => a.tier === 'world').sort(byImportanceThenTime),
+      holdings: collapseStories(shaped.filter(a => a.tier === 'holding' && a.heldTickers.length > 0).sort(byImpactThenTime)),
+      market: collapseStories(shaped.filter(a => a.tier === 'market').sort(byImportanceThenTime)),
+      world: collapseStories(shaped.filter(a => a.tier === 'world').sort(byImportanceThenTime)),
     };
 
     // Flat list (holdings → market → world) keeps the existing search/filter UI working.
@@ -156,37 +175,36 @@ router.get('/sentiment/:ticker/drivers', requireTier('plus'), async (req, res) =
   }
 });
 
+// ─── GET /api/news/sentiment-breakdown ───────────────────────
+// The Analytics page: every holding's score taken apart (article split, confidence,
+// momentum, daily trend) and a portfolio roll-up. Plus and above also get each holding's
+// own 90-day normal and the stories driving the score, as elsewhere.
+router.get('/sentiment-breakdown', async (req, res) => {
+  try {
+    const full = (req.tierCfg && req.tierCfg.sentimentDepth) === 'full';
+    res.json(await loadSentimentBreakdown(req.user.id, { full }));
+  } catch (err) {
+    console.error('Sentiment breakdown error:', err);
+    res.status(500).json({ error: 'Failed to load the sentiment breakdown' });
+  }
+});
+
 // ─── GET /api/news/portfolio-sentiment ───────────────────────
-// Get aggregate sentiment for entire portfolio
+// The Dashboard's figures: one score per holding and one for the portfolio. These are the
+// engine's own numbers — the same breakdown the Analytics page shows (and the same score
+// behind alerts, the report and Ask), so every screen agrees. The portfolio figure is
+// weighted by position size.
 router.get('/portfolio-sentiment', userRateLimit(LIMITS.LIVE_NEWS), async (req, res) => {
   try {
-    const holdings = await query('SELECT ticker FROM portfolio WHERE user_id = $1', [req.user.id]);
-    const tickers = holdings.map(h => h.ticker);
-
-    if (tickers.length === 0) {
-      return res.json({ sentiments: {}, overallScore: 50 });
-    }
-
-    const apiKey = process.env.FINNHUB_API_KEY || '';
-    const allArticles = await fetchNewsForTickers(tickers, apiKey);
-
-    const tickerSentiments = {};
-    for (const ticker of tickers) {
-      const tickerArticles = allArticles.filter(a => a.matchedTickers.includes(ticker));
-      const sentiments = tickerArticles.map(a => a.sentiment);
-      tickerSentiments[ticker] = {
-        ...aggregateSentiment(sentiments),
-        recentHeadline: tickerArticles[0]?.title || 'No recent news'
+    const b = await loadSentimentBreakdown(req.user.id, { full: false });
+    const sentiments = {};
+    for (const h of b.holdings) {
+      sentiments[h.ticker] = {
+        score: h.score / 100, label: h.label, count: h.articles,
+        recentHeadline: h.latest_headline || 'No recent news',
       };
     }
-
-    // Overall portfolio score (weighted average)
-    const scores = Object.values(tickerSentiments).filter(s => s.count > 0);
-    const overallScore = scores.length > 0
-      ? Math.round(scores.reduce((sum, s) => sum + s.score, 0) / scores.length * 100)
-      : 50;
-
-    res.json({ sentiments: tickerSentiments, overallScore });
+    res.json({ sentiments, overallScore: b.portfolio.weighted_score ?? 50, overallLabel: b.portfolio.label });
   } catch (err) {
     console.error('Portfolio sentiment error:', err);
     res.status(500).json({ error: 'Failed to analyze portfolio sentiment' });

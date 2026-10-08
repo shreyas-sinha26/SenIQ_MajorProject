@@ -1,14 +1,14 @@
 const { asyncRouter } = require('../middleware/asyncRouter');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const { queryOne } = require('../db');
 const { makeLimiter } = require('../services/slidingWindow');
 const { createToken, consumeToken } = require('../services/authTokens');
 const { sendEmail, emailEnabled } = require('../services/emailService');
-const { AUTH_LIMITS, APP_URL } = require('../config');
+const { AUTH_LIMITS, APP_URL, SESSION } = require('../config');
+const sessions = require('../services/sessions');
+const { authMiddleware } = sessions;
 
 const router = asyncRouter();
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 const isProd = process.env.NODE_ENV === 'production';
 
 // ─── Phase 5: per-IP rate limits on credential endpoints ─────
@@ -30,46 +30,10 @@ function rateLimit(limiter) {
 
 const PROVIDER_LABEL = { google: 'Google', github: 'GitHub' };
 
-// Session tokens carry the second they were issued (iat). A password change stamps the
-// same clock onto users.password_changed_at, and any token issued before it stops working.
 const nowSeconds = () => Math.floor(Date.now() / 1000);
-function signSession(user, iat = nowSeconds()) {
-  return jwt.sign({ id: user.id, email: user.email, name: user.name, iat }, JWT_SECRET, { expiresIn: '7d' });
-}
 
 const validPassword = (p) => typeof p === 'string' && p.length >= AUTH_LIMITS.MIN_PASSWORD_CHARS && p.length <= AUTH_LIMITS.MAX_PASSWORD_CHARS;
 const PASSWORD_RULE = `Password must be ${AUTH_LIMITS.MIN_PASSWORD_CHARS}–${AUTH_LIMITS.MAX_PASSWORD_CHARS} characters`;
-
-// ─── Middleware: Auth Guard ──────────────────────────────────
-// Verifies the token, then checks the account still exists and the token was not issued
-// before the last password change. The row it reads is left on req.userRow so the tier
-// middleware does not have to fetch it again.
-async function authMiddleware(req, res, next) {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'No token provided' });
-  let decoded;
-  try {
-    decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid token' });
-  }
-  // Other tokens are signed with the same secret (the OAuth state token); only a session
-  // token names a user.
-  if (!decoded || decoded.id == null || decoded.purpose) return res.status(401).json({ error: 'Invalid token' });
-  try {
-    const row = await queryOne(
-      'SELECT subscription_tier, is_admin, password_changed_at FROM users WHERE id = $1', [decoded.id]);
-    if (!row) return res.status(401).json({ error: 'Invalid token' });
-    if (row.password_changed_at && (decoded.iat || 0) < Math.floor(new Date(row.password_changed_at).getTime() / 1000)) {
-      return res.status(401).json({ error: 'Session expired — please sign in again' });
-    }
-    req.user = decoded;
-    req.userRow = row;
-    next();
-  } catch (err) {
-    next(err);
-  }
-}
 
 // ─── POST /api/auth/signup ───────────────────────────────────
 router.post('/signup', rateLimit(loginLimiter), async (req, res) => {
@@ -109,8 +73,8 @@ router.post('/signup', rateLimit(loginLimiter), async (req, res) => {
         .catch((err) => console.error('Verification email error:', err.message));
     }
 
-    const token = signSession({ id: created.id, email, name });
-    res.status(201).json({ token, user: { id: created.id, email, name, subscription_tier: 'free', is_admin: false } });
+    await sessions.startSession(res, created.id, req);
+    res.status(201).json({ user: { id: created.id, email, name, subscription_tier: 'free', is_admin: false } });
   } catch (err) {
     console.error('Signup error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -143,10 +107,43 @@ router.post('/login', rateLimit(loginLimiter), async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    const token = signSession(user);
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name, subscription_tier: user.subscription_tier || 'free', is_admin: !!user.is_admin } });
+    await sessions.startSession(res, user.id, req);
+    res.json({ user: { id: user.id, email: user.email, name: user.name, subscription_tier: user.subscription_tier || 'free', is_admin: !!user.is_admin } });
   } catch (err) {
     console.error('Login error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── POST /api/auth/logout ───────────────────────────────────
+// Ends this session on the server, so a copy of its cookie stops working too.
+router.post('/logout', async (req, res) => {
+  try {
+    const s = await sessions.findSession(sessions.readCookie(req, SESSION.COOKIE));
+    if (s) await sessions.endSession(s.id);
+    sessions.clearSessionCookie(res);
+    res.json({ message: 'Signed out' });
+  } catch (err) {
+    console.error('Logout error:', err);
+    sessions.clearSessionCookie(res);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── POST /api/auth/reauth ───────────────────────────────────
+// Confirms the password inside a live session; sensitive actions accept it for
+// SESSION.REAUTH_MINUTES (sessions.requireRecentAuth).
+router.post('/reauth', authMiddleware, rateLimit(loginLimiter), async (req, res) => {
+  try {
+    const { password } = req.body || {};
+    if (typeof password !== 'string' || !password) return res.status(400).json({ error: 'Password is required' });
+    const user = await queryOne('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
+    if (!user || !user.password_hash) return res.status(400).json({ error: 'This account has no password — sign out and sign in again instead.' });
+    if (!(await bcrypt.compare(password, user.password_hash))) return res.status(401).json({ error: 'Password is incorrect' });
+    await sessions.markReauthenticated(req.session.id);
+    res.json({ message: 'Confirmed' });
+  } catch (err) {
+    console.error('Reauth error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -200,10 +197,11 @@ router.post('/change-password', authMiddleware, async (req, res) => {
     }
 
     const hash = await bcrypt.hash(newPassword, 10);
-    // Every other session ends here; this one continues on the fresh token in the reply.
-    const at = nowSeconds();
-    await queryOne('UPDATE users SET password_hash = $1, password_changed_at = to_timestamp($2) WHERE id = $3', [hash, at, req.user.id]);
-    res.json({ message: 'Password updated successfully', token: signSession(user, at) });
+    await queryOne('UPDATE users SET password_hash = $1, password_changed_at = to_timestamp($2) WHERE id = $3', [hash, nowSeconds(), req.user.id]);
+    // Every other session ends here; this one carries on.
+    await sessions.endUserSessions(req.user.id, req.session.id);
+    await sessions.markReauthenticated(req.session.id);
+    res.json({ message: 'Password updated successfully' });
   } catch (err) {
     console.error('Change password error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -252,6 +250,8 @@ router.post('/reset-password', rateLimit(loginLimiter), async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
     await queryOne('UPDATE users SET password_hash = $1, password_changed_at = to_timestamp($2) WHERE id = $3 RETURNING id',
       [hash, nowSeconds(), consumed.user_id]);
+    // Whoever was signed in before the reset is signed out everywhere.
+    await sessions.endUserSessions(consumed.user_id);
     res.json({ message: 'Password updated — you can sign in now.' });
   } catch (err) {
     console.error('Reset password error:', err);
@@ -298,4 +298,4 @@ router.get('/verify-email', async (req, res) => {
   }
 });
 
-module.exports = { router, authMiddleware, signSession };
+module.exports = { router, authMiddleware };

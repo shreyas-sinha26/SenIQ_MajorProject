@@ -689,14 +689,42 @@
 
       <!-- ═══ PAGE: Analytics ═══ -->
       <div id="page-analytics" class="page hidden">
+        <!-- The headline: one number, said in words -->
+        <section class="an-summary glass" id="an-summary">
+          <div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+        </section>
+
         <section class="chart-section glass">
           <div class="section-header">
-            <h2>Sentiment Overview</h2>
-            <span class="impact-subtitle">Sentiment scores across your portfolio holdings</span>
+            <h2>Sentiment by holding</h2>
+            <span class="impact-subtitle">How the news on each holding reads right now, 0 to 100</span>
           </div>
+          <div class="an-legend" id="an-legend"></div>
           <div class="chart-container">
             <canvas id="sentiment-chart"></canvas>
           </div>
+          <p class="an-caption" id="an-chart-caption"></p>
+        </section>
+
+        <section class="an-section">
+          <div class="section-header">
+            <h2>What is behind each score</h2>
+            <span class="impact-subtitle">The parts that make up the number</span>
+          </div>
+          <div class="an-cards" id="an-cards"></div>
+        </section>
+
+        <section class="an-help glass">
+          <div class="section-header"><h2>How to read this page</h2></div>
+          <dl class="an-glossary">
+            <div><dt>Sentiment score</dt><dd>How the recent news on a holding reads, from 0 (all negative) to 100 (all positive). Above 60 counts as positive, below 40 as negative, in between as mixed. Newer articles, more credible sources and clearer readings count for more.</dd></div>
+            <div><dt>Acute window</dt><dd>The score looks at the last 72 hours. An article from this morning weighs more than one from two days ago.</dd></div>
+            <div><dt>Its own normal (baseline)</dt><dd>Each holding's average score over the last 90 days. Some companies always get upbeat coverage, so 70 can be ordinary for one and remarkable for another.</dd></div>
+            <div><dt>σ (z-score)</dt><dd>How far today's score sits from that holding's own normal, in standard deviations. Within ±0.5σ is an ordinary day; beyond ±1σ is unusual for that holding.</dd></div>
+            <div><dt>Momentum</dt><dd>The last 7 days compared with the 7 before: is the coverage getting better, worse, or holding steady?</dd></div>
+            <div><dt>Story contribution</dt><dd>Each story's share of the gap between today's score and normal. ▲ pushed the score up, ▼ pulled it down, and the shares add up to the whole gap.</dd></div>
+            <div><dt>What it is not</dt><dd>A sentiment score describes what is being written. It is not a forecast of where the price goes next.</dd></div>
+          </dl>
         </section>
       </div><!-- /page-analytics -->
 
@@ -716,7 +744,7 @@
         <!-- Ask it anything (E6) -->
         <section class="ask-section animate-in" style="--delay: 2" id="ask-section">
           <div class="section-header">
-            <h2>Ask About Your Portfolio</h2>
+            <h2>Ask SenPal About Your Portfolio</h2>
             <span class="ask-quota" id="ask-quota"></span>
           </div>
           <div class="ask-box glass">
@@ -1168,6 +1196,9 @@
               <input type="checkbox" id="api-key-write">
               <span>Allow this key to save strategies and start or stop paper deployments (virtual money only)</span>
             </label>
+            <div id="api-key-reauth" class="api-key-create hidden">
+              <input type="password" id="api-key-reauth-pw" placeholder="Confirm your password" autocomplete="current-password">
+            </div>
             <div id="api-key-msg" class="profile-msg hidden"></div>
           </div>
         </section>

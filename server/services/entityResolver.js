@@ -207,7 +207,23 @@ function buildResolver(companies, executives) {
     return tickers;
   }
 
+  // What a text is ABOUT, not everything it mentions. When the headline names companies,
+  // those are the subject, and a name that appears only later in the summary is a passing
+  // mention (feed boilerplate such as "...and the latest from Apple") — it is left out. A
+  // headline that names no one falls back to the whole summary.
   function resolve(title = '', summary = '', extra = []) {
+    const full = matchAll(title, summary, extra);
+    const head = matchAll(title, '', extra);
+    if (!head.tickers.length) return full;
+    // The summary's opening sentence usually restates the subject in full ("Strategy Inc.
+    // added 334 bitcoin…"), so a company named there still counts; later sentences do not.
+    const opening = String(summary).split(/(?<=[.!?])\s+/)[0].slice(0, 240);
+    const lead = companiesIn(opening);
+    const tickers = [...new Set([...head.tickers, ...full.tickers.filter((t) => lead.has(t))])];
+    return { tickers, executives: head.executives, sectors: full.sectors };
+  }
+
+  function matchAll(title = '', summary = '', extra = []) {
     const original = `${title} ${summary}`;
     const lower = original.toLowerCase();
     const tickers = companiesIn(original);

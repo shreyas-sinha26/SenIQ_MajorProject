@@ -2,7 +2,7 @@
  * Phase 5 — OAuth sign-in (Google + GitHub), authorization-code flow.
  *
  *   GET /api/auth/oauth/:provider            → 302 to the provider's consent page
- *   GET /api/auth/oauth/:provider/callback   → code exchange → SenIQ JWT → /app#oauth=<jwt>
+ *   GET /api/auth/oauth/:provider/callback   → code exchange → session cookie → /app
  *
  * Design notes:
  * - No SDKs: the exchanges are two fetch() calls per provider (Node ≥18).
@@ -21,7 +21,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { queryOne } = require('../db');
 const { OAUTH, APP_URL } = require('../config');
-const { signSession } = require('./auth');
+const sessions = require('../services/sessions');
 
 const router = asyncRouter();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
@@ -182,6 +182,7 @@ async function upsertOAuthUser(provider, profile) {
           WHERE id = $4 RETURNING id`,
         [provider, profile.sub, profile.avatar, user.id, unproven, Math.floor(Date.now() / 1000)]
       );
+      if (unproven) await sessions.endUserSessions(user.id);
     }
     return user;
   }
@@ -249,10 +250,9 @@ router.get('/:provider/callback', async (req, res) => {
     const profile = await provider.fetchProfile(String(code), redirectUriFor(providerKey));
     const user = await upsertOAuthUser(providerKey, profile);
 
-    // Same session token the password flow issues — everything downstream is identical. It
-    // travels in the URL fragment, which browsers keep out of server logs and Referer headers.
-    const token = signSession(user);
-    res.redirect(`/app#oauth=${encodeURIComponent(token)}`);
+    // The same server-side session the password flow starts; its cookie rides this redirect.
+    await sessions.startSession(res, user.id, req);
+    res.redirect('/app');
   } catch (err) {
     console.error(`OAuth ${providerKey} callback error:`, err.message);
     return failRedirect(res, err.message || 'Sign-in failed — please retry');

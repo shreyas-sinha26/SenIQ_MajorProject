@@ -5,7 +5,9 @@
 
 const assert = require('node:assert');
 const { classifyEventType } = require('../server/services/eventTyping');
-const { impactForEvent } = require('../server/services/impactScoring');
+const { impactForEvent, holdingRegion, coverageMult, tagMarketStories, collapseStories } = require('../server/services/impactScoring');
+const { IMPACT } = require('../server/config');
+const { classifyStance } = require('../server/services/eventTyping');
 const { planDeliveries, inQuietWindow, isPostWatermark, holdingMateriality, typeFactor, storyTokens, regionOf, sameStory, groupStories, regionExposure, scoreStory } = require('../server/services/materiality');
 
 let passed = 0;
@@ -69,6 +71,124 @@ check('sector event touches a holding in that sector (diluted)', () => {
   assert.ok(r.impact < direct.impact, `sector ${r.impact} < direct ${direct.impact}`);
 });
 
+check('a market-wide story ranks below an equally strong story about a sizeable holding', () => {
+  const book = [
+    { ticker: 'TCS', exposure_pct: 25, sector: 'IT', region: 'IN' },
+    { ticker: 'RELIANCE', exposure_pct: 20, sector: 'Energy', region: 'IN' },
+    { ticker: 'AAPL', exposure_pct: 40, sector: 'Technology', region: 'US' },
+    { ticker: 'BTC', exposure_pct: 15, sector: 'Crypto', region: 'GLOBAL' },
+  ];
+  const market = { event_id: 10, event_type: 'macro', sectors: [], last_seen: fresh, tickers: {}, isMacro: true, macroScore: 0.1, region: 'IN' };
+  const direct = { event_id: 11, event_type: 'earnings', sectors: [], last_seen: fresh, tickers: { TCS: { score: 0.1, confidence: 0.9 } } };
+  const m = impactForEvent(market, book, {}, now);
+  const d = impactForEvent(direct, book, {}, now);
+  assert.ok(d.impact > m.impact, `direct ${d.impact} > market ${m.impact}`);
+  // It reaches only the India-listed holdings (45%), at the market-wide relevance.
+  assert.strictEqual(m.exposure_pct, Math.round(45 * IMPACT.MACRO_BROAD_FACTOR * 10) / 10);
+});
+check('a market-wide story about one country does not touch a portfolio held elsewhere', () => {
+  const usOnly = [{ ticker: 'AAPL', exposure_pct: 100, sector: 'Technology', region: 'US' }];
+  const india = { event_id: 12, event_type: 'macro', sectors: [], last_seen: fresh, tickers: {}, isMacro: true, macroScore: 0.1, region: 'IN' };
+  assert.strictEqual(impactForEvent(india, usOnly, {}, now).impact, 0);
+  assert.ok(impactForEvent({ ...india, region: 'GLOBAL' }, usOnly, {}, now).impact > 0);
+  assert.ok(impactForEvent({ ...india, region: 'US' }, usOnly, {}, now).impact > 0);
+});
+check('a story that reaches a holding only as market news counts at market severity, whatever its type', () => {
+  const book = [{ ticker: 'TCS', exposure_pct: 100, sector: 'IT', region: 'IN' }];
+  const base = { event_id: 13, sectors: [], last_seen: fresh, tickers: {}, isMacro: true, macroScore: 0.9, region: 'IN' };
+  assert.strictEqual(impactForEvent({ ...base, event_type: 'legal' }, book, {}, now).impact, impactForEvent({ ...base, event_type: 'macro' }, book, {}, now).impact);
+});
+check('holdingRegion: stocks by listing, crypto and commodities belong to no one market', () => {
+  assert.strictEqual(holdingRegion({ asset_class: 'equity', exchange: 'NSE' }, null), 'IN');
+  assert.strictEqual(holdingRegion({ asset_class: 'equity', exchange: null }, 'IN'), 'IN');
+  assert.strictEqual(holdingRegion({ asset_class: 'equity', exchange: null }, 'US'), 'US');
+  assert.strictEqual(holdingRegion({ asset_class: 'equity', exchange: null }, undefined), 'US');
+  assert.strictEqual(holdingRegion({ asset_class: 'crypto' }, 'GLOBAL'), 'GLOBAL');
+  assert.strictEqual(holdingRegion({ asset_class: 'commodity' }, undefined), 'GLOBAL');
+});
+check('a market story many outlets cover counts for more, up to a cap', () => {
+  assert.strictEqual(coverageMult(1), 1);
+  assert.strictEqual(coverageMult(undefined), 1);
+  assert.strictEqual(coverageMult(4), 2);
+  assert.strictEqual(coverageMult(8), 2.5);
+  assert.strictEqual(coverageMult(1000), IMPACT.MACRO_COVERAGE_MAX);
+});
+check('related market headlines are grouped, and the big story outranks the lone one', () => {
+  const mk = (id, title, extra = {}) => ({ event_id: id, title, source: 'livemint.com', event_type: 'macro', sectors: [], tickers: {}, isMacro: true, macroScore: 0.1, region: 'IN', source_count: 1, importance: 0.6, last_seen: fresh, first_seen: fresh, ...extra });
+  const events = tagMarketStories([
+    mk(20, 'Sensex crashes 780 points as selloff deepens'),
+    mk(21, 'Why Sensex crashed today: selloff explained'),
+    mk(22, 'Sensex selloff: crash wipes out investor wealth'),
+    mk(23, 'Sensex crash and selloff: what analysts expect'),
+    mk(24, 'Baby products maker gets regulator nod for IPO'),
+    { ...mk(25, 'TCS beats estimates'), isMacro: false, tickers: { TCS: { score: 0.9, confidence: 0.9 } } },
+  ]);
+  assert.deepStrictEqual(events.slice(0, 5).map((e) => e.story_coverage), [4, 4, 4, 4, 1]);
+  assert.strictEqual(events[5].story_coverage, undefined);
+  const book = [{ ticker: 'TCS', exposure_pct: 100, sector: 'IT', region: 'IN' }];
+  const crash = impactForEvent(events[0], book, {}, now);
+  const ipo = impactForEvent(events[4], book, {}, now);
+  assert.strictEqual(crash.exposure_pct, 100 * IMPACT.MACRO_BROAD_FACTOR * 2);
+  assert.ok(Math.abs(crash.impact - ipo.impact * 2) < 0.002, `${crash.impact} vs ${ipo.impact}`);
+});
+check('the feed carries one row per story and counts the headlines folded into it', () => {
+  const row = (title, tier, ticker, impact) => ({ title, source: 'livemint.com', relevance_tier: tier, primary_ticker: ticker, impact_score: impact });
+  const feed = collapseStories([
+    row('TCS Q2 results today: revenue triggers to watch', 'holding', 'TCS', 0.13),
+    row('TCS Q2 results: revenue estimates from the street', 'holding', 'TCS', 0.12),
+    row('Infosys Q2 results: revenue estimates from the street', 'holding', 'INFY', 0.11),
+    row('Sensex crashes 780 points as selloff deepens', 'market', null, 0.10),
+    row('TCS Q2 results preview: revenue triggers and estimates', 'holding', 'TCS', 0.09),
+    row('Why Sensex crashed today: selloff explained', 'market', null, 0.08),
+    row('TCS wins a large cloud deal in Europe', 'holding', 'TCS', 0.07),
+  ]);
+  assert.deepStrictEqual(feed.map((r) => [r.primary_ticker || 'market', r.related]), [['TCS', 2], ['INFY', 0], ['market', 1], ['TCS', 0]]);
+  assert.strictEqual(feed[0].impact_score, 0.13);
+  assert.strictEqual(collapseStories(feed, 2).length, 2);
+});
+check('stance: a reported event, someone\'s view of one, and a round-up are told apart', () => {
+  const isCompany = (text) => /tata motors|reliance|elon musk/i.test(text);
+  const stance = (t) => classifyStance(t, isCompany);
+  for (const t of [
+    'TCS beats estimates as Q2 profit rises 9%', 'Reliance to acquire a 40% stake in a solar firm',
+    'Tata Motors Says It Will Cut 5,000 Jobs', 'Elon Musk says Tesla will open a plant in India',
+    'RBI MPC meeting October 2026: Repo rate hiked by 25 bps to 5.50%', 'SpaceX in Talks to Borrow $40 Billion to Buy Nvidia Chips',
+    'Bitcoin drops over 3% to $83,000',
+  ]) assert.strictEqual(stance(t), 'event', t);
+  for (const t of [
+    'Hunter Biden Says America’s Dollar Is ‘Fake’ Under Fiat System', 'Peter Schiff Warns Bitcoin Vulnerable to Tech Stock Pullback',
+    'Scott Galloway: “Apple Wins by Showing Up Late”', 'TCS Q2 Results 2026 Today: 5 triggers could decide share price\'s next move',
+    'Will SpaceX\'s $40B Nvidia Bet Help or Hurt the Stock After a 16% Run?', 'Prediction: A $1,000 Investment in Qualcomm Today Could Be Worth This Much by 2030',
+    'Why is the stock market down today? 3 factors behind Sensex fall', 'TCS Q2 preview: what to expect',
+    'Should Dell Stock Be Part Of Your Portfolio?', 'ET Alpha Wealth Summit 2.0: The ideas, trends and opportunities', 'Here\'s 1 of the Best AI Stocks Investors Should Consider Buying in October', 'NVIDIA (NVDA) vs. Apple (AAPL): Which Stock Wins the Valuation Race?',
+  ]) assert.strictEqual(stance(t), 'commentary', t);
+  for (const t of [
+    'Stocks to watch: TCS, Paytm, Tata Power, Ola', 'Top stocks to watch today: TCS, Tata Steel, Reliance',
+    'Which dow jones stocks are moving on Wednesday? Top movers', 'Stock Market LIVE: Sensex at day\'s low',
+    'Zacks Earnings Trends Highlights: Micron, Nvidia, Alphabet',
+    'Zacks.com featured highlights Seagate Technology, Western Digital and Dell', 'Dan Ives Names 5 Tech Stocks for 2027',
+  ]) assert.strictEqual(stance(t), 'roundup', t);
+});
+check('commentary and round-ups count for less than the event they talk about', () => {
+  const book = [{ ticker: 'AAPL', exposure_pct: 100, sector: 'Technology', region: 'US' }];
+  const base = impactForEvent({ ...earnings, stance: 'event' }, book, {}, now).impact;
+  const view = impactForEvent({ ...earnings, stance: 'commentary' }, book, {}, now).impact;
+  const list = impactForEvent({ ...earnings, stance: 'roundup' }, book, {}, now).impact;
+  assert.ok(Math.abs(view - base * IMPACT.STANCE_FACTOR.commentary) < 0.002 && Math.abs(list - base * IMPACT.STANCE_FACTOR.roundup) < 0.002);
+  assert.strictEqual(impactForEvent(earnings, book, {}, now).impact, base);
+});
+check('market headlines that share one topic word are one story in the feed; alerts keep the stricter rule', () => {
+  const m = (title) => ({ tokens: storyTokens(title), region: 'IN' });
+  const rbi = m('RBI rate hike: your EMI may not move'), rupee = m('Rupee undervalued, RBI governor says');
+  assert.strictEqual(sameStory(rbi, rupee), false);
+  assert.strictEqual(sameStory(rbi, rupee, { anchors: true }), true);
+  assert.strictEqual(sameStory(m('Fed holds rates'), { ...m('Fed signals a pause'), region: 'US' }, { anchors: true }), false);
+  assert.strictEqual(sameStory(m('Auto sales climb in September'), m('Cement makers lift prices'), { anchors: true }), false);
+  const row = (title, tier, ticker) => ({ title, source: 'livemint.com', relevance_tier: tier, primary_ticker: ticker });
+  const feed = collapseStories([row('RBI rate hike: your EMI may not move', 'market', null), row('Rupee undervalued, RBI governor says', 'market', null),
+    row('RBI fines TCS over a filing lapse', 'holding', 'TCS'), row('RBI clears payments licence for Tata Consultancy', 'holding', 'TCS')]);
+  assert.deepStrictEqual(feed.map((r) => r.related), [1, 0, 0]);
+});
 check('unrelated holding gets zero impact', () => {
   const r = impactForEvent(earnings, [{ ticker: 'XOM', exposure_pct: 100, sector: 'Energy' }], {}, now);
   assert.strictEqual(r.impact, 0);
