@@ -64,10 +64,15 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   open pull request *(checked 2026-10-09)*. Latest tags **`v1.12` / `v2.12`** on `d9ec9df`, the merge of pull request #13
   (IPO Watch; the tag also takes in pull request #12, the curated coins, which was merged untagged). The commits after it on
   `main` are handoff notes and the README's "latest tag" line. Untracked and never pushed: `samples/` and `.github/` (see §11).
+  **Open: pull request #14, branch `paper-ledger`** (the paper ledger, §5), pushed 2026-10-09 and
+  not merged. It is to be tagged **`v2.13` only**, with no `v1.13` (Annas's decision: it is
+  strategies-only work).
 - **Tests** *(checked 2026-10-09)*: `npm test` passes — 24 files, 604 checks, offline
-  (no database or API calls).
+  (no database or API calls). On `paper-ledger`: 25 files, 619 checks.
 - **Dev database** *(checked)*: Postgres `seniq`, all 42 migration files applied (latest
-  `0041_ipo_graduation`). 1,960 articles, 334 events (2026-10-08, late).
+  `0041_ipo_graduation`). 1,960 articles, 334 events (2026-10-08, late). `0042_paper_ledger`
+  (on `paper-ledger`) is not applied yet; the next start on that code applies it. The dev
+  database has no paper deployments.
 - **Nothing is running** *(checked late 2026-10-08)*: no dev server, no strategy engine, no
   `ollama serve`. Nothing is hosted. The next `npm start` will have Claude calls on.
 - **Local `.env` switches that differ from the defaults** *(checked)*: `CLAUDE_REPORTS=1` (was `0`
@@ -283,6 +288,22 @@ data tools and strategy actions to API keys (Pro), with one shared rate budget p
 actions need a key created with write access. A clone of the repository has no engine, so
 every strategy route answers "engine offline".
 
+**Paper ledger (pull request #14, not merged).** The Paper Trade page replays a deployment
+each time it is opened and keeps nothing. A daily job (`services/paperLedger.js`) now also
+stores each deployment's fills and its closing value per completed day (`paper_fills`,
+`paper_equity`, migration `0042`), so a fill can be emailed and a later price revision cannot
+rewrite the record. It runs at 01:15 UTC and once 20 seconds after start, only with
+`FEATURES_STRATEGIES=1`, and needs the engine. Rules: completed days only (a bar dated today
+UTC waits); append-only; one mark per deployment per UTC day, and a failed attempt leaves it
+due; a stopped deployment is recorded through its stop date once. Fills at most 3 days old
+when first recorded are emailed, one message per user (Pro, verified, alert emails on); the
+first pass over an older deployment is history and is not emailed. Read at
+`/api/paper/:id/ledger`, `/v1/paper/:id/ledger`, the MCP tool `get_paper_ledger`, and the
+"Recorded ledger" section of each Paper Trade card. Settings: `PAPER` in `server/config.js`.
+The job reads a `fills` list from the engine's replay answer; that is a **local change in
+`strategy-service/`** (`engine/analytics/trades.py`, `service/backtest_runner.py`, `app.py`,
+one new test), not in the repository like the rest of the engine.
+
 ### Where things live
 
 | Area | Files |
@@ -301,7 +322,7 @@ every strategy route answers "engine offline".
 | Reports and email | `services/reportEmails.js`, `reportPdf.js`, `reportInsights.js`, `cardWriter.js`, `eveningReport.js`, `marketSessions.js`, `emailService.js`, `alertNotifier.js`, `alertNarrative.js`, `routes/email.js` |
 | Sign-in and sessions | `routes/auth.js`, `routes/oauth.js`, `services/sessions.js`, `authTokens.js` |
 | Request safety | `middleware/asyncRouter.js`, `rateLimit.js`, `tier.js`, `services/safeFetch.js` |
-| v2 | `routes/strategies.js`, `paper.js`, `mcp.js`, `v1.js`, `apiKeys.js`; `services/strategyClient.js`, `strategyStore.js`, `strategyTools.js`, `strategySpec.js`, `signalHistory.js`, `dataTools.js`, `apiKeyGate.js` |
+| v2 | `routes/strategies.js`, `paper.js`, `mcp.js`, `v1.js`, `apiKeys.js`; `services/strategyClient.js`, `strategyStore.js`, `strategyTools.js`, `strategySpec.js`, `signalHistory.js`, `dataTools.js`, `apiKeyGate.js`, `paperLedger.js` |
 | Strategy engine (local-only) | `strategy-service/app.py`, `service/`, `engine/`, `tests/` |
 | Frontend | `public/index.html`, `js/app.js`, `css/style.css`; landing: `landing.html`, `js/landing.js`, `css/landing.css`; `docs.html` (v2) |
 | Migrations | `server/migrations/` (run on boot) |
@@ -315,6 +336,7 @@ Two migrations share the number `0016`. This is harmless; do not rename an appli
 |---|---|
 | `node scripts/india_smart_money.js poll` | One India poll (deals + up to 60 insider filings) |
 | `node scripts/ipo_watch.js poll \| link \| alias \| symbols \| returns \| retone \| graduate` | IPO Watch jobs by hand (see the file's header) |
+| `node scripts/paper_mark.js [--write] [--force] [--no-email]` | The paper ledger job by hand (v2; needs the engine). Without `--write` it lists what is due |
 | `node scripts/india_smart_money.js history SYMBOL` | Pre-May-2026 insider trades for a symbol |
 | `node scripts/india_smart_money.js import <csv> [--dry-run]` | Load a deal file downloaded by hand |
 | `node scripts/rescore_sentiment.js [--write]` | Re-score stored word-list readings with FinBERT |
@@ -376,6 +398,10 @@ All the write scripts are dry runs without their flag.
 - One PDF report email delivered to Annas, from a phone hotspot.
 - Local FinBERT on new stories; all 1,222 stored readings re-scored.
 - One India poll: 59 filings read, 200 insider trades stored, 218 bulk deals for 2026-10-07.
+- The paper ledger job on 2026-10-09, against a scratch database (since dropped) and the real
+  engine: three backdated deployments (AAPL, RELIANCE on NSE, a stopped MSFT) recorded 28 fills
+  and 471 days on the run after start; each one's last recorded value matched the live replay;
+  the stopped one was closed; the Paper Trade page showed the ledger.
 
 **Never run for real:**
 - Any hosting. Scheduled reports and the India poll only run while the app happens to be up.
@@ -389,6 +415,8 @@ All the write scripts are dry runs without their flag.
 - A full browser click-through of v1 or v2 on any tag from `v1.2` onwards.
 - An India alert from live NSE data.
 - Email through Resend; bounce and complaint handling.
+- A paper fill email actually sent (offline tests only), the 01:15 UTC ledger job firing on
+  its own, and the "replay no longer matches" note on real revised prices.
 
 ---
 
@@ -820,6 +848,11 @@ matched in news strictly and only while held; commodities go from 4 to 15.
 migrations (`0031`–`0041`), `server/services/ipoWatch/`, a tab with an India / US switch, and
 two touches on the news pipeline (company news for newly filed or priced US issues; linking
 and reading IPO stories at the end of each pass). `IPO_PLAN.md` is the full record.
+
+**Pull request #14** (`paper-ledger`) was pushed on 2026-10-09 and is **open**. The paper ledger
+(§5): migration `0042`, `server/services/paperLedger.js`, a scheduler job, three read paths and
+`scripts/paper_mark.js`. After Annas merges it (`gh pr merge 14 --merge --delete-branch`), tag the
+merge commit **`v2.13` only**, then update this section, §3 and the README's "latest tag" line.
 
 ---
 
