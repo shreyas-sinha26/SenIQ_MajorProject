@@ -24,7 +24,7 @@ return 404 and the v2 pages are hidden.
 | **v2** | v1 + Strategy Builder, Your Strategies, Backtest, Paper Trade, MCP server, public REST API (`/v1`), API keys |
 
 Releases are tagged in pairs on the same commit: `v1.N` is that commit run with strategies
-off, `v2.N` with them on. The latest is `v1.10` / `v2.10`.
+off, `v2.N` with them on. The latest is `v1.11` / `v2.11`.
 
 ---
 
