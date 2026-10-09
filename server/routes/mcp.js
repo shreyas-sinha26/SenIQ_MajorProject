@@ -32,6 +32,7 @@ const { callService, flattenDetail, cleanSymbols, replayPaper, MAX_WATCH_SYMBOLS
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
 const { DATA_TOOLS, runDataTool } = require('../services/dataTools');
 const { saveStrategy, deployPaper, stopPaper, strategyToJson, deploymentToJson } = require('../services/strategyStore');
+const { readLedger } = require('../services/paperLedger');
 const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../services/strategySignals');
 
 // Normalize a service reply into an MCP tool result. 422 = pydantic field
@@ -247,6 +248,18 @@ function buildMcpServer(ctx) {
     if (!row) return fail('deployment not found');
 
     return serviceResult(await replayPaper(row));
+  });
+
+  server.registerTool('get_paper_ledger', {
+    description: 'The stored record of a paper deployment: every simulated fill (date, side, quantity, price) and its value at the close of each completed day, as a daily job recorded them. Use for "what did it trade and when" and for the equity history; use get_paper_state for the live position. Simulated, virtual money.',
+    inputSchema: { deployment_id: z.number().int().describe('id from list_paper_deployments') },
+  }, async ({ deployment_id }) => {
+    const limited = rateLimited(lightLimiter, ctx.keyId);
+    if (limited) return limited;
+    const row = await queryOne(
+      'SELECT * FROM paper_deployments WHERE id = $1 AND user_id = $2', [deployment_id, ctx.userId]);
+    if (!row) return fail('deployment not found');
+    return ok({ deployment: deploymentToJson(row), ...(await readLedger(row)) });
   });
 
   // ── SenIQ data tools (shared catalog with /v1) ──

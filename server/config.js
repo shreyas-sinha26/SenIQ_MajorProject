@@ -739,6 +739,23 @@ const STRATEGY_SERVICE = {
   CATALOG_TIMEOUT_MS: 8000,
 };
 
+// ─── Paper ledger (services/paperLedger.js) ──────────────────
+// A daily job replays every paper deployment and stores the fills and the day's closing
+// value. Only completed days are stored: a bar dated today (UTC) may still be trading.
+const PAPER = {
+  // 01:15 UTC: the US close (20:00–21:00 UTC), the NSE close (10:00 UTC) and the crypto
+  // day (ends 00:00 UTC) are all behind it, so every bar dated before today is final.
+  MARK_CRON: '15 1 * * *',
+  MARK_TIMEZONE: 'UTC',
+  BOOT_DELAY_MS: 20000,          // catch-up run after start; a deployment already marked today is skipped
+  // A fill is emailed only if it is this recent when first recorded. Older ones are history
+  // (the first pass over an existing deployment, or the app was off for a week).
+  NOTIFY_FRESH_DAYS: 3,
+  LEDGER_FILLS: 200,             // newest fills a ledger read returns
+  LEDGER_DAYS: 400,              // newest recorded days a ledger read returns
+  EMAIL_SUBJECT_PREFIX: '[SenIQ]',
+};
+
 // ─── OAuth sign-in (Phase 5) ─────────────────────────────────
 // Authorization-code flow, callback at /api/auth/oauth/<provider>/callback.
 // A provider is live only when both its ID and SECRET are set; the frontend asks
@@ -802,4 +819,4 @@ const SESSION = {
   REAUTH_MINUTES: 10,    // how long a password confirmation covers sensitive actions
 };
 
-module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
+module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, STRATEGY_SERVICE, PAPER, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
