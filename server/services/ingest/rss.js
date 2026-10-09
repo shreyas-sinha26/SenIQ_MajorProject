@@ -1,6 +1,7 @@
 /**
  * RSS ingestion (Phase 2b) — Indian financial feeds (Economic Times / LiveMint /
- * Moneycontrol / Business Standard) for ticker-level India news Finnhub misses.
+ * Moneycontrol / Business Standard) for ticker-level India news Finnhub misses, and the
+ * crypto outlets (CoinDesk / Cointelegraph / Decrypt / The Block) for coin news.
  * Dependency-free: a small, forgiving <item> parser (these feeds are plain RSS 2.0).
  * Any feed that errors or times out is simply skipped.
  */

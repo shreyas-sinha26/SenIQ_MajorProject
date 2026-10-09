@@ -190,11 +190,46 @@ console.log('crypto and India coverage:');
 check('every universe coin is filed as crypto and has a price key', () => {
   const { resolveAsset, coingeckoIdFor, NON_EQUITY_ALIASES } = require('../server/services/assetRegistry');
   const coins = companies.filter((c) => c.asset_class === 'crypto').map((c) => c.ticker);
-  assert.strictEqual(coins.length, 25);
+  assert.strictEqual(coins.length, 46);
   assert.deepStrictEqual(coins.filter((t) => resolveAsset(t).assetClass !== 'crypto' || !coingeckoIdFor(t)), []);
   assert.strictEqual(coingeckoIdFor('AAPL'), null);
   // The legacy matcher must not learn "etc" / "near" / "ton" as aliases.
   assert.deepStrictEqual(['ETC', 'NEAR', 'TON', 'UNI'].filter((t) => t in NON_EQUITY_ALIASES), []);
+});
+check('a coin with a distinctive name needs no cue', () => {
+  assert.deepStrictEqual(tk('Zcash and Monero lead privacy rally'), ['XMR', 'ZEC']);
+  assert.deepStrictEqual(tk('Hyperliquid volumes hit a record'), ['HYPE']);
+  assert.deepStrictEqual(tk('Aave votes on a new fee switch'), ['AAVE']);
+  assert.deepStrictEqual(tk('Filecoin and Bittensor slide'), ['FIL', 'TAO']);
+});
+check('a coin named by an everyday word counts only in a crypto story', () => {
+  assert.deepStrictEqual(tk('Jupiter token jumps 12% after buyback vote'), ['JUP']);
+  assert.deepStrictEqual(tk('NASA probe sends new images of Jupiter'), []);
+  assert.deepStrictEqual(tk('Jupiter Wagons wins a Rs 500 crore order'), []);
+  assert.deepStrictEqual(tk('Render leads AI tokens higher'), ['RENDER']);
+  assert.deepStrictEqual(tk('Studios render films faster with new chips'), []);
+  assert.deepStrictEqual(tk('Quant Mutual Fund raises stake in Reliance'), ['RELIANCE']);
+  assert.deepStrictEqual(tk('Quant climbs as banks test its blockchain'), ['QNT']);
+  assert.deepStrictEqual(tk('Pepe Jeans to open 50 stores in India'), []);
+  assert.deepStrictEqual(tk('Pepe memecoin slides 20% in a day'), ['PEPE']);
+  assert.deepStrictEqual(tk('Ondo State governor signs budget'), []);
+  assert.deepStrictEqual(tk('Aerodrome licence granted for Noida airport'), []);
+  assert.deepStrictEqual(tk('Sui Southern Gas posts a quarterly loss'), []);
+  assert.deepStrictEqual(tk('A sui generis ruling from the court'), []);
+  assert.deepStrictEqual(tk('Sui blockchain halts for two hours'), ['SUI']);
+  assert.deepStrictEqual(tk('SUI token unlock worth $100M due Friday'), ['SUI']);
+});
+check('a coin symbol that is also a word counts only in a crypto story', () => {
+  assert.deepStrictEqual(tk('AI HYPE fades as chip stocks slip'), []);
+  assert.deepStrictEqual(tk('HYPE token rallies on Hyperliquid buyback'), ['HYPE']);
+  assert.deepStrictEqual(tk('RAY and INJ lead altcoin gains'), ['INJ', 'RAY']);
+  assert.deepStrictEqual(tk('ICP norms tightened for exporters'), []);
+  assert.deepStrictEqual(tk('CAKE SALE: bakery chains cut prices'), []);
+  assert.deepStrictEqual(tk('PancakeSwap burns 9M CAKE in a week'), ['CAKE']);
+});
+check('the crypto talk may sit in the summary while the headline names the coin', () => {
+  assert.deepStrictEqual(resolve('Robinhood adds Jupiter for US users', 'The Solana DEX aggregator said trading goes live next week.').tickers.sort(), ['HOOD', 'JUP', 'SOL']);
+  assert.deepStrictEqual(resolve('Robinhood adds Jupiter for US users', 'The planet-themed savings product goes live next week.').tickers, ['HOOD']);
 });
 check('GDELT covers every Indian universe name, a capped slice per run, rotating', () => {
   const { INDIA_TICKERS, indiaTerm, indiaBatch } = require('../server/services/ingest/gdelt');

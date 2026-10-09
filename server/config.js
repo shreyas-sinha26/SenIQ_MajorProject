@@ -617,6 +617,12 @@ const INGEST = {
     'https://www.livemint.com/rss/markets',
     'https://www.moneycontrol.com/rss/marketreports.xml',
     'https://www.business-standard.com/rss/markets-106.rss',
+    // Crypto outlets — the only crypto-specific source (Finnhub's crypto category is the
+    // first two of these again). All four checked through rss.js 2026-10-09.
+    'https://www.coindesk.com/arc/outboundfeeds/rss/',
+    'https://cointelegraph.com/rss',
+    'https://decrypt.co/feed',
+    'https://www.theblock.co/rss.xml',
   ],
   REDDIT_SUBREDDITS: ['stocks', 'wallstreetbets', 'cryptocurrency'],
   REDDIT_LIMIT: 25,
