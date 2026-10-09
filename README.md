@@ -259,7 +259,7 @@ scores it.
 - [`ENGINE_PLAN.md`](ENGINE_PLAN.md) — the intelligence engine
 - [`STRATEGY_PLAN.md`](STRATEGY_PLAN.md) — strategies, MCP and the API
 - [`RAG_PLAN.md`](RAG_PLAN.md) — Ask, retrieval and signals
-- [`IPO_PLAN.md`](IPO_PLAN.md) — sentiment for IPOs and small/mid-caps (plan only)
+- [`IPO_PLAN.md`](IPO_PLAN.md) — sentiment for IPOs and small/mid-caps; IPO Watch (Indian and US IPO calendar, opt-in with `IPO_WATCH=1`) is built, the rest is plan only
 - [`DEPLOY.md`](DEPLOY.md) — deployment steps (not yet executed)
 
 ## License
