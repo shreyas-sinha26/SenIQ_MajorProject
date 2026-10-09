@@ -3338,9 +3338,10 @@ async function ysBacktest(id) {
 }
 
 // ─── Paper Trade (Phase 7 — Pro) ─────────────────────────────
-// A deployment = {saved strategy snapshot, symbol, cash, deploy date}. State
-// is a deterministic replay deploy→today through the sim engine, computed on
-// read — nothing stored, nothing to drift.
+// A deployment = {saved strategy snapshot, symbol, cash, deploy date}. Each card
+// shows two things: the live state, a replay deploy→today through the sim engine
+// computed on read; and the ledger, the fills and daily values a daily job has
+// stored from completed days (it loads without the engine).
 let ptInitDone = false;
 
 async function initPaperPage() {
@@ -3441,8 +3442,59 @@ function ptRenderList(list) {
       </div>
       <div class="ys-summary">deployed ${escapeHtml(d.deployed_at)}${d.stopped_at ? ` · stopped ${escapeHtml(d.stopped_at)}` : ''} · paper cash ${Number(d.initial_cash).toLocaleString()}</div>
       <div class="pt-state" id="pt-state-${d.id}"><span class="ys-loading">replaying…</span></div>
+      <details class="pt-ledger" id="pt-ledger-${d.id}"><summary class="ys-loading">loading ledger…</summary></details>
     </div>`).join('');
-  list.forEach(d => ptLoadState(d.id));
+  list.forEach(d => { ptLoadState(d.id); ptLoadLedger(d.id); });
+}
+
+// Recorded equity as a small line: one point per stored day.
+function ptSparkline(points) {
+  if (points.length < 2) return '';
+  const vals = points.map(p => Number(p.equity));
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const W = 600, H = 60, pad = 3;
+  const xy = vals.map((v, i) => {
+    const x = (i / (vals.length - 1)) * W;
+    const y = max === min ? H / 2 : pad + (1 - (v - min) / (max - min)) * (H - 2 * pad);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const up = vals[vals.length - 1] >= vals[0];
+  return `<svg class="pt-spark ${up ? 'pos' : 'neg'}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Recorded equity, ${escapeHtml(points[0].date)} to ${escapeHtml(points[points.length - 1].date)}"><polyline points="${xy}" /></svg>`;
+}
+
+async function ptLoadLedger(id) {
+  const el = document.getElementById(`pt-ledger-${id}`);
+  if (!el) return;
+  try {
+    const data = await api(`/api/paper/${id}/ledger`);
+    const fills = data.fills || [];
+    const days = data.equity || [];
+    const marked = data.last_marked_at ? `checked ${timeAgo(new Date(data.last_marked_at))}` : 'not recorded yet';
+    const parts = [`${fills.length} fill${fills.length === 1 ? '' : 's'}`];
+    if (days.length) parts.push(`${days.length} day${days.length === 1 ? '' : 's'} to ${days[days.length - 1].date}`);
+    parts.push(marked);
+    const rows = fills.map(f => `<tr>
+        <td>${escapeHtml(f.date)}</td>
+        <td class="${f.side === 'BUY' ? 'pos' : 'neg'}">${f.side === 'BUY' ? 'Buy' : 'Sell'}</td>
+        <td>${Number(f.quantity).toLocaleString()}</td>
+        <td>${Number(f.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td>${Number(f.charges).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+      </tr>`).join('');
+    const empty = data.last_marked_at
+      ? 'No fills recorded yet — the strategy has not traded on a completed day.'
+      : 'Nothing recorded yet. The ledger is written once a day, from completed days only.';
+    el.innerHTML = `
+      <summary><span class="material-symbols-outlined">receipt_long</span> Recorded ledger <small>${escapeHtml(parts.join(' · '))}</small></summary>
+      ${data.note ? `<p class="pt-ledger-note">${escapeHtml(data.note)}</p>` : ''}
+      ${data.last_error ? `<p class="pt-ledger-note">Last attempt to record failed: ${escapeHtml(data.last_error)}</p>` : ''}
+      ${ptSparkline(days)}
+      ${fills.length ? `<div class="bt-trades-scroll"><table class="pt-fills">
+        <thead><tr><th>Date</th><th>Side</th><th>Qty</th><th>Price</th><th>Charges</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>` : `<p class="ys-summary">${empty}</p>`}
+      <p class="ys-summary">${escapeHtml(data.basis || '')}</p>`;
+  } catch (err) {
+    el.innerHTML = `<summary class="ys-loading">${escapeHtml(err.message || 'ledger unavailable')}</summary>`;
+  }
 }
 
 async function ptLoadState(id) {

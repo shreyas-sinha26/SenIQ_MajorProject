@@ -11,7 +11,7 @@
 
 const cron = require('node-cron');
 const { query, queryOne, execute } = require('./db');
-const { FEATURES, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH } = require('./config');
+const { FEATURES, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, PAPER } = require('./config');
 const { gatherArticles } = require('./services/ingest');
 const { loadIndex } = require('./services/entityResolver');
 const { analyzeSentiment } = require('./services/sentiment');
@@ -33,6 +33,7 @@ const { generateDailyBriefs } = require('./services/reports');
 const { embedPendingArticles } = require('./services/newsSearch');
 const { purgeOldThreads } = require('./services/askThreads');
 const { runReportEmails } = require('./services/reportEmails');
+const { runPaperMarks } = require('./services/paperLedger');
 const { captureException } = require('./observability');
 const { REPORTS, QA, REPORT_EMAIL } = require('./config');
 
@@ -296,6 +297,21 @@ async function runReportEmailJob() {
   if (r.due) console.log(`📬 Report emails: ${r.sent} sent, ${r.failed} failed`);
 }
 
+// Paper ledger (v2) — record each deployment's fills and closing value for the days that
+// have completed, then email the new fills. A deployment already marked today is skipped.
+async function runPaperMarkJob() {
+  if (!FEATURES.STRATEGIES) return;
+  try {
+    const r = await runPaperMarks();
+    if (!r.due) return;
+    console.log(`\n📒 Paper ledger: ${r.marked} of ${r.due} deployment(s) marked, ${r.fills} fill(s) and ${r.days} day(s) recorded; emails ${r.emails.sent} sent, ${r.emails.skipped} skipped, ${r.emails.failed} failed`);
+    for (const f of r.failed) console.warn(`   ⚠️  deployment ${f.id}: ${f.error}`);
+  } catch (err) {
+    console.error('Paper ledger error:', err);
+    captureException(err);
+  }
+}
+
 function startScheduler() {
   // Collect the cron tasks so graceful shutdown can stop them (SIGTERM on deploy).
   const tasks = [];
@@ -320,6 +336,14 @@ function startScheduler() {
   if (FEATURES.IPO_WATCH) {
     tasks.push(cron.schedule(IPO_WATCH.CRON, runIpoCalendarPoll, { timezone: IPO_WATCH.TIMEZONE }));
     console.log(`⏰ IPO calendar poller started — ${IPO_WATCH.CRON} ${IPO_WATCH.TIMEZONE}`);
+  }
+
+  // Paper ledger: once a day after every market has closed, and once after start — the
+  // engine is our own process, and the app is not always up at the scheduled minute.
+  if (FEATURES.STRATEGIES) {
+    setTimeout(runPaperMarkJob, PAPER.BOOT_DELAY_MS);
+    tasks.push(cron.schedule(PAPER.MARK_CRON, runPaperMarkJob, { timezone: PAPER.MARK_TIMEZONE }));
+    console.log(`⏰ Paper ledger started — ${PAPER.MARK_CRON} ${PAPER.MARK_TIMEZONE}`);
   }
 
   tasks.push(cron.schedule(REPORTS.CRON, runDailyBriefs));
