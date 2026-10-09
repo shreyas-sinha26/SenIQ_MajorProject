@@ -61,10 +61,9 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 ## 3. Current state
 
 - **Git** *(checked 2026-10-08)*: on `main`, level with `origin/main`, no other branch, no
-  open pull request *(checked 2026-10-09)*. Latest tags **`v1.10` / `v2.10`** on `839df81` (pull request #10). After it,
-  **untagged**: pull request #11 (`68ef315`, the listed tier of the company reference and 15
-  commodities); the rest are handoff notes. The next pair would be `v1.11` / `v2.11` on
-  `68ef315`. `IPO_PLAN.md` has an uncommitted edit that no session made — left alone. Untracked and never pushed: `samples/` and `.github/` (see §11).
+  open pull request *(checked 2026-10-09)*. Latest tags **`v1.11` / `v2.11`** on `68ef315`, the merge of pull request #11
+  (the listed tier of the company reference and 15 commodities). The commits after it on
+  `main` are handoff notes and the README's "latest tag" line. `IPO_PLAN.md` has an uncommitted edit that no session made — left alone. Untracked and never pushed: `samples/` and `.github/` (see §11).
 - **Tests** *(checked 2026-10-09)*: `npm test` passes — 23 files, 554 checks, offline
   (no database or API calls).
 - **Dev database** *(checked)*: Postgres `seniq`, all 31 migration files applied (latest
@@ -748,6 +747,7 @@ hand-labelled sheets of (story, company) pairs (§8).
 | `v1.8` / `v2.8` | `d13a560` | #8: per-company sentiment (FinBERT per company, optional local or hosted language model), roundups as market stories, re-read and labelling scripts |
 | `v1.9` / `v2.9` | `55c5fe3` | #9: in-page confirm dialog for the delete and stop buttons; README restored and brought up to date, with the hand-label sentiment results |
 | `v1.10` / `v2.10` | `839df81` | #10: the local model reads every story and its agreement with FinBERT is the confidence; optional fine-tuned FinBERT (off); two-sheet scoring; README results corrected |
+| `v1.11` / `v2.11` | `68ef315` | #11: two-tier company reference (1,839 listed companies: S&P 1500 and Nifty 500), strict matching for held listed names, listed names shielding curated ones, 15 commodities |
 
 Pull request #6 was closed by GitHub when its base branch was deleted; #7 replaced it.
 
@@ -767,7 +767,7 @@ its agreement with FinBERT is the reading's confidence; an optional fine-tuned F
 wired but off; the README's results section now carries both label sheets (§8).
 
 **Pull request #11** (`listed-universe`) was merged on 2026-10-09 as `68ef315`, at Annas's
-request, and the branch deleted. **Not tagged.** The company reference has two tiers (§8):
+request, and the branch deleted. Tagged `v1.11` / `v2.11`. The company reference has two tiers (§8):
 1,839 listed companies (S&P 1500 and Nifty 500) can be searched, held and priced, and are
 matched in news strictly and only while held; commodities go from 4 to 15.
 
