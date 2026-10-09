@@ -154,9 +154,9 @@ cd ~/Downloads/SenIQ_MajorProject && read -s -p "New demo password: " PW && echo
    (CoinDesk, Cointelegraph, Decrypt, The Block). Reddit returns
    nothing without credentials; X is a stub.
 2. **Resolve entities** (`entityResolver.js`): which companies, executives, sectors or
-   commodities a headline names, against a curated universe of 217 instruments (100 US, 57
-   India, 45 crypto, 15 commodities) and 192 dated executives. A second, **listed** tier
-   (1,838 more companies: 1,399 US, 439 India) is matched only for names someone holds — see "Company
+   commodities a headline names, against a curated universe of 218 instruments (100 US, 57
+   India, 46 crypto, 15 commodities) and 192 dated executives. A second, **listed** tier
+   (1,837 more companies: 1,398 US, 439 India) is matched only for names someone holds — see "Company
    reference: two tiers" in §8.
 3. **Grade relevance and cluster** (`newsRelevance.js`): each article is holding / market /
    world / none, decided by the headline. Duplicates across outlets share one cluster. Noise
@@ -501,11 +501,11 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
 
 **Company reference: two tiers (2026-10-09, pull request #11).**
 - `companies.tier` is `curated` or `listed` (migration `0030`). **Curated** = the hand-written
-  `server/data/universe.js` (217: aliases, brands, executives). **Listed** = everything else a
+  `server/data/universe.js` (218: aliases, brands, executives). **Listed** = everything else a
   user may hold, built from published constituent lists into `server/data/listed.json` by
   `scripts/build_listed_universe.js`: symbol, name, name without its corporate tail (`core`),
   sector, and `plain` when the name is a single ordinary English word.
-- **US is in: 1,399 listed companies** (1,400 until Sui took SUI from Sun Communities) = the S&P 1500 (Wikipedia's S&P 500 / 400 / 600 lists,
+- **US is in: 1,398 listed companies** (1,400 until Sui and PancakeSwap took SUI and CAKE) = the S&P 1500 (Wikipedia's S&P 500 / 400 / 600 lists,
   CC BY-SA, taken 2026-10-09) less the 100 already curated.
 - **India is in: 439 listed companies** = the Nifty 500 (file downloaded by Annas from
   niftyindices.com on 2026-10-09, kept as `server/data/sources/nifty500.csv`, gitignored) less
@@ -552,25 +552,26 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   name gets less news than it should; multi-word names in an ALL-CAPS headline are missed; the commodity reading still
   follows the story's tone, not the price direction.
 
-**Crypto: 45 curated coins and a crypto news source (2026-10-09, branch `crypto-kb`).**
+**Crypto: 46 curated coins and a crypto news source (2026-10-09, branch `crypto-kb`).**
 - **News.** The feed had no crypto source: in 2,088 stored stories Bitcoin was in 33
   headlines, Ethereum and Solana in 4 each, most curated coins in none. Four crypto outlets
   now come in through the existing RSS reader (`INGEST.RSS_FEEDS`): CoinDesk, Cointelegraph,
   Decrypt, The Block. One live read gave 112 crypto stories, 68 naming a curated coin
   (Bitcoin 34, Ethereum 17, Solana 11). Finnhub's `news?category=crypto` works on the free
   key but is CoinDesk and Cointelegraph again, so it is not used. No key was bought.
-- **Coins: 45** (were 25). Added Zcash, Hyperliquid, Monero, Hedera, Quant, Bittensor, Ethena,
+- **Coins: 46** (were 25). Added Zcash, Hyperliquid, Monero, Hedera, Quant, Bittensor, Ethena,
   Aave, Ondo, Worldcoin, Internet Computer, Pepe, Jupiter, Algorand, Render, Filecoin,
-  Aerodrome Finance, Injective, Raydium, Sui: CoinGecko's top 100 on 2026-10-09 less stablecoins,
+  Aerodrome Finance, Injective, Raydium, Sui, PancakeSwap: CoinGecko's top 100 on 2026-10-09 less stablecoins,
   wrapped / staked / bridged copies, tokenised funds and gold, and exchange tokens, trading
   $50M+ a day. Hyperliquid is 1.9 years old and was let in by Annas. Each price key was
   confirmed by one live CoinGecko request.
-- **Sui took the symbol SUI from Sun Communities**, at Annas's word: a symbol can belong to
-  one thing, so `listed.json` was rebuilt and that stock left it (1,838 listed, 1,399 US).
-  **PancakeSwap (CAKE) is left out** for the same reason: The Cheesecake Factory keeps CAKE.
-- **Everyday-word coins** (`CRYPTO_NEEDS_CONTEXT` in `entityResolver.js`): sixteen of the new
+- **Sui took the symbol SUI from Sun Communities, and PancakeSwap took CAKE from The
+  Cheesecake Factory**, at Annas's word: a symbol can belong to one thing, so `listed.json`
+  was rebuilt and those two stocks left it (1,837 listed, 1,398 US). PancakeSwap was added
+  after the pipeline run below, so no story is tagged with it yet.
+- **Everyday-word coins** (`CRYPTO_NEEDS_CONTEXT` in `entityResolver.js`): seventeen of the new
   coins have a name or a symbol that is a word, a place or a person (Jupiter, Render, Quant,
-  Pepe, Ondo, Sui; HYPE, RAY, ICP, FIL…). They count only when the story also talks about crypto
+  Pepe, Ondo, Sui; HYPE, RAY, ICP, FIL, CAKE…). They count only when the story also talks about crypto
   (`CRYPTO_CONTEXT`: token, blockchain, DeFi, Bitcoin, Solana… or the coin's own distinctive
   name), anywhere in the headline or summary. The seven word-names also need their capital.
   The older word-coins (Avalanche, Cosmos, Polygon; symbols NEAR, LINK, DOT, UNI, ETC) are
@@ -579,10 +580,10 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   off): 132 new stories stored, all read by FinBERT (Ollama was not running; GDELT returned
   nothing). Coin readings in the database went from 73 to 228. New coins named: Sui 5,
   Zcash 5, Monero 3, Render 2, Hyperliquid 2, Pepe 2; the other fourteen, none yet.
-- **The 20 new coins are inactive in the dev database until this branch is on the checkout
+- **The 21 new coins are inactive in the dev database until this branch is on the checkout
   the server runs from.** Every boot seeds the universe from that checkout's own file and
   switches off curated rows it does not list; a server started from `ipo-watch` did so
-  seconds after the run. Stored stories keep their tags. Sun Communities is off too until then.
+  seconds after the run. Stored stories keep their tags. Sun Communities and The Cheesecake Factory are off too once seeded from this branch.
 - **Not done:** the rest of the top 100 as a listed tier (the listed tier is for companies
   today). The new coins' sentiment has not been looked at.
 - CoinGecko now calls Toncoin "Gram (prev. Toncoin)", symbol GRAM. The curated entry is

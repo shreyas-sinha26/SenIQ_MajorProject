@@ -84,8 +84,8 @@ const COMMODITY_CONTEXT = /\b(prices?|futures|rates?|rall(?:y|ies)|surges?|jumps
 // Coins whose name or symbol is an everyday word, a place or a person — "Jupiter Wagons",
 // "Quant Mutual Fund", "Ondo State", "AI HYPE", "Pepe Jeans", "Sui Southern Gas". They count only when the story
 // also talks about crypto, or names the coin in a way nothing else is named.
-const CRYPTO_NEEDS_CONTEXT = new Set(['HYPE', 'QNT', 'TAO', 'ENA', 'ONDO', 'WLD', 'ICP', 'PEPE', 'JUP', 'ALGO', 'RENDER', 'FIL', 'AERO', 'INJ', 'RAY', 'SUI']);
-const CRYPTO_CONTEXT = /\b(crypto\w*|tokens?|coins?|memecoins?|altcoins?|stablecoins?|blockchains?|defi|web3|on-?chain|dex|staking|airdrops?|mainnet|bitcoin|btc|ethereum|solana|binance|coinbase|hyperliquid|quant network|bittensor|ethena|ondo finance|worldcoin|internet computer|dfinity|algorand|render network|filecoin|aerodrome finance|injective|raydium|sui network)\b/i;
+const CRYPTO_NEEDS_CONTEXT = new Set(['HYPE', 'QNT', 'TAO', 'ENA', 'ONDO', 'WLD', 'ICP', 'PEPE', 'JUP', 'ALGO', 'RENDER', 'FIL', 'AERO', 'INJ', 'RAY', 'SUI', 'CAKE']);
+const CRYPTO_CONTEXT = /\b(crypto\w*|tokens?|coins?|memecoins?|altcoins?|stablecoins?|blockchains?|defi|web3|on-?chain|dex|staking|airdrops?|mainnet|bitcoin|btc|ethereum|solana|binance|coinbase|hyperliquid|quant network|bittensor|ethena|ondo finance|worldcoin|internet computer|dfinity|algorand|render network|filecoin|aerodrome finance|injective|raydium|sui network|pancakeswap)\b/i;
 // Companies whose NAME contains a commodity word. "Senco Gold jumps 8%" is a jeweller's
 // results, not the gold price, so the word inside one of these names never tags the
 // commodity. Most of them are outside the universe — they are listed only to be ruled out.
