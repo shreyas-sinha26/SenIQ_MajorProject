@@ -57,7 +57,7 @@ function escapeRegex(s) {
 
 // Company names that are also ordinary English words — only count them when they
 // appear Capitalized/UPPER in the original text (so "US visa limits" ≠ Visa Inc).
-const AMBIGUOUS = new Set(['visa', 'meta', 'reliance', 'avalanche', 'cosmos', 'polygon']);
+const AMBIGUOUS = new Set(['visa', 'meta', 'reliance', 'avalanche', 'cosmos', 'polygon', 'quant', 'ondo', 'pepe', 'jupiter', 'render', 'aerodrome', 'sui']);
 // Ticker symbols that collide with everyday uppercase text ("PM Modi", "F&O", "Series C",
 // "T-bills", "V-shaped", "CAT 2026", "RTX 5090", ACN = acetonitrile) — never matched as bare symbols; these
 // companies resolve through their names/aliases only.
@@ -81,6 +81,11 @@ const COMMODITY_HEADLINE = {
 // futures, its crop or its trade.
 const COMMODITY_NEEDS_CONTEXT = new Set(['COPPER', 'XPT', 'XPD', 'ALUMINIUM', 'WHEAT', 'CORN', 'SOYBEAN', 'SUGAR', 'COFFEE', 'COTTON', 'COCOA']);
 const COMMODITY_CONTEXT = /\b(prices?|futures|rates?|rall(?:y|ies)|surges?|jumps?|rises?|gains?|falls?|slumps?|slips?|drops?|plunges?|climbs?|output|production|crop|harvest|exports?|imports?|supply|demand|stocks|inventor(?:y|ies)|mcx|ncdex|lme|per (?:tonne|ton|kg|quintal|bushel|pound|ounce))\b/i;
+// Coins whose name or symbol is an everyday word, a place or a person — "Jupiter Wagons",
+// "Quant Mutual Fund", "Ondo State", "AI HYPE", "Pepe Jeans", "Sui Southern Gas". They count only when the story
+// also talks about crypto, or names the coin in a way nothing else is named.
+const CRYPTO_NEEDS_CONTEXT = new Set(['HYPE', 'QNT', 'TAO', 'ENA', 'ONDO', 'WLD', 'ICP', 'PEPE', 'JUP', 'ALGO', 'RENDER', 'FIL', 'AERO', 'INJ', 'RAY', 'SUI', 'CAKE']);
+const CRYPTO_CONTEXT = /\b(crypto\w*|tokens?|coins?|memecoins?|altcoins?|stablecoins?|blockchains?|defi|web3|on-?chain|dex|staking|airdrops?|mainnet|bitcoin|btc|ethereum|solana|binance|coinbase|hyperliquid|quant network|bittensor|ethena|ondo finance|worldcoin|internet computer|dfinity|algorand|render network|filecoin|aerodrome finance|injective|raydium|sui network|pancakeswap)\b/i;
 // Companies whose NAME contains a commodity word. "Senco Gold jumps 8%" is a jeweller's
 // results, not the gold price, so the word inside one of these names never tags the
 // commodity. Most of them are outside the universe — they are listed only to be ruled out.
@@ -351,7 +356,7 @@ function buildResolver(companies, executives) {
   // headline that names no one falls back to the whole summary.
   function resolve(title = '', summary = '', extra = []) {
     const full = matchAll(title, summary, extra);
-    const head = matchAll(title, '', extra);
+    const head = matchAll(title, '', extra, `${title} ${summary}`);
     if (!head.tickers.length) return full;
     // The summary's opening sentence usually restates the subject in full ("Strategy Inc.
     // added 334 bitcoin…"), so a company named there still counts; later sentences do not.
@@ -361,7 +366,9 @@ function buildResolver(companies, executives) {
     return { tickers, executives: head.executives, sectors: full.sectors };
   }
 
-  function matchAll(title = '', summary = '', extra = []) {
+  // `context`: the text searched for crypto talk — the whole story, even when only the
+  // headline is being matched.
+  function matchAll(title = '', summary = '', extra = [], context = null) {
     const original = `${title} ${summary}`;
     const lower = original.toLowerCase();
     const tickers = companiesIn(original);
@@ -376,6 +383,9 @@ function buildResolver(companies, executives) {
         if (inHeadline.has(t)) continue;
         if (!headlineNames(t, String(title))) tickers.delete(t);
       }
+    }
+    if ([...tickers].some((t) => CRYPTO_NEEDS_CONTEXT.has(t)) && !CRYPTO_CONTEXT.test(context || original)) {
+      for (const t of [...tickers]) if (CRYPTO_NEEDS_CONTEXT.has(t)) tickers.delete(t);
     }
     // Executives → their company (key-person events with no ticker in the headline).
     for (const { re, lower: ci, name, ticker } of execRe) {

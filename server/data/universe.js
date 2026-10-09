@@ -196,8 +196,13 @@ const IN = [
   { ticker: 'MAXHEALTH', name: 'Max Healthcare', sector: 'Health Care' },
 ];
 
-// ── Crypto (top ~25) ──
-// coingeckoId = the price key (CoinGecko /simple/price); all 25 checked against the API 2026-10-07.
+// ── Crypto (46) ──
+// coingeckoId = the price key (CoinGecko /simple/price); the first 25 checked against the API
+// 2026-10-07, the 21 from Zcash on 2026-10-09. Those 21 are CoinGecko's top 100 that day less
+// stablecoins, wrapped / staked copies, tokenised funds and exchange tokens, at $50M+ a day.
+// Sui takes the symbol SUI from Sun Communities and PancakeSwap takes CAKE from The Cheesecake
+// Factory (both left out of listed.json, as for any curated symbol).
+// Several names and symbols are everyday words — see CRYPTO_NEEDS_CONTEXT in entityResolver.js.
 const CRYPTO = [
   { ticker: 'BTC', name: 'Bitcoin', coingeckoId: 'bitcoin' }, { ticker: 'ETH', name: 'Ethereum', aliases: ['ether'], coingeckoId: 'ethereum' },
   { ticker: 'USDT', name: 'Tether', coingeckoId: 'tether' }, { ticker: 'BNB', name: 'BNB', aliases: ['binance coin'], coingeckoId: 'binancecoin' },
@@ -212,6 +217,17 @@ const CRYPTO = [
   { ticker: 'ATOM', name: 'Cosmos', coingeckoId: 'cosmos' }, { ticker: 'ETC', name: 'Ethereum Classic', coingeckoId: 'ethereum-classic' },
   { ticker: 'APT', name: 'Aptos', coingeckoId: 'aptos' }, { ticker: 'ARB', name: 'Arbitrum', coingeckoId: 'arbitrum' },
   { ticker: 'NEAR', name: 'NEAR Protocol', coingeckoId: 'near' },
+  { ticker: 'ZEC', name: 'Zcash', coingeckoId: 'zcash' }, { ticker: 'HYPE', name: 'Hyperliquid', coingeckoId: 'hyperliquid' },
+  { ticker: 'XMR', name: 'Monero', coingeckoId: 'monero' }, { ticker: 'HBAR', name: 'Hedera', coingeckoId: 'hedera-hashgraph' },
+  { ticker: 'QNT', name: 'Quant', aliases: ['quant network'], coingeckoId: 'quant-network' }, { ticker: 'TAO', name: 'Bittensor', coingeckoId: 'bittensor' },
+  { ticker: 'ENA', name: 'Ethena', coingeckoId: 'ethena' }, { ticker: 'AAVE', name: 'Aave', coingeckoId: 'aave' },
+  { ticker: 'ONDO', name: 'Ondo', aliases: ['ondo finance'], coingeckoId: 'ondo-finance' }, { ticker: 'WLD', name: 'Worldcoin', coingeckoId: 'worldcoin-wld' },
+  { ticker: 'ICP', name: 'Internet Computer', aliases: ['dfinity'], coingeckoId: 'internet-computer' }, { ticker: 'PEPE', name: 'Pepe', coingeckoId: 'pepe' },
+  { ticker: 'JUP', name: 'Jupiter', coingeckoId: 'jupiter-exchange-solana' }, { ticker: 'ALGO', name: 'Algorand', coingeckoId: 'algorand' },
+  { ticker: 'RENDER', name: 'Render', aliases: ['render network'], coingeckoId: 'render-token' }, { ticker: 'FIL', name: 'Filecoin', coingeckoId: 'filecoin' },
+  { ticker: 'AERO', name: 'Aerodrome Finance', aliases: ['aerodrome'], coingeckoId: 'aerodrome-finance' }, { ticker: 'INJ', name: 'Injective', coingeckoId: 'injective-protocol' },
+  { ticker: 'RAY', name: 'Raydium', coingeckoId: 'raydium' }, { ticker: 'SUI', name: 'Sui', aliases: ['sui network'], coingeckoId: 'sui' },
+  { ticker: 'CAKE', name: 'PancakeSwap', coingeckoId: 'pancakeswap-token' },
 ].map((c) => ({ ...c, sector: 'Crypto', assetClass: 'crypto', exchange: 'CRYPTO', country: 'GLOBAL' }));
 
 // ── Commodities (prices: Yahoo front-month futures, see priceService.COMMODITY_YAHOO) ──
