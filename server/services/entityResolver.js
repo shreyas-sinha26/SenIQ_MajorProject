@@ -156,6 +156,24 @@ function universeRows() {
 // against everyday words, and a loose match here is how "Trent" met "current".
 const LISTED = require('../data/listed.json').companies;
 const LISTED_BY_TICKER = new Map(LISTED.map((c) => [c.ticker, c]));
+// Companies graduated from IPO Watch (the 'ipo' tier of the reference). They are in the
+// table, not the file, so loadIndex reads them in; they are matched as strictly as a listed
+// company. Nobody has checked a one-word name against ordinary words, so each counts as
+// `plain`: only beside a company cue.
+let IPO_TIER = new Map();
+const NAME_TAIL = /[\s,]+(?:incorporated|inc|corporation|corp|company|co|limited|ltd|plc|n\.?v|s\.?a|holdings?|group|trust|the)\.?$/i;
+// "Orion180 Insurance Group Inc." → "Orion180 Insurance": the name without its corporate tail. Pure.
+function coreName(name) {
+  let n = String(name || '').trim();
+  for (let i = 0; i < 3 && NAME_TAIL.test(n); i++) n = n.replace(NAME_TAIL, '').replace(/[\s,&]+$/, '').trim();
+  return n;
+}
+function setIpoTier(rows) {
+  IPO_TIER = new Map((rows || []).map((c) => {
+    const core = coreName(c.name);
+    return [c.ticker, { ticker: c.ticker, name: c.name, core, country: c.country, plain: !/\s/.test(core) }];
+  }));
+}
 const edge = (s) => `(?<![A-Za-z0-9])${escapeRegex(s)}(?![A-Za-z0-9])`;
 // Words that show a capitalised word is being used as a company's name.
 const COMPANY_CUE = "(?:['’]s\\b|\\s+(?:Inc|Corp|Corporation|Co|Ltd|Limited|Holdings|Group|shares?|stock|stocks)\\b)";
@@ -173,7 +191,7 @@ const COMPANY_CUE = "(?:['’]s\\b|\\s+(?:Inc|Corp|Corporation|Co|Ltd|Limited|Ho
  */
 function namesHolding(holding, text) {
   const sym = String(holding.ticker).toUpperCase();
-  const listed = LISTED_BY_TICKER.get(sym);
+  const listed = LISTED_BY_TICKER.get(sym) || IPO_TIER.get(sym);
   if (new RegExp(`(?:\\b(?:NYSE|NASDAQ|Nasdaq|NSE|BSE|AMEX)\\s*:\\s*|\\$)${escapeRegex(sym)}(?![A-Za-z0-9])`).test(text)) return true;
   const bareFrom = !listed ? 1 : listed.country === 'IN' ? 4 : 5;
   // `brand`: an Indian symbol that is the name headlines use, in any capitals ("Paytm").
@@ -423,6 +441,7 @@ async function loadIndex(force = false) {
   const { query } = require('../db');
   const companies = await query("SELECT ticker, name, aliases, sector, asset_class FROM companies WHERE is_active = true AND tier = 'curated'");
   const executives = await query('SELECT full_name, ticker, aliases FROM executives');
+  setIpoTier(await query("SELECT ticker, name, country FROM companies WHERE is_active = true AND tier = 'ipo'"));
   _resolver = buildResolver(companies, executives);
   _loadedAt = Date.now();
   return _resolver;
@@ -463,8 +482,8 @@ async function seedUniverse() {
        FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[]) AS f(t, n, s, e, c)
      ON CONFLICT (ticker) DO UPDATE SET
        name=EXCLUDED.name, sector=EXCLUDED.sector, exchange=EXCLUDED.exchange, country=EXCLUDED.country,
-       is_active=true, updated_at=now()
-     WHERE companies.tier = 'listed'`,
+       is_active=true, tier='listed', updated_at=now()
+     WHERE companies.tier IN ('listed', 'ipo')`,   // a graduated IPO that enters the file joins the listed tier
     [listed.map((c) => c.ticker), listed.map((c) => c.name), listed.map((c) => c.sector), listed.map((c) => c.exchange), listed.map((c) => c.country)]
   );
   await execute(
@@ -493,4 +512,4 @@ async function seedUniverse() {
   console.log(`   🏷️  universe seeded: ${n.c} companies, ${executives.length} executives; ${n.l} more listed`);
 }
 
-module.exports = { buildResolver, namesHolding, resolve, loadIndex, seedUniverse, universeRows, SECTOR_THEMES, AMBIGUOUS, AMBIGUOUS_SYMBOLS };
+module.exports = { buildResolver, namesHolding, coreName, setIpoTier, resolve, loadIndex, seedUniverse, universeRows, SECTOR_THEMES, AMBIGUOUS, AMBIGUOUS_SYMBOLS };

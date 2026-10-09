@@ -11,7 +11,7 @@
 
 const cron = require('node-cron');
 const { query, queryOne, execute } = require('./db');
-const { FEATURES, SMART_MONEY, INDIA_SMART_MONEY } = require('./config');
+const { FEATURES, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH } = require('./config');
 const { gatherArticles } = require('./services/ingest');
 const { loadIndex } = require('./services/entityResolver');
 const { analyzeSentiment } = require('./services/sentiment');
@@ -24,6 +24,10 @@ const { recomputeImpacts } = require('./services/impactScoring');
 const { logEventFeatures, resolveOutcomes } = require('./services/outcomes');
 const { pollSmartMoney } = require('./services/smartMoney');
 const { pollIndiaSmartMoney } = require('./services/smartMoney/india');
+const { pollCalendar } = require('./services/ipoWatch');
+const { linkArticles, linkSymbols, monitoredTickers, graduate } = require('./services/ipoWatch/registry');
+const { resolveReturns, resolveUsOutcomes } = require('./services/ipoWatch/returns');
+const { readPendingStories } = require('./services/ipoWatch/arc');
 const { syncDisclosures } = require('./services/disclosures');
 const { generateDailyBriefs } = require('./services/reports');
 const { embedPendingArticles } = require('./services/newsSearch');
@@ -107,7 +111,11 @@ async function runNewsPipeline() {
     const held = allHoldings.map((h) => ({ ticker: h.ticker, name: h.company_name }));
 
     // 1. Gather raw articles from every enabled source.
-    const { articles: raw, counts } = await gatherArticles(tickers);
+    // IPO Watch: newly filed and priced US issues are nobody's holding yet, so their company
+    // news is asked for alongside. A failure here must not stop the pipeline.
+    let ipoTickers = [];
+    if (FEATURES.IPO_WATCH) ipoTickers = await monitoredTickers().catch(() => []);
+    const { articles: raw, counts } = await gatherArticles(tickers, ipoTickers);
     console.log(`   📰 Fetched ${raw.length} articles ${JSON.stringify(counts)}`);
 
     // 2. Classify + entity-resolve (curated universe + held-holding fallback).
@@ -178,6 +186,16 @@ async function runNewsPipeline() {
     } catch (err) {
       console.warn('   ⚠️  news embedding step failed:', err.message);
     }
+    // 9. IPO Watch: link the new stories to the issues they are about. Never fails the pipeline.
+    if (FEATURES.IPO_WATCH) {
+      try {
+        const ipo = await linkArticles();
+        const tone = await readPendingStories();
+        if (ipo.linked || tone.read) console.log(`   📅 IPO Watch: ${ipo.linked} story link(s) added, ${tone.read} read for tone`);
+      } catch (err) {
+        console.warn('   ⚠️  IPO story linking failed:', err.message);
+      }
+    }
     console.log(`   ✅ Pipeline complete\n`);
   } catch (err) {
     console.error('Pipeline error:', err);
@@ -235,6 +253,31 @@ async function runIndiaSmartMoneyPoll() {
   }
 }
 
+// IPO Watch — the calendar of Indian public issues, once a day.
+async function runIpoCalendarPoll() {
+  if (!FEATURES.IPO_WATCH) return;
+  try {
+    const r = await pollCalendar();
+    console.log(`\n📅 IPO calendar: ${r.stored} issue(s), ${r.gmp + r.gmpHistory} GMP and ${r.subscriptions} subscription reading(s), ${r.outcomes} new outcome(s) stored from ${r.sources} source(s)`);
+    for (const f of r.failed) console.warn(`   ⚠️  ${f.source}: ${f.error}`);
+    // A newly seen issue gets the stories written before we knew of it; a listed one its ticker.
+    const links = await linkArticles({ days: IPO_WATCH.LINK_BACKFILL_DAYS });
+    await readPendingStories();
+    const sym = await linkSymbols();
+    console.log(`   ${links.linked} story link(s) added; ticker found for ${sym.found} of ${sym.due} listed issue(s)${sym.error ? ` (${sym.error})` : ''}`);
+    const ret = await resolveReturns();
+    if (ret.due) console.log(`   returns: ${ret.updated} of ${ret.due} issue(s) updated${ret.error ? ` (${ret.error})` : ''}`);
+    const us = await resolveUsOutcomes();
+    if (us.due) console.log(`   US outcomes: ${us.updated} of ${us.due} issue(s) updated${us.error ? ` (${us.error})` : ''}`);
+    // A listed issue whose ticker a price now confirms joins the company reference.
+    const grad = await graduate();
+    if (grad.graduated || grad.clashes) console.log(`   graduated ${grad.graduated} compan${grad.graduated === 1 ? 'y' : 'ies'} into the reference${grad.clashes ? `; ${grad.clashes} ticker clash(es) skipped` : ''}`);
+  } catch (err) {
+    console.error('IPO calendar poll error:', err);
+    captureException(err);
+  }
+}
+
 // Ask thread retention — drop conversations untouched for QA.THREAD_RETENTION_DAYS.
 async function runThreadPurge() {
   try {
@@ -272,6 +315,11 @@ function startScheduler() {
   if (FEATURES.INDIA_SMART_MONEY) {
     tasks.push(cron.schedule(INDIA_SMART_MONEY.CRON, runIndiaSmartMoneyPoll, { timezone: INDIA_SMART_MONEY.TIMEZONE }));
     console.log(`⏰ India smart-money poller started — ${INDIA_SMART_MONEY.CRON} ${INDIA_SMART_MONEY.TIMEZONE}`);
+  }
+
+  if (FEATURES.IPO_WATCH) {
+    tasks.push(cron.schedule(IPO_WATCH.CRON, runIpoCalendarPoll, { timezone: IPO_WATCH.TIMEZONE }));
+    console.log(`⏰ IPO calendar poller started — ${IPO_WATCH.CRON} ${IPO_WATCH.TIMEZONE}`);
   }
 
   tasks.push(cron.schedule(REPORTS.CRON, runDailyBriefs));

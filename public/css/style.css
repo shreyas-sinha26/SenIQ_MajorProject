@@ -82,6 +82,7 @@ body {
 .hidden { display: none !important; }
 /* v1 build: strategies + API/MCP hidden unless /api/config enables them */
 .no-strategies [data-feature="strategies"] { display: none !important; }
+.no-ipo-watch [data-feature="ipo-watch"] { display: none !important; }
 .view  { min-height: 100vh; }
 .mono  { font-family: var(--mono); }
 
@@ -1775,3 +1776,39 @@ body input::placeholder, body textarea::placeholder { color: #94A3B8; }
 .ni-level { font-size: .68rem; font-weight: 700; color: var(--text); }
 .ni-level.high { color: var(--royal); }
 .ni-level.low { color: var(--muted); font-weight: 600; }
+
+/* ─── IPO Watch ─── */
+.ipo-tbl tbody tr { cursor: default; }
+.ipo-tbl td.mono { white-space: nowrap; }
+.ipo-tbl th, .ipo-tbl td { padding-left: 10px; padding-right: 10px; }
+.ipo-tbl td.mono .ipo-meta { white-space: normal; }
+.ipo-tbl td.mono .ipo-lot { white-space: nowrap; }
+.ipo-name { font-weight: 600; color: var(--text); }
+.ipo-meta { display: block; font-size: .72rem; color: var(--muted); margin-top: 2px; }
+.ipo-stage { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: .7rem; font-weight: 700; font-family: var(--mono); background: rgba(10,37,64,.06); color: var(--muted); white-space: nowrap; }
+.ipo-stage.open { background: var(--royal); color: #fff; }
+.ipo-stage.upcoming { background: rgba(30,64,175,.1); color: var(--royal); }
+.ipo-stage.listed { background: rgba(10,37,64,.1); color: var(--text); }
+.ipo-table-wrap { overflow-x: auto; }
+.ipo-meta-inline { color: var(--muted); font-size: .76rem; }
+.ipo-gmp-up, .ipo-gmp-down { font-size: .62rem; color: var(--muted); }
+.ipo-gmp-up { color: var(--royal); }
+.ipo-tbl tbody tr.ipo-row-click { cursor: pointer; }
+.ipo-tbl tbody tr.ipo-detail:hover { background: none; }
+.ipo-tbl tr.ipo-detail > td { padding: 4px 10px 18px; white-space: normal; }
+.ipo-stories-head { font-size: .82rem; color: var(--muted); margin: 6px 0 4px; }
+.ipo-arc { display: block; width: 100%; max-width: 640px; height: auto; margin: 4px 0 10px; }
+.ipo-arc-grid { stroke: var(--line); stroke-width: 1; }
+.ipo-arc-grid.mid { stroke-dasharray: 3 3; }
+.ipo-arc-mark { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 4; opacity: .6; }
+.ipo-arc-axis { font-size: 10px; fill: var(--muted); font-family: var(--mono); }
+.ipo-arc-line { fill: none; stroke: var(--royal); stroke-width: 1.5; }
+.ipo-arc-dot { fill: var(--royal); }
+.ipo-story-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.ipo-story-list li { display: flex; gap: 10px; align-items: flex-start; font-size: .84rem; }
+.ipo-story-list li .ht-senti-label { min-width: 34px; text-align: center; font-family: var(--mono); flex-shrink: 0; }
+.ipo-story-list a { color: var(--text); text-decoration: none; }
+.ipo-story-list a:hover { text-decoration: underline; }
+.ipo-add { background: none; border: 1px solid var(--glass-brd); border-radius: 999px; padding: 1px 8px; font-size: .68rem; font-weight: 600; color: var(--royal); cursor: pointer; font-family: inherit; }
+.ipo-add:hover { background: rgba(30,64,175,.08); }
+.ipo-add:disabled { opacity: .5; cursor: default; }
