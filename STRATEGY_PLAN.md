@@ -91,7 +91,7 @@ Streamable HTTP endpoint at **`/mcp`** inside the Node app (`server/routes/mcp.j
 fresh server per request. Shipped surface is **read + run only** (kickoff decision; write tools
 like deploy/save are a later, separately-guarded step):
 `list_strategies · validate_strategy · run_backtest · get_signals · list_saved_strategies ·
-list_paper_deployments · get_paper_state`.
+list_paper_deployments · get_paper_state` (and `get_paper_ledger`, 2026-10-09).
 Auth: per-user API key (`Authorization: Bearer seniq_…`), sha256-hashed in `api_keys` (migration
 0015), managed in Profile → API Access (create Pro-gated, shown once; revoke immediate). Tier read
 from DB per request — downgrade shuts keys off instantly. In-memory sliding-window rate limits per
@@ -106,6 +106,30 @@ and a **shared rate budget per key across /v1 and /mcp** (`services/apiKeyGate.j
 limiters; `services/strategyClient.js` shared engine client). Responses carry
 X-RateLimit-Limit/-Remaining; 429 adds Retry-After. Docs: static **`/docs`** page
 (`public/docs.html`), linked from the API Access card.
+
+## Paper ledger — BUILT 2026-10-09
+Paper state used to exist only while someone looked at it: every read replayed deploy→today and
+nothing was kept. That left open question 2 below unanswered, and two gaps: nothing could tell a
+user a fill had happened, and a price the data source revised later rewrote past trades.
+
+- **Store:** SenIQ Postgres (migration `0042`): `paper_fills` (one row per simulated fill) and
+  `paper_equity` (closing value per completed day). The engine stays stateless.
+- **Job:** `services/paperLedger.js`, run by the scheduler at 01:15 UTC (after the US, NSE and
+  crypto closes) and once after start, only when `FEATURES_STRATEGIES=1`. It replays each
+  deployment and stores what is new. By hand: `node scripts/paper_mark.js [--write]`.
+- **Rules:** completed days only (a bar dated today UTC waits for a later run); append-only
+  (nothing dated on or before the newest recorded fill is added; a replay that no longer agrees
+  with the record leaves a note on the deployment and the record stands); a deployment is marked
+  once per UTC day and a failed attempt leaves it due; a stopped deployment is recorded through
+  its stop date once.
+- **Emails:** one message per user for fills at most 3 days old when first recorded, to Pro
+  users with a verified address and alert emails on. The first pass over an existing deployment
+  is history and is never emailed.
+- **Reads:** `GET /api/paper/:id/ledger`, `GET /v1/paper/:id/ledger` (light limit, no engine
+  call), MCP `get_paper_ledger`, and a "Recorded ledger" section on each Paper Trade card. The
+  live state is still a replay.
+- **Engine:** the replay answer carries a `fills` list (local engine change). An engine without
+  it is refused by the job rather than read as "no trades".
 
 ## Honest caveat — backtest depth for SenIQ factors
 - **Technical-only rules** backtest back **years** (deep price history).
@@ -126,7 +150,8 @@ Builder + backtest = **Plus+** · Paper trading = **Pro** · MCP / API = **Pro**
 1. Where the Python service lives + how we lift zeuniq's engine (vendored `strategy-service/`
    folder vs git submodule vs shared package) — extracting `engine/` + backtest + indicators +
    sim OMS, leaving live/Dhan behind.
-2. Paper-trading state store: SenIQ Postgres vs the service's own DB.
+2. Paper-trading state store: SenIQ Postgres vs the service's own DB. **Settled 2026-10-09:**
+   SenIQ Postgres (see "Paper ledger" above).
 3. Auth between SenIQ and the service (shared secret / mTLS).
 4. Hosting: a second process — Phase 4 deploy implications (two services on Render).
 5. The exact SenIQ signal-factor vocabulary + the `get_signal_history` contract (agree before the

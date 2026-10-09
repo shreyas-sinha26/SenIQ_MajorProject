@@ -18,6 +18,7 @@ const { callService, flattenDetail, cleanSymbols, replayPaper, MAX_WATCH_SYMBOLS
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
 const { DATA_TOOLS, runDataTool } = require('../services/dataTools');
 const { saveStrategy, deployPaper, stopPaper, strategyToJson, deploymentToJson } = require('../services/strategyStore');
+const { readLedger } = require('../services/paperLedger');
 const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../services/strategySignals');
 
 const router = asyncRouter();
@@ -72,6 +73,7 @@ router.get('/', gate(lightLimiter), (req, res) => {
       'GET  /v1/strategies/saved',
       'GET  /v1/paper',
       'GET  /v1/paper/:id/state',
+      'GET  /v1/paper/:id/ledger',
       ...DATA_TOOLS.map((t) => `GET  ${t.rest}`),
       'POST /v1/strategies/saved        (write key)',
       'POST /v1/paper                   (write key)',
@@ -185,6 +187,14 @@ router.get('/paper/:id/state', gate(heavyLimiter), async (req, res) => {
   if (!row) return res.status(404).json({ error: 'deployment not found' });
 
   passthrough(res, await replayPaper(row));
+});
+
+// ─── GET /v1/paper/:id/ledger — recorded fills and daily values (no engine call) ─
+router.get('/paper/:id/ledger', gate(lightLimiter), async (req, res) => {
+  const row = await queryOne(
+    'SELECT * FROM paper_deployments WHERE id = $1 AND user_id = $2', [req.params.id, req.apiCtx.userId]);
+  if (!row) return res.status(404).json({ error: 'deployment not found' });
+  res.json({ deployment: deploymentToJson(row), ...(await readLedger(row)) });
 });
 
 // ─── POST /v1/walk-forward — out-of-sample robustness check ──

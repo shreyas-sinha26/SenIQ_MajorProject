@@ -111,6 +111,9 @@ off, `v2.N` with them on. The latest is `v1.12` / `v2.12`.
 - **Strategy Builder** — mixes technical factors (EMA, RSI, MACD) with SenIQ factors
   (sentiment, smart money) in one strategy.
 - **Backtest and paper trading** — with a buy-and-hold benchmark and a walk-forward check.
+- **Paper ledger** — once a day every paper deployment's fills and closing value are stored,
+  from completed days only, so its record does not change when price history is revised
+  later. A new fill is emailed (Pro, alert emails on). By hand: `node scripts/paper_mark.js`.
 - **MCP server (`/mcp`) and REST API (`/v1`)** — the same data tools and strategy actions,
   for Pro API keys, with one shared rate budget per key.
 - These pages need a separate strategy engine that is **not in this repository**. Without it

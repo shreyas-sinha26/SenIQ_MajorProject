@@ -1563,6 +1563,26 @@ tr:hover .ht-info { opacity: 1; }
 .pt-pos { font-size: .8rem; color: var(--text); }
 .pt-pos strong { color: var(--green); }
 .pt-pos.pt-flat { color: var(--muted); font-style: italic; }
+.pt-ledger { border-top: 1px solid var(--line); padding-top: 8px; }
+.pt-ledger > summary {
+  cursor: pointer; font-size: .8rem; color: var(--text);
+  display: flex; align-items: center; gap: 6px; list-style: none;
+}
+.pt-ledger > summary::-webkit-details-marker { display: none; }
+.pt-ledger > summary .material-symbols-outlined { font-size: 1rem; color: var(--muted); }
+.pt-ledger > summary small { color: var(--muted); font-size: .74rem; }
+.pt-ledger[open] > summary { margin-bottom: 8px; }
+.pt-ledger-note { font-size: .76rem; color: var(--red); margin-bottom: 8px; }
+.pt-spark { width: 100%; height: 60px; display: block; margin-bottom: 8px; }
+.pt-spark polyline { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.pt-spark.pos polyline { stroke: var(--green); }
+.pt-spark.neg polyline { stroke: var(--red); }
+.pt-fills { width: 100%; border-collapse: collapse; font-size: .8rem; margin-bottom: 8px; }
+.pt-fills th, .pt-fills td { padding: 5px 10px; text-align: right; border-bottom: 1px solid var(--line); }
+.pt-fills th:first-child, .pt-fills td:first-child { text-align: left; }
+.pt-fills th { color: var(--muted); font-weight: 600; font-size: .72rem; }
+.pt-fills td.pos { color: var(--green); }
+.pt-fills td.neg { color: var(--red); }
 
 /* ─── SenIQ signal factors (Phase 7 step 5) ───────────────── */
 .sb-seniq-tag {

@@ -1,12 +1,16 @@
 /**
  * Paper Trade routes (Phase 7) — Pro tier.
  *
- * Replay-from-inception: a deployment stores only {snapshotted strategy,
- * symbol, cash, deploy date}. State is computed on read by replaying
+ * Replay-from-inception: a deployment stores {snapshotted strategy,
+ * symbol, cash, deploy date}. Current state is computed on read by replaying
  * deploy→today (or →stopped_at) through the strategy service's sim engine
  * with `trade_from` gating — indicators warm up on pre-deploy history, but
  * no signal may trade before the deploy date, so a deployment never
  * "inherits" an entry that fired before it existed.
+ *
+ * The ledger is the stored half: fills and daily values a daily job has
+ * recorded from completed days (services/paperLedger.js). Reading it needs
+ * no engine.
  */
 const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne, execute } = require('../db');
@@ -14,6 +18,7 @@ const { authMiddleware } = require('./auth');
 const { attachTier, requireTier } = require('../middleware/tier');
 const { deployPaper, stopPaper, deploymentToJson, MAX_ACTIVE_DEPLOYMENTS } = require('../services/strategyStore');
 const { replayPaper } = require('../services/strategyClient');
+const { readLedger } = require('../services/paperLedger');
 
 const router = asyncRouter();
 router.use(authMiddleware, attachTier, requireTier('pro'));
@@ -54,6 +59,14 @@ router.post('/:id/state', async (req, res) => {
     final_cash: out.data.final_cash,
     seniq_coverage: out.data.seniq_coverage || null,
   });
+});
+
+// GET /api/paper/:id/ledger — the recorded fills and daily values.
+router.get('/:id/ledger', async (req, res) => {
+  const row = await queryOne(
+    'SELECT * FROM paper_deployments WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+  if (!row) return res.status(404).json({ error: 'deployment not found' });
+  res.json({ deployment: deploymentToJson(row), ...(await readLedger(row)) });
 });
 
 // POST /api/paper/:id/stop — freeze the deployment (state replays →stopped_at).

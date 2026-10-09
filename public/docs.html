@@ -145,6 +145,11 @@
     <p>Replay a deployment from its deploy date to now (or to when it was stopped): current
     equity, open position, trade log, metrics. Read-only — deploying and stopping stay in the app.</p>
 
+    <h3><span class="method get">GET</span>/v1/paper/:id/ledger</h3>
+    <p>The stored record of a deployment: every simulated fill (date, side, quantity, price) and its
+    value at the close of each completed day. A daily job records these, so the answer does not
+    change when price history is revised later, and reading it makes no engine call (light limit).</p>
+
     <h2>Writing (keys with write access only)</h2>
     <p>Keys are read-only unless created with the write option in Profile → API Access. A write key can save
     strategies and start or stop paper deployments — virtual money only, no real orders, and nothing can be
@@ -193,7 +198,7 @@
     <code>POST /mcp</code> (Streamable HTTP) using the same key — tools:
     <code>list_strategies · validate_strategy · run_backtest · run_walk_forward · get_signals ·
     list_seniq_presets · get_seniq_preset · compare_without_seniq ·
-    list_saved_strategies · list_paper_deployments · get_paper_state</code>, plus the data tools
+    list_saved_strategies · list_paper_deployments · get_paper_state · get_paper_ledger</code>, plus the data tools
     <code>get_portfolio_overview · get_attribution · get_top_events · get_ticker_news ·
     get_sentiment · explain_sentiment · get_smart_money · get_market_news · search_news · get_story_detail · get_disclosures</code>. Keys with write access also get
     <code>save_strategy · start_paper_deployment · stop_paper_deployment</code>.</p>
