@@ -12,6 +12,7 @@ const oauthRouter = require('./routes/oauth');
 const portfolioRouter = require('./routes/portfolio');
 const newsRouter = require('./routes/news');
 const smartMoneyRouter = require('./routes/smartMoney');
+const ipoWatchRouter = require('./routes/ipoWatch');
 const reportsRouter = require('./routes/reports');
 const adminRouter = require('./routes/admin');
 const billingRouter = require('./routes/billing');
@@ -96,6 +97,9 @@ app.use('/api/email', emailRouter); // unsubscribe links + email preferences
 app.use('/api/portfolio', portfolioRouter);
 app.use('/api/news', newsRouter);
 app.use('/api/smart-money', smartMoneyRouter);
+// IPO Watch (FEATURES.IPO_WATCH). Off → 404 JSON, like the v2 paths below.
+if (FEATURES.IPO_WATCH) app.use('/api/ipo-watch', ipoWatchRouter);
+else app.use('/api/ipo-watch', (req, res) => res.status(404).json({ error: 'Not available in this version' }));
 app.use('/api/reports', reportsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/billing', billingRouter);
@@ -130,7 +134,7 @@ app.get('/api/health', async (req, res) => {
 app.get('/api/config', (req, res) => {
   res.json({
     disclaimer: DISCLAIMER,
-    features: { strategies: FEATURES.STRATEGIES },
+    features: { strategies: FEATURES.STRATEGIES, ipoWatch: FEATURES.IPO_WATCH },
     // Phase 5 — which sign-in buttons the frontend should show.
     oauth: { google: OAUTH.GOOGLE.enabled, github: OAUTH.GITHUB.enabled },
   });

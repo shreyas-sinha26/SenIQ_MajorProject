@@ -63,11 +63,13 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 - **Git** *(checked 2026-10-08)*: on `main`, level with `origin/main`, no other branch, no
   open pull request *(checked 2026-10-09)*. Latest tags **`v1.11` / `v2.11`** on `68ef315`, the merge of pull request #11
   (the listed tier of the company reference and 15 commodities). The commits after it on
-  `main` are handoff notes and the README's "latest tag" line. `IPO_PLAN.md` has an uncommitted edit that no session made — left alone. Untracked and never pushed: `samples/` and `.github/` (see §11).
-- **Tests** *(checked 2026-10-09)*: `npm test` passes — 23 files, 554 checks, offline
+  `main` are handoff notes and the README's "latest tag" line. Untracked and never pushed: `samples/` and `.github/` (see §11).
+- **Open pull request** *(checked 2026-10-09)*: **#13, branch `ipo-watch`** — IPO Watch (§5), with `main` up to the
+  merge of pull request #12 merged into it. Not merged, not tagged. The checkout is on `ipo-watch`.
+- **Tests** *(checked 2026-10-09)*: `npm test` passes on `ipo-watch` — 24 files, 604 checks, offline
   (no database or API calls).
-- **Dev database** *(checked)*: Postgres `seniq`, all 31 migration files applied (latest
-  `0030_company_tier`). 1,960 articles, 334 events (2026-10-08, late).
+- **Dev database** *(checked)*: Postgres `seniq`, all 42 migration files applied (latest
+  `0041_ipo_graduation`, from the `ipo-watch` branch). 1,960 articles, 334 events (2026-10-08, late).
 - **Nothing is running** *(checked late 2026-10-08)*: no dev server, no strategy engine, no
   `ollama serve`. Nothing is hosted. The next `npm start` will have Claude calls on.
 - **Local `.env` switches that differ from the defaults** *(checked)*: `CLAUDE_REPORTS=1` (was `0`
@@ -77,6 +79,9 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ### Next, in order
 
+0. **Merge pull request #13 (IPO Watch)** — Annas merges. Then set `IPO_WATCH=1` where it should
+   run, and let the 09:15 IST poll run for some days: the GMP trend, 1-week returns and
+   graduation have only been seen on their first day.
 1. **Tell Shreyas that `main` moved** (still to do; Annas sends it). Sign-in is now
    server-side sessions, so part of his
    OAuth callback (`server/routes/oauth.js`) was rewritten and everyone must sign in again.
@@ -185,6 +190,7 @@ the ticker's own 90-day normal. Sources are weighted by credibility.
 |---|---|---|
 | US smart money (13F + congress) + 8-K filings | every 15 min | First contact is silent; only newly disclosed records alert |
 | India smart money | weekdays 19:30 IST | Only when `INDIA_SMART_MONEY=1`; never on boot |
+| IPO Watch poll | daily 09:15 IST | Only when `IPO_WATCH=1`; never on boot. Calendar, GMP, subscription, outcomes, tickers, returns, graduation |
 | Daily brief | checked every 15 min | Written when each user's clock passes 05:30 |
 | Report emails | checked every 15 min | Schedule below |
 | Ask thread purge | 04:15 daily | Threads older than 30 days |
@@ -195,6 +201,20 @@ the ticker's own 90-day normal. Sources are weighted by credibility.
 stocks from Finnhub (Yahoo as fallback), Indian stocks from Yahoo (`.NS` then `.BO`, in INR),
 commodities from Yahoo futures with FMP as fallback. Every holding is converted to USD before
 weights are computed. Adding a holding returns a company brief and backfills impact silently.
+
+**IPO Watch** (`server/services/ipoWatch/`, opt-in with `IPO_WATCH=1`; on branch `ipo-watch`,
+pull request #13). A calendar of Indian and US public issues with its own sidebar tab.
+India comes from InvestorGain (two pages a day: calendar and grey market premium, and
+subscription by investor class); the US from Finnhub's IPO calendar. The `ipos` table stands
+in for the company reference while a company has no ticker: stored stories are linked to an
+issue by name and read for tone as news about it (`ipo_articles`). After listing the issue
+gets its ticker, its outcome is logged (`ipo_outcomes`: listing gain, then listing-day,
+1-week, 1-month and 3-month closes from Yahoo), and once a price confirms the ticker the
+company graduates into `companies` in a tier of its own, `ipo`. With the switch on, the news
+pipeline also fetches company news for up to 10 newly filed or priced US issues and links
+IPO stories at the end of each pass. **`IPO_PLAN.md` is the full record**: decisions, build
+status, limits. Before any hosting, InvestorGain's reuse terms must be settled (the same open
+item as NSE's); BSE and NSE refuse automated requests and are not worked around.
 
 **Smart money.** US: 13F filings of 10 seeded funds straight from SEC EDGAR, and congressional
 trades from Financial Modeling Prep. India (opt-in): NSE bulk and block deals on the
@@ -295,6 +315,7 @@ Two migrations share the number `0016`. This is harmless; do not rename an appli
 | Command | What it does |
 |---|---|
 | `node scripts/india_smart_money.js poll` | One India poll (deals + up to 60 insider filings) |
+| `node scripts/ipo_watch.js poll \| link \| alias \| symbols \| returns \| retone \| graduate` | IPO Watch jobs by hand (see the file's header) |
 | `node scripts/india_smart_money.js history SYMBOL` | Pre-May-2026 insider trades for a symbol |
 | `node scripts/india_smart_money.js import <csv> [--dry-run]` | Load a deal file downloaded by hand |
 | `node scripts/rescore_sentiment.js [--write]` | Re-score stored word-list readings with FinBERT |
@@ -327,6 +348,7 @@ All the write scripts are dry runs without their flag.
 | `COMPANY_SENTIMENT_LLM` | **`ollama`** | A language model reads multi-company clauses: `ollama` (local, free) or `1` (Haiku). Default is off |
 | `FINBERT_CLASSIFY` | **`1`** | Local FinBERT scores new stories. Default is off. `FINBERT_MODE=hosted` uses the Hugging Face API instead |
 | `INDIA_SMART_MONEY`, `NSE_USER_AGENT` | **`1`**, set | India deals and insider trades. Default is off |
+| `IPO_WATCH` | not set | `1` shows the IPO Watch tab and runs its daily poll. The US side also needs `FINNHUB_API_KEY`. Default is off |
 | `SMTP_HOST/PORT/USER/PASS`, `EMAIL_FROM` | set (Gmail app password) | All email while there is no domain |
 | `STRATEGY_SERVICE_URL`, `STRATEGY_SERVICE_SECRET` | set | v2 engine at :8100 |
 | `FEATURES_STRATEGIES` | unset | `1` = v2 |
@@ -804,6 +826,6 @@ matched in news strictly and only while held; commodities go from 4 to 15.
 | `ENGINE_PLAN.md` | Engine phases E1–E6 (all done) and the v2 engine scope | v2 scope is open |
 | `STRATEGY_PLAN.md` | Strategy service, Builder schema, MCP design | Built |
 | `RAG_PLAN.md` | Ask, retrieval and signals plan (agreed 2026-10-07); India filings spike notes | Partly built |
-| `IPO_PLAN.md` | Sentiment for IPOs and small/mid-caps, where 13F and congress data are blind | Plan only, nothing built |
+| `IPO_PLAN.md` | Sentiment for IPOs and small/mid-caps, where 13F and congress data are blind | Change 3 (IPO Watch) and Change 4 (graduation) built on `ipo-watch`, pull request #13; Changes 1, 2 and 5 are plan only |
 | `DEPLOY.md` | Render + Neon + Cloudflare steps | Ready, not executed |
 | `README.md` | Project overview, features, setup (macOS and Windows), known limits | Yes — rewritten 2026-10-08 against this handoff, up to `v1.8` / `v2.8` |

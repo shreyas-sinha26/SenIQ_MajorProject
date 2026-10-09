@@ -37,8 +37,10 @@ function dedupe(articles) {
   return out;
 }
 
-async function gatherArticles(tickers = []) {
-  const jobs = [{ name: 'finnhub', run: () => fetchFinnhub(tickers) }];
+// `alsoCompanyNews`: tickers nobody holds whose company news is wanted all the same (IPO
+// Watch's newly filed and priced issues). They go to the per-ticker source only.
+async function gatherArticles(tickers = [], alsoCompanyNews = []) {
+  const jobs = [{ name: 'finnhub', run: () => fetchFinnhub([...new Set([...tickers, ...alsoCompanyNews])]) }];
   if (FEATURES.MACRO_INGEST) jobs.push({ name: 'gdelt', run: () => fetchGdelt(tickers) });
   if (FEATURES.RSS_INGEST) jobs.push({ name: 'rss', run: () => fetchRss() });
   if (FEATURES.REDDIT_INGEST) jobs.push({ name: 'reddit', run: () => fetchReddit() });
