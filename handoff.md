@@ -150,12 +150,13 @@ cd ~/Downloads/SenIQ_MajorProject && read -s -p "New demo password: " PW && echo
 ### The pipeline (`server/scheduler.js`, every 10 minutes and on boot)
 
 1. **Gather** articles from the enabled sources (`services/ingest/`): Finnhub company news,
-   GDELT, four Indian RSS feeds (ET, Mint, Moneycontrol, Business Standard). Reddit returns
+   GDELT, four Indian RSS feeds (ET, Mint, Moneycontrol, Business Standard) and four crypto ones
+   (CoinDesk, Cointelegraph, Decrypt, The Block). Reddit returns
    nothing without credentials; X is a stub.
 2. **Resolve entities** (`entityResolver.js`): which companies, executives, sectors or
-   commodities a headline names, against a curated universe of 197 instruments (100 US, 57
-   India, 25 crypto, 15 commodities) and 192 dated executives. A second, **listed** tier
-   (1,839 more companies: 1,400 US, 439 India) is matched only for names someone holds — see "Company
+   commodities a headline names, against a curated universe of 217 instruments (100 US, 57
+   India, 45 crypto, 15 commodities) and 192 dated executives. A second, **listed** tier
+   (1,838 more companies: 1,399 US, 439 India) is matched only for names someone holds — see "Company
    reference: two tiers" in §8.
 3. **Grade relevance and cluster** (`newsRelevance.js`): each article is holding / market /
    world / none, decided by the headline. Duplicates across outlets share one cluster. Noise
@@ -500,11 +501,11 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
 
 **Company reference: two tiers (2026-10-09, pull request #11).**
 - `companies.tier` is `curated` or `listed` (migration `0030`). **Curated** = the hand-written
-  `server/data/universe.js` (197: aliases, brands, executives). **Listed** = everything else a
+  `server/data/universe.js` (217: aliases, brands, executives). **Listed** = everything else a
   user may hold, built from published constituent lists into `server/data/listed.json` by
   `scripts/build_listed_universe.js`: symbol, name, name without its corporate tail (`core`),
   sector, and `plain` when the name is a single ordinary English word.
-- **US is in: 1,400 listed companies** = the S&P 1500 (Wikipedia's S&P 500 / 400 / 600 lists,
+- **US is in: 1,399 listed companies** (1,400 until Sui took SUI from Sun Communities) = the S&P 1500 (Wikipedia's S&P 500 / 400 / 600 lists,
   CC BY-SA, taken 2026-10-09) less the 100 already curated.
 - **India is in: 439 listed companies** = the Nifty 500 (file downloaded by Annas from
   niftyindices.com on 2026-10-09, kept as `server/data/sources/nifty500.csv`, gitignored) less
@@ -551,22 +552,36 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   name gets less news than it should; multi-word names in an ALL-CAPS headline are missed; the commodity reading still
   follows the story's tone, not the price direction.
 
-**Crypto: proposed, not built (2026-10-09).** Annas asked about widening the 25 curated coins.
-- **The feed has no crypto news source.** In 2,088 stored stories Bitcoin is in 33 headlines,
-  Ethereum and Solana in 4 each, and most curated coins (Chainlink, Avalanche, Polkadot,
-  Litecoin…) in none. Sources are Finnhub company news (per stock), GDELT and four Indian
-  outlets; Reddit is off. More coins without a crypto source would be price-only. Suggested:
-  RSS from the main crypto outlets through the existing RSS reader.
-- **Suggested additions (about 21):** from CoinGecko's top 100 on 2026-10-09, leaving out
-  stablecoins, wrapped / staked / bridged copies, tokenised funds and gold, and exchange
-  tokens, and keeping only coins trading at least $50M a day (and 1% of market value) that
-  are two or more years old: Zcash, Monero, Sui, Hedera, Quant, Bittensor, Ethena, Aave,
-  Ondo, Worldcoin, Internet Computer, Pepe, Jupiter, Algorand, Render, Filecoin, Aerodrome,
-  Injective, PancakeSwap, Raydium — plus Hyperliquid (11th largest, 1.9 years old). Several
-  are everyday words and would need the cue rule.
-- Waiting on Annas: both parts, or the coin list only; Hyperliquid in or out.
-- Seen in passing: CoinGecko now calls Toncoin "Gram (prev. Toncoin)", symbol GRAM. The
-  curated entry still says TON / Toncoin; the price key (`the-open-network`) still works.
+**Crypto: 45 curated coins and a crypto news source (2026-10-09, branch `crypto-kb`).**
+- **News.** The feed had no crypto source: in 2,088 stored stories Bitcoin was in 33
+  headlines, Ethereum and Solana in 4 each, most curated coins in none. Four crypto outlets
+  now come in through the existing RSS reader (`INGEST.RSS_FEEDS`): CoinDesk, Cointelegraph,
+  Decrypt, The Block. One live read gave 112 crypto stories, 68 naming a curated coin
+  (Bitcoin 34, Ethereum 17, Solana 11). Finnhub's `news?category=crypto` works on the free
+  key but is CoinDesk and Cointelegraph again, so it is not used. No key was bought.
+- **Coins: 45** (were 25). Added Zcash, Hyperliquid, Monero, Hedera, Quant, Bittensor, Ethena,
+  Aave, Ondo, Worldcoin, Internet Computer, Pepe, Jupiter, Algorand, Render, Filecoin,
+  Aerodrome Finance, Injective, Raydium, Sui: CoinGecko's top 100 on 2026-10-09 less stablecoins,
+  wrapped / staked / bridged copies, tokenised funds and gold, and exchange tokens, trading
+  $50M+ a day. Hyperliquid is 1.9 years old and was let in by Annas. Each price key was
+  confirmed by one live CoinGecko request.
+- **Sui took the symbol SUI from Sun Communities**, at Annas's word: a symbol can belong to
+  one thing, so `listed.json` was rebuilt and that stock left it (1,838 listed, 1,399 US).
+  **PancakeSwap (CAKE) is left out** for the same reason: The Cheesecake Factory keeps CAKE.
+- **Everyday-word coins** (`CRYPTO_NEEDS_CONTEXT` in `entityResolver.js`): sixteen of the new
+  coins have a name or a symbol that is a word, a place or a person (Jupiter, Render, Quant,
+  Pepe, Ondo, Sui; HYPE, RAY, ICP, FIL…). They count only when the story also talks about crypto
+  (`CRYPTO_CONTEXT`: token, blockchain, DeFi, Bitcoin, Solana… or the coin's own distinctive
+  name), anywhere in the headline or summary. The seven word-names also need their capital.
+  The older word-coins (Avalanche, Cosmos, Polygon; symbols NEAR, LINK, DOT, UNI, ETC) are
+  not under this rule and still match on the capital or the bare symbol alone.
+- **Not done:** no pipeline run, so nothing new is stored or scored yet; the coins reach the
+  `companies` table when the server next seeds the universe. The rest of the top 100 as a
+  listed tier is not built (the listed tier is for companies today). The new coins' sentiment
+  has not been looked at.
+- CoinGecko now calls Toncoin "Gram (prev. Toncoin)", symbol GRAM. The curated entry is
+  left as TON / Toncoin: holdings are keyed by symbol, and "Gram" is an everyday word. The
+  price key (`the-open-network`) still works.
 
 **Entity resolution.**
 - A commodity word inside a company name ("Senco Gold") no longer tags the commodity, using a
