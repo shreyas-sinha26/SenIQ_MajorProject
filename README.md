@@ -41,12 +41,12 @@ off, `v2.N` with them on. The latest is `v1.11` / `v2.11`.
   silently; a holding only alerts on events after it was added.
 
 ### News and sentiment
-- **Sources** — Finnhub company news, GDELT, and four Indian RSS feeds (Economic Times, Mint,
-  Moneycontrol, Business Standard). Reddit ingest is built but needs credentials.
-- **Entity resolution** — a curated universe of 197 instruments (100 US, 57 India, 25 crypto,
+- **Sources** — Finnhub company news, GDELT, and eight RSS feeds: four Indian (Economic Times, Mint,
+  Moneycontrol, Business Standard) and four crypto (CoinDesk, Cointelegraph, Decrypt, The Block). Reddit ingest is built but needs credentials.
+- **Entity resolution** — a curated universe of 217 instruments (100 US, 57 India, 45 crypto,
   15 commodities) and 192 executives decides which companies a story names.
-- **Any S&P 1500 or Nifty 500 stock can be held** — a second, "listed" tier of 1,839 more
-  companies (1,400 US, 439 India: symbol, name, sector) can be searched, added and priced.
+- **Any S&P 1500 or Nifty 500 stock can be held** — a second, "listed" tier of 1,838 more
+  companies (1,399 US, 439 India: symbol, name, sector) can be searched, added and priced.
   A listed company is matched in news strictly (its full name, or its symbol where that is
   unambiguous), and only while someone holds it.
 - **Relevance and de-spam** — every story is graded Holdings / Markets / World / noise, and
