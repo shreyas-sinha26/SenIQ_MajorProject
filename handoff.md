@@ -1,6 +1,6 @@
 # SenIQ — Handoff
 
-Rewritten 2026-10-08. This file describes the project **as it stands now**. The previous
+Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening). This file describes the project **as it stands now**. The previous
 handoff was a session-by-session log (1,658 lines); it is still in git history
 (`git show 6ee98d9:handoff.md`) if a detail of how something was built is needed.
 
@@ -37,10 +37,10 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 ## 2. Standing rules
 
 1. **A session makes no Claude API call of its own until Annas says so**; he approves those
-   one at a time. The app's own calls are a separate switch, and Annas turned it **on** late
-   on 2026-10-08: `.env` has `CLAUDE_REPORTS=1`, so a running server calls Claude for Ask,
-   the daily brief, Pro alert explanations and report cards, inside the quotas and the
-   $5/day ceiling. Set it back to `0` to stop all of that.
+   one at a time. The app's own calls are a separate switch, `CLAUDE_REPORTS` in `.env`. It
+   is **`0`** *(checked 2026-10-09)*; Annas had it at `1` late on 2026-10-08. At `1` a running
+   server calls Claude for Ask, the daily brief, Pro alert explanations and report cards,
+   inside the quotas and the $5/day ceiling.
 2. **Ask before any run that costs money or takes long**: paid model call, embedding run,
    backfill, eval run.
 3. **Annas is the sole author.** No AI attribution in commits, pull requests or code.
@@ -60,23 +60,25 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ## 3. Current state
 
-- **Git** *(checked 2026-10-08)*: on `main`, level with `origin/main`, no other branch, no
-  open pull request *(checked 2026-10-09)*. Latest tags **`v1.12` / `v2.12`** on `d9ec9df`, the merge of pull request #13
-  (IPO Watch; the tag also takes in pull request #12, the curated coins, which was merged untagged). The commits after it on
-  `main` are handoff notes and the README's "latest tag" line. Untracked and never pushed: `samples/` and `.github/` (see §11).
-  Since then pull request #14 (the paper ledger, §5) was merged as `f3638fb` and tagged
-  **`v2.13` only**: it is strategies-only work, so there is no `v1.13` (Annas's decision). The
-  latest tags are therefore **`v1.12` and `v2.13`**, on different commits.
-- **Tests** *(checked 2026-10-09)*: `npm test` passes — 24 files, 604 checks, offline
-  (no database or API calls). Since pull request #14: 25 files, 619 checks.
-- **Dev database** *(checked)*: Postgres `seniq`, all 42 migration files applied (latest
-  `0041_ipo_graduation`). 1,960 articles, 334 events (2026-10-08, late). `0042_paper_ledger`
-  (pull request #14) is not applied yet; the next start applies it, v1 included. The dev
-  database has no paper deployments.
-- **Nothing is running** *(checked late 2026-10-08)*: no dev server, no strategy engine, no
-  `ollama serve`. Nothing is hosted. The next `npm start` will have Claude calls on.
-- **Local `.env` switches that differ from the defaults** *(checked)*: `CLAUDE_REPORTS=1` (was `0`
-  until late 2026-10-08), `INDIA_SMART_MONEY=1`, `FINBERT_CLASSIFY=1`, `COMPANY_SENTIMENT_LLM=ollama` (the local
+- **Git** *(checked 2026-10-09, evening)*: on `main`, level with `origin/main`, no open pull
+  request. Latest tags **`v1.12`** on `d9ec9df` (the merge of pull request #13, IPO Watch) and
+  **`v2.13`** on `f3638fb` (the merge of pull request #14, the paper ledger, §5). `v2.13` is
+  strategies-only work, so there is no `v1.13` (Annas's decision, §11). The one commit after
+  `f3638fb` on `main` is handoff and README notes. One other branch exists, local and on
+  GitHub: `crypto-kb`, already merged as pull request #12 and still checked out in the
+  worktree `.claude/worktrees/crypto-kb`; nothing on it is missing from `main`. Untracked and
+  never pushed: `samples/` and `.github/` (see §11).
+- **Tests** *(checked 2026-10-09)*: `npm test` passes — 25 files, 619 checks, offline
+  (no database or API calls). The local engine's own tests: 49 pass
+  (`cd strategy-service && ./venv/bin/python -m pytest -q`).
+- **Dev database** *(checked 2026-10-09, evening)*: Postgres `seniq`, 42 of the 43 migration
+  files applied (latest `0041_ipo_graduation`). **`0042_paper_ledger` is not applied yet**; the
+  next start applies it, with strategies on or off. 2,280 articles, 524 events. No paper
+  deployments, so the paper ledger has nothing to record there yet.
+- **Nothing is running** *(checked 2026-10-09, evening)*: no dev server, no strategy engine, no
+  `ollama serve`. Nothing is hosted. `.env` has `CLAUDE_REPORTS=0`, so the next `npm start`
+  makes no Claude calls.
+- **Local `.env` switches that differ from the defaults** *(checked 2026-10-09)*: `IPO_WATCH=1`, `INDIA_SMART_MONEY=1`, `FINBERT_CLASSIFY=1`, `COMPANY_SENTIMENT_LLM=ollama` (the local
   model reads multi-company stories, §8; it needs `ollama serve`, which is **not** running),
   plus Annas's own `NSE_USER_AGENT`.
 
@@ -86,7 +88,13 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
    IST poll has not yet fired on its own, and the GMP trend, the 1-week and later returns and
    graduation have only been seen on their first day. The "+ Portfolio" button has not been
    clicked. See `IPO_PLAN.md` for the open items.
-1. **Tell Shreyas that `main` moved** (still to do; Annas sends it). Sign-in is now
+1. **Paper ledger: see it work on a real deployment** (`v2.13`, §5). Start the engine and
+   the app with `FEATURES_STRATEGIES=1` (§4), deploy a saved strategy on the Paper Trade page,
+   and leave both up past 01:15 UTC (06:45 IST), or run `node scripts/paper_mark.js --write`
+   the next day. Still unproven: a fill email actually sent, and the scheduled run firing on
+   its own (§7). A deployment made today has no completed day until tomorrow, so its ledger
+   starts empty.
+1a. **Tell Shreyas that `main` moved** (still to do; Annas sends it). Sign-in is now
    server-side sessions, so part of his
    OAuth callback (`server/routes/oauth.js`) was rewritten and everyone must sign in again.
    Since then `v1.8` / `v2.8` added per-company sentiment: nothing for him to change, and the
@@ -365,7 +373,7 @@ All the write scripts are dry runs without their flag.
 | `FINNHUB_API_KEY` | set | US prices and company news |
 | `FMP_API_KEY` | set | Commodity fallback, executives refresh |
 | `AIROUTER_API_KEY` | set | Claude through AIRouter (`ANTHROPIC_API_KEY` is the alternative) |
-| `CLAUDE_REPORTS` | **`1`** (since 2026-10-08) | `1` lets the app call Claude: brief, Ask, alert narrative, report cards |
+| `CLAUDE_REPORTS` | `0` (checked 2026-10-09; it was `1` late on 2026-10-08) | `1` lets the app call Claude: brief, Ask, alert narrative, report cards |
 | `COMPANY_SENTIMENT_LLM` | **`ollama`** | A language model reads multi-company clauses: `ollama` (local, free) or `1` (Haiku). Default is off |
 | `FINBERT_CLASSIFY` | **`1`** | Local FinBERT scores new stories. Default is off. `FINBERT_MODE=hosted` uses the Hugging Face API instead |
 | `INDIA_SMART_MONEY`, `NSE_USER_AGENT` | **`1`**, set | India deals and insider trades. Default is off |
@@ -865,8 +873,8 @@ and reading IPO stories at the end of each pass). `IPO_PLAN.md` is the full reco
 | `PLAN.md` | Original phased product plan | Phase order superseded by the roadmap |
 | `SenIQ_Roadmap.pdf` | Re-sequenced roadmap (deploy first, then OAuth and billing). Rebuild: `python3 scripts/build_roadmap_pdf.py` | Yes, for ordering |
 | `ENGINE_PLAN.md` | Engine phases E1–E6 (all done) and the v2 engine scope | v2 scope is open |
-| `STRATEGY_PLAN.md` | Strategy service, Builder schema, MCP design | Built |
+| `STRATEGY_PLAN.md` | Strategy service, Builder schema, MCP design, paper ledger | Built |
 | `RAG_PLAN.md` | Ask, retrieval and signals plan (agreed 2026-10-07); India filings spike notes | Partly built |
 | `IPO_PLAN.md` | Sentiment for IPOs and small/mid-caps, where 13F and congress data are blind | Change 3 (IPO Watch) and Change 4 (graduation) built, pull request #13; Changes 1, 2 and 5 are plan only |
 | `DEPLOY.md` | Render + Neon + Cloudflare steps | Ready, not executed |
-| `README.md` | Project overview, features, setup (macOS and Windows), known limits | Yes — rewritten 2026-10-08 against this handoff, up to `v1.8` / `v2.8` |
+| `README.md` | Project overview, features, setup (macOS and Windows), known limits | Yes — rewritten 2026-10-08 against this handoff, up to `v1.8` / `v2.8`; later features added section by section, latest `v2.13` |
