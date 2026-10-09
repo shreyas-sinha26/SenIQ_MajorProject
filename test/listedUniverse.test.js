@@ -85,6 +85,34 @@ check('the resolver uses it for held names, and only for held names', () => {
   assert.deepStrictEqual(tk('Apple and Thor Industries sign a deal', [{ ticker: 'THO' }]), ['AAPL', 'THO']);
 });
 
+console.log('India:');
+check('a symbol that is the brand matches in any capitals; one that is a word only in capitals', () => {
+  assert.ok(names('PAYTM', 'Paytm shares jump 5%') && names('NYKAA', 'Nykaa Q2 profit doubles') && names('PAYTM', 'One 97 Communications gets RBI nod'));
+  assert.ok(!names('CLEAN', 'Clean energy push gathers pace') && names('CLEAN', 'Clean Science and Technology rises'));
+  assert.ok(names('IRFC', 'IRFC shares rally') && !names('IDEA', 'A new idea for telecom') && names('IDEA', 'Vodafone Idea gets AGR relief'));
+});
+check('a name inside a longer name belongs to the longer one', () => {
+  assert.ok(names('BANKINDIA', 'Bank of India cuts lending rates'));
+  for (const h of ['Reserve Bank of India holds rates', 'Union Bank of India Q2 profit rises', 'State Bank of India raises funds']) assert.ok(!names('BANKINDIA', h), h);
+});
+check('a listed company\'s name is not read as the curated company inside it', () => {
+  assert.deepStrictEqual(tk('ITC Hotels Q2 profit rises'), []);
+  assert.deepStrictEqual(tk('ITC Hotels Q2 profit rises', [{ ticker: 'ITCHOTELS' }]), ['ITCHOTELS']);
+  assert.deepStrictEqual(tk('ITC and ITC Hotels announce dividends'), ['ITC']);
+  assert.deepStrictEqual(tk('Adani Power share price jumps after NCLT nod'), []);
+  assert.deepStrictEqual(tk('Reliance Power shares surge 10%'), []);
+  assert.deepStrictEqual(tk('SBI Cards and Payment Services posts profit'), []);
+  assert.deepStrictEqual(tk('Apple Hospitality REIT raises its dividend'), []);
+  assert.deepStrictEqual(tk('Adani Enterprises wins a bid'), ['ADANIENT']);
+});
+check('the India rows: no placeholder, sectors in the curated vocabulary', () => {
+  const india = LISTED.companies.filter((c) => c.country === 'IN');
+  assert.ok(india.length > 400 && !india.some((c) => /^DUMMY/.test(c.ticker)));
+  assert.ok(india.every((c) => c.exchange === 'NSE'));
+  assert.deepStrictEqual(parseNifty('Company Name,Industry,Symbol,Series,ISIN Code\nDummy HEG Ltd.,Capital Goods,DUMMYHEG,EQ,DUM1\nDLF Ltd.,Realty,DLF,EQ,X\nEIH Ltd.,Consumer Services,EIHOTEL,EQ,Y\nACC Ltd.,Construction Materials,ACC,EQ,Z\n').map((c) => [c.ticker, c.sector]),
+    [['DLF', 'Real Estate'], ['EIHOTEL', 'Consumer Discretionary'], ['ACC', 'Materials']]);
+});
+
 console.log('commodities that are everyday words:');
 check('counted in a headline about the commodity as one', () => {
   assert.deepStrictEqual(tk('Sugar prices jump as Brazil output falls'), ['SUGAR']);

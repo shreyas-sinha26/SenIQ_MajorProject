@@ -22,8 +22,9 @@
  *
  * A company already in the curated universe is left out (the curated entry wins). A name
  * that is a single ordinary English word ("Target", "Gap") is flagged `plain`, so the
- * resolver asks for a company cue beside it; the word list is this machine's
- * /usr/share/dict/words, read at build time only.
+ * resolver asks for a company cue beside it; an Indian symbol that is not an ordinary word
+ * is flagged `brand`, so it matches in any capitals ("Paytm"). The word list is this
+ * machine's /usr/share/dict/words, read at build time only.
  */
 const fs = require('fs');
 const path = require('path');
@@ -40,13 +41,16 @@ const GICS = {
   Energy: 'Energy', Financials: 'Financials', 'Health Care': 'Health Care', Industrials: 'Industrials',
   Materials: 'Materials', 'Real Estate': 'Real Estate', Utilities: 'Utilities',
 };
+// First match wins, so the narrower names come before the words they contain
+  // ("Construction Materials" before "Construction", "Consumer Services" before "Services").
 const NSE_INDUSTRY = [
   [/information technology/i, 'Information Technology'], [/financial|bank|insurance/i, 'Financials'],
-  [/health|pharma/i, 'Pharmaceuticals'], [/automobile|auto components/i, 'Automobile'],
+  [/health|pharma/i, 'Health Care'], [/automobile|auto components/i, 'Automobile'],
   [/fast moving consumer goods|fmcg/i, 'FMCG'], [/oil|gas|consumable fuels/i, 'Energy'],
   [/metals|mining|chemicals|construction materials|forest/i, 'Materials'], [/power|utilities/i, 'Power'],
-  [/telecom/i, 'Telecom'], [/capital goods|construction|services|diversified/i, 'Industrials'],
-  [/consumer durables|consumer services|textiles|media|realty/i, 'Consumer Discretionary'],
+  [/telecom/i, 'Telecom'], [/realty/i, 'Real Estate'],
+  [/consumer durables|consumer services|textiles|media/i, 'Consumer Discretionary'],
+  [/capital goods|construction|services|diversified/i, 'Industrials'],
 ];
 
 // Wiki cell → plain text: drop a leading style attribute, templates, links and refs.
@@ -98,13 +102,13 @@ function parseNifty(text) {
     const c = parseCsvLine(l);
     const sector = (NSE_INDUSTRY.find(([re]) => re.test(c[iInd])) || [null, 'Industrials'])[1];
     return { ticker: c[iSym].toUpperCase(), name: c[iName], sector, exchange: 'NSE', country: 'IN' };
-  }).filter((r) => r.ticker && r.name);
+  }).filter((r) => r.ticker && r.name && !/^DUMMY/.test(r.ticker)); // the list carries placeholder rows during a demerger
 }
 
 // The name with its corporate tail removed: what a headline actually writes.
 const TAIL = /[\s,]+(?:incorporated|inc|corporation|corp|company|co|limited|ltd|plc|n\.?v|s\.?a|holdings?|group|trust|the)\.?$/i;
 function coreName(name) {
-  let n = String(name).replace(/\s*\((?:class [a-z]|the)\)\s*/gi, ' ').replace(/^the\s+/i, '').replace(/\s+/g, ' ').trim();
+  let n = String(name).replace(/\s*\((?:class [a-z]|the|india|i)\)\s*/gi, ' ').replace(/^the\s+/i, '').replace(/\s+/g, ' ').trim();
   for (let i = 0; i < 3 && TAIL.test(n); i++) n = n.replace(TAIL, '').replace(/[\s,&]+$/, '').trim();
   return n || String(name).trim();
 }
@@ -135,6 +139,10 @@ function main() {
     const core = coreName(c.name);
     const row = { ticker: c.ticker, name: c.name, core, sector: c.sector, exchange: c.exchange, country: c.country };
     if (!/\s/.test(core) && words.has(core.toLowerCase())) row.plain = true;
+    // An Indian symbol is often the brand a headline writes — Paytm, Nykaa, Naukri — in any
+    // capitals. Allowed when the symbol is long enough and is not itself an ordinary word
+    // (CLEAN, AMBER and TRIDENT are not allowed; they match only in capitals).
+    if (c.country === 'IN' && /^[A-Z]{5,}$/.test(c.ticker) && !words.has(c.ticker.toLowerCase())) row.brand = true;
     companies.push(row);
   }
   companies.sort((a, b) => (a.country + a.ticker < b.country + b.ticker ? -1 : 1));

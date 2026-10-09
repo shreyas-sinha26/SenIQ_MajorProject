@@ -176,14 +176,47 @@ function namesHolding(holding, text) {
   const listed = LISTED_BY_TICKER.get(sym);
   if (new RegExp(`(?:\\b(?:NYSE|NASDAQ|Nasdaq|NSE|BSE|AMEX)\\s*:\\s*|\\$)${escapeRegex(sym)}(?![A-Za-z0-9])`).test(text)) return true;
   const bareFrom = !listed ? 1 : listed.country === 'IN' ? 4 : 5;
-  if (sym.length >= bareFrom && new RegExp(edge(sym)).test(text)) return true;
+  // `brand`: an Indian symbol that is the name headlines use, in any capitals ("Paytm").
+  if (sym.length >= bareFrom && new RegExp(edge(sym), listed && listed.brand ? 'i' : '').test(text)) return true;
   const core = listed ? listed.core : String(holding.name || '').trim();
   if (core.length < (listed ? 2 : 4)) return false;
+  let re;
   // Several words: as written, capitals included — "Preferred Bank" is the company, "the
   // preferred bank for exporters" is not. A holding we know only by a typed name is looser.
-  if (/\s/.test(core)) return new RegExp(edge(core), listed ? '' : 'i').test(text);
-  if (listed && listed.plain) return new RegExp(`${edge(core).slice(0, -'(?![A-Za-z0-9])'.length)}${COMPANY_CUE}|\\b(?:shares|stock) of ${escapeRegex(core)}(?![A-Za-z0-9])`).test(text);
-  return new RegExp(edge(core)).test(text);
+  if (/\s/.test(core)) re = new RegExp(edge(core), listed ? 'g' : 'gi');
+  else if (listed && listed.plain) re = new RegExp(`${edge(core).slice(0, -'(?![A-Za-z0-9])'.length)}${COMPANY_CUE}|\\b(?:shares|stock) of ${escapeRegex(core)}(?![A-Za-z0-9])`, 'g');
+  else re = new RegExp(edge(core), 'g');
+  // The name inside a longer company's name is that other company: "Bank of India" in
+  // "Union Bank of India", "Tata Motors" in "Tata Motors Passenger Vehicles".
+  const longer = longerNames(core);
+  const lower = text.toLowerCase();
+  for (const m of text.matchAll(re)) {
+    const inside = longer.some((name) => {
+      for (let i = lower.indexOf(name); i !== -1; i = lower.indexOf(name, i + 1)) {
+        if (i <= m.index && m.index + m[0].length <= i + name.length + 2) return true;
+      }
+      return false;
+    });
+    if (!inside) return true;
+  }
+  return false;
+}
+
+// Names that are not companies we hold a row for, but contain one's name.
+const OTHER_NAMES = ['reserve bank of india', 'export-import bank of india', 'securities and exchange board of india', 'south indian bank'];
+let knownNames = null;
+const longerCache = new Map();
+// Every known name (lower-case) that strictly contains this one.
+function longerNames(core) {
+  const c = core.toLowerCase();
+  if (longerCache.has(c)) return longerCache.get(c);
+  if (!knownNames) {
+    const { UNIVERSE } = require('../data/universe');
+    knownNames = [...new Set([...LISTED.map((x) => x.core), ...UNIVERSE.flatMap((x) => [x.name, ...(x.aliases || [])]), ...OTHER_NAMES].map((n) => String(n).toLowerCase()))];
+  }
+  const out = knownNames.filter((n) => n.length > c.length && n.includes(c));
+  longerCache.set(c, out);
+  return out;
 }
 
 /**
@@ -255,6 +288,11 @@ function buildResolver(companies, executives) {
     for (const s of syns) sectorThemeRe.push({ re: new RegExp(`\\b${escapeRegex(s)}\\b`, 'i'), sector });
   }
 
+  // Listed-tier names of several words, lower-case → their ticker, less any that a curated
+  // company already answers to.
+  const LISTED_SPANS = LISTED.filter((c) => /\s/.test(c.core) && !longAliases.has(c.core.toLowerCase()) && !symbolByTicker.has(c.ticker))
+    .map((c) => [c.core.toLowerCase(), new Set([c.ticker])]);
+
   // Companies named in a piece of text (names, aliases, symbols). Pure.
   function companiesIn(original) {
     const lower = original.toLowerCase();
@@ -269,11 +307,17 @@ function buildResolver(companies, executives) {
         spans.push({ s: i, e: i + alias.length, tks });
       }
     }
+    // A listed company's name is a span too — not to tag it (that needs a holder), but so a
+    // curated name inside it is read as the other company: "ITC Hotels" is not ITC, "Adani
+    // Power" is not Adani Enterprises.
+    for (const [name, tk] of LISTED_SPANS) {
+      for (let i = lower.indexOf(name); i !== -1; i = lower.indexOf(name, i + 1)) spans.push({ s: i, e: i + name.length, tks: tk, other: true });
+    }
     // Shadowed = strictly inside a longer alias that belongs only to other companies.
     const shadowed = (s, e, tks) => spans.some((sp) =>
       sp.s <= s && e <= sp.e && sp.e - sp.s > e - s && ![...tks].some((t) => sp.tks.has(t)));
     for (const sp of spans) {
-      if (!shadowed(sp.s, sp.e, sp.tks)) sp.tks.forEach((t) => tickers.add(t));
+      if (!sp.other && !shadowed(sp.s, sp.e, sp.tks)) sp.tks.forEach((t) => tickers.add(t));
     }
     // Short aliases (whole-word, case-insensitive).
     for (const { re, tickers: tks } of shortAliasRe) {
@@ -287,11 +331,16 @@ function buildResolver(companies, executives) {
     }
     // Ticker symbols (whole-word, UPPERCASE only — avoids "sol"/"ada" noise).
     for (const { re, ticker } of symbolRe) {
-      if (re.test(original)) tickers.add(ticker);
+      if (tickers.has(ticker)) continue;
+      for (const m of original.matchAll(new RegExp(re.source, 'g'))) {
+        if (!shadowed(m.index, m.index + m[0].length, new Set([ticker]))) { tickers.add(ticker); break; }
+      }
     }
     // Ambiguous common-word names (e.g. "Visa") — only when capitalized in original.
     for (const { re, tickers: tks } of capitalRe) {
-      if (re.test(original)) tks.forEach((t) => tickers.add(t));
+      for (const m of original.matchAll(new RegExp(re.source, 'g'))) {
+        if (!shadowed(m.index, m.index + m[0].length, tks)) { tks.forEach((t) => tickers.add(t)); break; }
+      }
     }
     return tickers;
   }
