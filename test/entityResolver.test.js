@@ -190,7 +190,7 @@ console.log('crypto and India coverage:');
 check('every universe coin is filed as crypto and has a price key', () => {
   const { resolveAsset, coingeckoIdFor, NON_EQUITY_ALIASES } = require('../server/services/assetRegistry');
   const coins = companies.filter((c) => c.asset_class === 'crypto').map((c) => c.ticker);
-  assert.strictEqual(coins.length, 45);
+  assert.strictEqual(coins.length, 46);
   assert.deepStrictEqual(coins.filter((t) => resolveAsset(t).assetClass !== 'crypto' || !coingeckoIdFor(t)), []);
   assert.strictEqual(coingeckoIdFor('AAPL'), null);
   // The legacy matcher must not learn "etc" / "near" / "ton" as aliases.
@@ -224,6 +224,8 @@ check('a coin symbol that is also a word counts only in a crypto story', () => {
   assert.deepStrictEqual(tk('HYPE token rallies on Hyperliquid buyback'), ['HYPE']);
   assert.deepStrictEqual(tk('RAY and INJ lead altcoin gains'), ['INJ', 'RAY']);
   assert.deepStrictEqual(tk('ICP norms tightened for exporters'), []);
+  assert.deepStrictEqual(tk('CAKE SALE: bakery chains cut prices'), []);
+  assert.deepStrictEqual(tk('PancakeSwap burns 9M CAKE in a week'), ['CAKE']);
 });
 check('the crypto talk may sit in the summary while the headline names the coin', () => {
   assert.deepStrictEqual(resolve('Robinhood adds Jupiter for US users', 'The Solana DEX aggregator said trading goes live next week.').tickers.sort(), ['HOOD', 'JUP', 'SOL']);

@@ -196,12 +196,12 @@ const IN = [
   { ticker: 'MAXHEALTH', name: 'Max Healthcare', sector: 'Health Care' },
 ];
 
-// ── Crypto (45) ──
+// ── Crypto (46) ──
 // coingeckoId = the price key (CoinGecko /simple/price); the first 25 checked against the API
-// 2026-10-07, the 20 from Zcash on 2026-10-09. Those 20 are CoinGecko's top 100 that day less
+// 2026-10-07, the 21 from Zcash on 2026-10-09. Those 21 are CoinGecko's top 100 that day less
 // stablecoins, wrapped / staked copies, tokenised funds and exchange tokens, at $50M+ a day.
-// Sui takes the symbol SUI from Sun Communities (left out of listed.json, as for any curated
-// symbol). PancakeSwap (CAKE) is left out: The Cheesecake Factory keeps that symbol.
+// Sui takes the symbol SUI from Sun Communities and PancakeSwap takes CAKE from The Cheesecake
+// Factory (both left out of listed.json, as for any curated symbol).
 // Several names and symbols are everyday words — see CRYPTO_NEEDS_CONTEXT in entityResolver.js.
 const CRYPTO = [
   { ticker: 'BTC', name: 'Bitcoin', coingeckoId: 'bitcoin' }, { ticker: 'ETH', name: 'Ethereum', aliases: ['ether'], coingeckoId: 'ethereum' },
@@ -227,6 +227,7 @@ const CRYPTO = [
   { ticker: 'RENDER', name: 'Render', aliases: ['render network'], coingeckoId: 'render-token' }, { ticker: 'FIL', name: 'Filecoin', coingeckoId: 'filecoin' },
   { ticker: 'AERO', name: 'Aerodrome Finance', aliases: ['aerodrome'], coingeckoId: 'aerodrome-finance' }, { ticker: 'INJ', name: 'Injective', coingeckoId: 'injective-protocol' },
   { ticker: 'RAY', name: 'Raydium', coingeckoId: 'raydium' }, { ticker: 'SUI', name: 'Sui', aliases: ['sui network'], coingeckoId: 'sui' },
+  { ticker: 'CAKE', name: 'PancakeSwap', coingeckoId: 'pancakeswap-token' },
 ].map((c) => ({ ...c, sector: 'Crypto', assetClass: 'crypto', exchange: 'CRYPTO', country: 'GLOBAL' }));
 
 // ── Commodities (prices: Yahoo front-month futures, see priceService.COMMODITY_YAHOO) ──
