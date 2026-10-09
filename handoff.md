@@ -816,7 +816,7 @@ request, and the branch deleted. Tagged `v1.11` / `v2.11`. The company reference
 matched in news strictly and only while held; commodities go from 4 to 15.
 
 **Pull request #13** (`ipo-watch`) was merged by Annas on 2026-10-09 as `d9ec9df`. Tagged
-`v1.12` / `v2.12`; the branch was not deleted. IPO Watch (§5) is behind `IPO_WATCH=1`: eleven
+`v1.12` / `v2.12`, and the branch deleted. IPO Watch (§5) is behind `IPO_WATCH=1`: eleven
 migrations (`0031`–`0041`), `server/services/ipoWatch/`, a tab with an India / US switch, and
 two touches on the news pipeline (company news for newly filed or priced US issues; linking
 and reading IPO stories at the end of each pass). `IPO_PLAN.md` is the full record.
