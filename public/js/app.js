@@ -2078,17 +2078,259 @@ async function deleteWebhook(id) {
   } catch (err) { showToast(err.message, 'error'); }
 }
 
+// ── IPO Watch: the calendar of Indian public issues ──
+let ipoMarket = 'in';
+let ipoBoard = 'mainboard';
+let ipoSpacs = '0';
+let ipoUsView = 'all';
+const IPO_STAGE_LABEL = { announced: 'Announced', upcoming: 'Upcoming', open: 'Open', closed: 'Awaiting listing', listed: 'Listed', withdrawn: 'Withdrawn' };
+
+// "2026-10-14" → "14 Oct"; the year is added only when it is not this one.
+function ipoDay(s) {
+  const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return '—';
+  const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(m[2]) - 1];
+  return `${Number(m[3])} ${mon}${Number(m[1]) === new Date().getFullYear() ? '' : ` ${m[1]}`}`;
+}
+
+function ipoPriceBand(i) {
+  if (i.price_low == null && i.price_high == null) return '—';
+  if (i.price_low == null || i.price_high == null || i.price_low === i.price_high) return `₹${i.price_high ?? i.price_low}`;
+  return `₹${i.price_low} – ₹${i.price_high}`;
+}
+
+// Grey market premium: ₹ over the issue price, its share of the top price, and which way it
+// moved since the reading before. "—" when there is no fresh reading.
+function ipoGmpCell(i) {
+  if (i.gmp == null) return '—';
+  const pct = i.gmp_pct == null ? '' : ` <span class="ipo-meta-inline">(${i.gmp_pct > 0 ? '+' : ''}${i.gmp_pct}%)</span>`;
+  const move = i.gmp_prev == null || i.gmp_prev === i.gmp ? '' : i.gmp > i.gmp_prev ? ' <span class="ipo-gmp-up" title="Up from ₹' + i.gmp_prev + '">▲</span>' : ' <span class="ipo-gmp-down" title="Down from ₹' + i.gmp_prev + '">▼</span>';
+  return `<span title="Unofficial grey market figure via ${escapeHtml(i.gmp_source || 'an aggregator')}, read ${fmtDate(i.gmp_at)}">${i.gmp < 0 ? '−' : ''}₹${Math.abs(i.gmp)}${pct}${move}</span>`;
+}
+
+// A graduated issue's company is in the reference, so it can go straight into the portfolio.
+function ipoAddButton(i) {
+  if (!i.graduated || !i.symbol) return '';
+  const held = holdings.some(h => h.ticker === i.symbol);
+  return held ? ' · <span title="In your portfolio">held</span>'
+    : ` · <button type="button" class="ipo-add" data-add-ticker="${escapeHtml(i.symbol)}" title="Add ${escapeHtml(i.symbol)} to your portfolio">+ Portfolio</button>`;
+}
+
+// The button sits inside a row that opens the news on click, so its click stops there.
+function wireIpoAddButtons(box) {
+  box.querySelectorAll('.ipo-add').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); ipoAddToPortfolio(b); }));
+}
+
+async function ipoAddToPortfolio(btn) {
+  const ticker = btn.dataset.addTicker;
+  btn.disabled = true;
+  try {
+    const res = await api('/api/portfolio', { method: 'POST', body: JSON.stringify({ ticker, asset_class: 'equity' }) });
+    if (res.holding) { holdings.push(res.holding); document.getElementById('holdings-count').textContent = holdings.length; renderHoldings(); }
+    showToast(`${ticker} added to portfolio`, 'success');
+    btn.outerHTML = '<span title="In your portfolio">held</span>';
+  } catch (err) {
+    showToast(err.message || `Could not add ${ticker}`, 'error');
+    btn.disabled = false;
+  }
+}
+
+// Under the listing date of a listed issue: the price it listed at and the gain over the issue price.
+function ipoListingNote(i, cur = '₹') {
+  if (i.listing_price == null && i.listing_gain_pct == null) return '';
+  const g = i.listing_gain_pct;
+  const gain = g == null ? '' : ` (${g > 0 ? '+' : g < 0 ? '−' : ''}${Math.abs(g).toFixed(1)}%)`;
+  const price = i.listing_price == null ? 'listed' : `at ${i.listing_price_derived ? `≈${cur}${i.listing_price >= 100 ? Math.round(i.listing_price) : i.listing_price.toFixed(1)}` : `${cur}${i.listing_price}`}`;
+  const tip = i.listing_price_derived ? 'Gain over the issue price as reported; the price is worked back from it' : 'Listing price and gain over the issue price';
+  // Later closes, each as a return over the issue price, as they come due.
+  const pct = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(1)}%`;
+  const later = [['day close', i.ret_listing_day_pct], ['1w', i.ret_1w_pct], ['1m', i.ret_1m_pct], ['3m', i.ret_3m_pct]].filter(([, v]) => v != null);
+  return `<span class="ipo-meta ipo-lot" title="${tip}">${price}${gain}</span>${
+    later.length ? `<span class="ipo-meta" title="Closing price against the issue price">${later.map(([k, v]) => `${k} ${pct(v)}`).join(' · ')}</span>` : ''}`;
+}
+
+// Subscription: times the issue was bid for, with the split by investor class beneath and
+// the day the figures are as of on hover.
+function ipoSubCell(i) {
+  if (i.sub_total == null) return '—';
+  const x = (v) => (v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(1) : v.toFixed(2));
+  const parts = [['QIB', i.sub_qib], ['NII', i.sub_nii], ['Retail', i.sub_retail]].filter(([, v]) => v != null);
+  return `<span title="Times subscribed, as of ${fmtDate(i.sub_on)}">${x(i.sub_total)}x</span>${
+    parts.length ? `<span class="ipo-meta">${parts.map(([k, v]) => `${k} ${x(v)}`).join(' · ')}</span>` : ''}`;
+}
+
+async function loadIpoCalendar() {
+  const box = document.getElementById('ipo-calendar');
+  if (!box) return;
+  const us = ipoMarket === 'us';
+  const wire = (id, key, get, set) => document.querySelectorAll(`#${id} .scope-btn`).forEach(b => {
+    b.classList.toggle('active', b.dataset[key] === get());
+    b.onclick = () => { set(b.dataset[key]); loadIpoCalendar(); };
+  });
+  wire('ipo-market-toggle', 'market', () => ipoMarket, v => { ipoMarket = v; });
+  wire('ipo-board-toggle', 'board', () => ipoBoard, v => { ipoBoard = v; });
+  wire('ipo-spac-toggle', 'spacs', () => ipoSpacs, v => { ipoSpacs = v; });
+  wire('ipo-us-view-toggle', 'view', () => ipoUsView, v => { ipoUsView = v; });
+  document.getElementById('ipo-us-view-toggle').classList.toggle('hidden', !us);
+  document.getElementById('ipo-board-toggle').classList.toggle('hidden', us);      // boards are India's
+  document.getElementById('ipo-spac-toggle').classList.toggle('hidden', !us);
+  box.innerHTML = '<div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>';
+  let data;
+  try { data = await api(us ? `/api/ipo-watch/calendar?market=us&spacs=${ipoSpacs}` : `/api/ipo-watch/calendar?market=in&board=${ipoBoard}`); }
+  catch (err) {
+    box.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message || 'Could not load the IPO calendar')}</p></div>`;
+    return;
+  }
+  const issues = data.issues || [];
+  ipoIssues = new Map(issues.map(i => [String(i.id), i]));
+  const note = document.getElementById('ipo-source-note');
+  if (note) note.textContent = !issues.length ? ''
+    : us ? 'From Finnhub\'s IPO calendar. A filed issue has no price or listing day yet, and expected dates can move; check the prospectus before acting.'
+    : 'Dates and prices are compiled from unofficial sources and can change; check the offer document before acting. GMP (grey market premium) is an unofficial, unregulated figure and does not predict the listing price.';
+  if (issues.length === 0) {
+    box.innerHTML = `<div class="empty-state"><p>No ${us ? 'US ' : ipoBoard === 'all' ? '' : ipoBoard === 'sme' ? 'SME ' : 'mainboard '}issues on the calendar yet.</p></div>`;
+    return;
+  }
+  if (us) {
+    // "Deals" leaves out the filings and withdrawals: only issues with a price and a date.
+    const shown = ipoUsView === 'deals' ? issues.filter(i => ['upcoming', 'closed', 'listed'].includes(i.stage)) : issues;
+    if (!shown.length) { box.innerHTML = '<div class="empty-state"><p>No expected or priced US deals right now.</p></div>'; return; }
+    box.innerHTML = renderUsIpoTable(shown);
+    box.querySelectorAll('tr[data-ipo]').forEach(tr => tr.addEventListener('click', () => toggleIpoStories(tr)));
+    wireIpoAddButtons(box);
+    return;
+  }
+  box.innerHTML = `
+    <div class="ipo-table-wrap">
+      <table class="holdings-tbl ipo-tbl">
+        <thead><tr><th>Company</th><th>Stage</th><th>Opens</th><th>Closes</th><th>Lists</th><th>Price band</th><th title="Grey market premium: unofficial, per share over the issue price">GMP</th><th title="Times the shares on offer were bid for: QIB = institutions, NII = non-institutional (HNI), Retail = individuals">Subscribed</th><th>Issue size</th></tr></thead>
+        <tbody>${issues.map(i => `
+          <tr ${i.stories ? `class="ipo-row-click" data-ipo="${i.id}" title="Show the news on this issue"` : ''}>
+            <td><span class="ipo-name">${escapeHtml(i.name)}</span>
+                <span class="ipo-meta">${i.board === 'sme' ? 'SME' : 'Mainboard'}${i.exchange ? ` · ${escapeHtml(i.exchange)}` : ''}${i.symbol ? ` · ${escapeHtml(i.symbol)}` : ''}${i.stories ? ` · ${i.stories} ${i.stories === 1 ? 'story' : 'stories'}` : ''}${ipoAddButton(i)}</span></td>
+            <td><span class="ipo-stage ${i.stage}">${IPO_STAGE_LABEL[i.stage] || escapeHtml(i.stage)}</span></td>
+            <td class="mono">${ipoDay(i.open_date)}</td>
+            <td class="mono">${ipoDay(i.close_date)}</td>
+            <td class="mono">${ipoDay(i.listing_date)}${ipoListingNote(i)}</td>
+            <td class="mono">${ipoPriceBand(i)}${i.lot_size ? `<span class="ipo-meta ipo-lot">lot of ${i.lot_size.toLocaleString('en-IN')}</span>` : ''}</td>
+            <td class="mono">${ipoGmpCell(i)}</td>
+            <td class="mono">${ipoSubCell(i)}</td>
+            <td class="mono">${i.issue_size_cr != null ? fmtInr(i.issue_size_cr * 1e7) : '—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  box.querySelectorAll('tr[data-ipo]').forEach(tr => tr.addEventListener('click', () => toggleIpoStories(tr)));
+  wireIpoAddButtons(box);
+}
+
+// The US table. A US issue has a ticker and a stated status from the day it files, and no
+// lot size, grey market or subscription figures.
+const IPO_US_STAGE_LABEL = { announced: 'Filed', upcoming: 'Expected', closed: 'Priced', listed: 'Trading', withdrawn: 'Withdrawn' };
+const IPO_US_DATE_LABEL = { announced: 'filed', withdrawn: 'withdrawn' };
+
+function ipoUsPrice(i) {
+  const d = (v) => `$${Number(v).toFixed(2)}`;
+  if (i.price_high == null) return '—';
+  return i.price_low != null && i.price_low !== i.price_high ? `${d(i.price_low)} – ${d(i.price_high)}` : d(i.price_high);
+}
+
+function renderUsIpoTable(issues) {
+  return `
+    <div class="ipo-table-wrap">
+      <table class="holdings-tbl ipo-tbl">
+        <thead><tr><th>Company</th><th>Stage</th><th>Date</th><th>Price</th><th>Shares</th><th>Deal size</th></tr></thead>
+        <tbody>${issues.map(i => {
+          const day = i.first_trade_date || i.listing_date || i.status_date;
+          return `
+          <tr ${i.stories ? `class="ipo-row-click" data-ipo="${i.id}" title="Show the news on this issue"` : ''}>
+            <td><span class="ipo-name">${escapeHtml(i.name)}</span>
+                <span class="ipo-meta">${[i.exchange, i.symbol, i.is_spac ? 'SPAC' : '', i.stories ? `${i.stories} ${i.stories === 1 ? 'story' : 'stories'}` : ''].filter(Boolean).map(escapeHtml).join(' · ') || '—'}${ipoAddButton(i)}</span></td>
+            <td><span class="ipo-stage ${i.stage}">${IPO_US_STAGE_LABEL[i.stage] || escapeHtml(i.stage)}</span></td>
+            <td class="mono">${ipoDay(day)}${day && IPO_US_DATE_LABEL[i.stage] ? `<span class="ipo-meta ipo-lot">${IPO_US_DATE_LABEL[i.stage]}</span>` : ''}${ipoListingNote(i, '$')}</td>
+            <td class="mono">${ipoUsPrice(i)}</td>
+            <td class="mono">${i.shares ? fmtMoney(i.shares).replace('$', '') : '—'}</td>
+            <td class="mono">${i.issue_size_usd ? fmtMoney(i.issue_size_usd) : '—'}</td>
+          </tr>`; }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ── IPO Watch: one issue's news — its tone by day, then the stories ──
+let ipoIssues = new Map();
+
+async function toggleIpoStories(tr) {
+  const open = tr.nextElementSibling;
+  if (open && open.classList.contains('ipo-detail')) { open.remove(); tr.classList.remove('row-active'); return; }
+  const issue = ipoIssues.get(tr.dataset.ipo);
+  const detail = document.createElement('tr');
+  detail.className = 'ipo-detail';
+  detail.innerHTML = `<td colspan="${tr.cells.length}"><div class="loading-skeleton"><div class="skeleton-line"></div></div></td>`;
+  tr.after(detail);
+  tr.classList.add('row-active');
+  let data;
+  try { data = await api(`/api/ipo-watch/${issue.id}/stories`); }
+  catch (err) { detail.firstElementChild.innerHTML = `<div class="empty-state small"><p>${escapeHtml(err.message || 'Could not load the news')}</p></div>`; return; }
+  detail.firstElementChild.innerHTML = renderIpoStories(issue, data);
+}
+
+// Tone by day as a small chart: 0–100 up the side, a dot per day sized by its story count,
+// and the issue's own dates marked. Drawn only when a story has been read.
+function ipoArcChart(issue, arc) {
+  if (!arc.length) return '';
+  const W = 640, H = 150, L = 34, R = 14, T = 16, B = 26;
+  const t = (d) => Date.parse(d);
+  const marks = [['Opens', issue.open_date], ['Closes', issue.close_date], ['Lists', issue.listing_date]].filter(([, d]) => d);
+  const days = [...arc.map(p => p.day), ...marks.map(([, d]) => d)];
+  const lo = Math.min(...days.map(t)) - 86400e3, hi = Math.max(...days.map(t)) + 86400e3;
+  const x = (d) => L + ((t(d) - lo) / (hi - lo)) * (W - L - R);
+  const y = (score) => T + (1 - score) * (H - T - B);
+  const pts = arc.map(p => `${x(p.day).toFixed(1)},${y(p.score).toFixed(1)}`).join(' ');
+  return `
+    <svg class="ipo-arc" viewBox="0 0 ${W} ${H}" role="img" aria-label="Tone of the news on ${escapeHtml(issue.name)} by day">
+      ${[0, 0.5, 1].map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="ipo-arc-grid${v === 0.5 ? ' mid' : ''}"/><text x="${L - 6}" y="${y(v) + 3}" class="ipo-arc-axis" text-anchor="end">${v * 100}</text>`).join('')}
+      ${marks.map(([label, d]) => `<line x1="${x(d)}" x2="${x(d)}" y1="${T}" y2="${H - B}" class="ipo-arc-mark"/><text x="${x(d)}" y="${T - 5}" class="ipo-arc-axis" text-anchor="middle">${label}</text>`).join('')}
+      ${arc.length > 1 ? `<polyline points="${pts}" class="ipo-arc-line"/>` : ''}
+      ${arc.map(p => `<circle cx="${x(p.day).toFixed(1)}" cy="${y(p.score).toFixed(1)}" r="${Math.min(8, 3 + p.stories)}" class="ipo-arc-dot"><title>${ipoDay(p.day)}: ${Math.round(p.score * 100)} from ${p.stories} ${p.stories === 1 ? 'story' : 'stories'}</title></circle>`).join('')}
+      <text x="${L}" y="${H - 6}" class="ipo-arc-axis">${ipoDay(days.reduce((a, b) => (t(a) < t(b) ? a : b)))}</text>
+      <text x="${W - R}" y="${H - 6}" class="ipo-arc-axis" text-anchor="end">${ipoDay(days.reduce((a, b) => (t(a) > t(b) ? a : b)))}</text>
+    </svg>`;
+}
+
+function renderIpoStories(issue, { stories, arc, tone }) {
+  const head = tone
+    ? `Tone of the news: <span class="ht-senti-label ${tone.label}">${tone.label}</span> <span class="mono">${Math.round(tone.score * 100)}</span> of 100, from ${tone.stories} ${tone.stories === 1 ? 'story' : 'stories'} read`
+    : 'No story on this issue has been read for tone yet.';
+  return `
+    <div class="ipo-stories">
+      <p class="ipo-stories-head">${head}</p>
+      ${ipoArcChart(issue, arc)}
+      <ul class="ipo-story-list">${stories.map(s => `
+        <li>
+          ${s.sentiment ? `<span class="ht-senti-label ${escapeHtml(s.sentiment.label)}" title="${s.sentiment.model === 'subscription-rule' ? 'Scored from the subscription figure in the headline, not from its wording' : 'Tone of the headline and summary'}">${Math.round(s.sentiment.score * 100)}</span>` : '<span class="ht-senti-label neutral" title="Not read for tone">–</span>'}
+          <div>
+            ${/^https?:\/\//.test(s.url || '') ? `<a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title)}</a>` : escapeHtml(s.title)}
+            <span class="ipo-meta">${escapeHtml(s.source || '')} · ${ipoDay(s.day)}${s.shared ? ' · covers several issues, so not read for tone' : s.passing ? ' · names this issue only in passing, so not read for tone' : ''}</span>
+          </div>
+        </li>`).join('')}
+      </ul>
+    </div>`;
+}
+
 // Top-level page switcher (called from nav tabs and inline onclick).
 const STRATEGY_PAGES = ['strategy-builder', 'strategies', 'backtest', 'paper-trade'];
 const strategiesEnabled = () => !document.body.classList.contains('no-strategies');
 
 function switchToPage(page) {
   if (STRATEGY_PAGES.includes(page) && !strategiesEnabled()) page = 'dashboard';
+  if (page === 'ipo-watch' && document.body.classList.contains('no-ipo-watch')) page = 'dashboard';
   document.querySelectorAll('.main-tab').forEach(t => t.classList.toggle('active', t.dataset.page === page));
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('hidden', p.id !== `page-${page}`));
   if (page === 'analytics') loadAnalytics();
   if (page === 'ai') { loadDailyBrief(); loadAskThreads(); }
   if (page === 'profile') { populateProfilePage(currentUser); loadPlans(); loadApiKeys(); loadEmailPrefs(); }
+  if (page === 'ipo-watch') loadIpoCalendar();
   if (page === 'backtest') initBacktestPage();
   if (page === 'strategy-builder') initBuilderPage();
   if (page === 'strategies') initStrategiesPage();
