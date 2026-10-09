@@ -61,9 +61,10 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 ## 3. Current state
 
 - **Git** *(checked 2026-10-08)*: on `main`, level with `origin/main`, no other branch, no
-  open pull request *(checked 2026-10-09)*. Latest tags **`v1.10` / `v2.10`** on `839df81`, the merge of pull request #10
-  (the final sentiment refinement and the corrected README results). The commits after it
-  on `main` are handoff notes and the README's "latest tag" line. Untracked and never pushed: `samples/` and `.github/` (see §11).
+  open pull request *(checked 2026-10-09)*. Latest tags **`v1.10` / `v2.10`** on `839df81` (pull request #10). After it,
+  **untagged**: pull request #11 (`68ef315`, the listed tier of the company reference and 15
+  commodities); the rest are handoff notes. The next pair would be `v1.11` / `v2.11` on
+  `68ef315`. `IPO_PLAN.md` has an uncommitted edit that no session made — left alone. Untracked and never pushed: `samples/` and `.github/` (see §11).
 - **Tests** *(checked 2026-10-09)*: `npm test` passes — 23 files, 554 checks, offline
   (no database or API calls).
 - **Dev database** *(checked)*: Postgres `seniq`, all 31 migration files applied (latest
@@ -551,6 +552,23 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   name gets less news than it should; multi-word names in an ALL-CAPS headline are missed; the commodity reading still
   follows the story's tone, not the price direction.
 
+**Crypto: proposed, not built (2026-10-09).** Annas asked about widening the 25 curated coins.
+- **The feed has no crypto news source.** In 2,088 stored stories Bitcoin is in 33 headlines,
+  Ethereum and Solana in 4 each, and most curated coins (Chainlink, Avalanche, Polkadot,
+  Litecoin…) in none. Sources are Finnhub company news (per stock), GDELT and four Indian
+  outlets; Reddit is off. More coins without a crypto source would be price-only. Suggested:
+  RSS from the main crypto outlets through the existing RSS reader.
+- **Suggested additions (about 21):** from CoinGecko's top 100 on 2026-10-09, leaving out
+  stablecoins, wrapped / staked / bridged copies, tokenised funds and gold, and exchange
+  tokens, and keeping only coins trading at least $50M a day (and 1% of market value) that
+  are two or more years old: Zcash, Monero, Sui, Hedera, Quant, Bittensor, Ethena, Aave,
+  Ondo, Worldcoin, Internet Computer, Pepe, Jupiter, Algorand, Render, Filecoin, Aerodrome,
+  Injective, PancakeSwap, Raydium — plus Hyperliquid (11th largest, 1.9 years old). Several
+  are everyday words and would need the cue rule.
+- Waiting on Annas: both parts, or the coin list only; Hyperliquid in or out.
+- Seen in passing: CoinGecko now calls Toncoin "Gram (prev. Toncoin)", symbol GRAM. The
+  curated entry still says TON / Toncoin; the price key (`the-open-network`) still works.
+
 **Entity resolution.**
 - A commodity word inside a company name ("Senco Gold") no longer tags the commodity, using a
   short list (`COMMODITY_COMPANY_NAMES`) plus capital-letter clues. A Title Case headline
@@ -747,6 +765,11 @@ a paper deployment, revoke an API key) now use an in-page dialog, `confirmAction
 request, and the branch deleted. Tagged `v1.10` / `v2.10`. The local model reads every new story and
 its agreement with FinBERT is the reading's confidence; an optional fine-tuned FinBERT is
 wired but off; the README's results section now carries both label sheets (§8).
+
+**Pull request #11** (`listed-universe`) was merged on 2026-10-09 as `68ef315`, at Annas's
+request, and the branch deleted. **Not tagged.** The company reference has two tiers (§8):
+1,839 listed companies (S&P 1500 and Nifty 500) can be searched, held and priced, and are
+matched in news strictly and only while held; commodities go from 4 to 15.
 
 ---
 
