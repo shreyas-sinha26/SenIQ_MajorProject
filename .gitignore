@@ -63,3 +63,6 @@ eval/ask/runs/
 # Sentiment model training: downloaded data and model weights
 training/data/
 models/
+
+# Downloaded constituent lists the listed tier is built from (scripts/build_listed_universe.js)
+server/data/sources/

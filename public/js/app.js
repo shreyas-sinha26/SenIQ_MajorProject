@@ -1278,17 +1278,38 @@ function initModal() {
     }
   });
 
-  // Smart autocomplete
+  // Smart autocomplete: the built-in list answers at once; the server's company reference
+  // (every listed stock) fills the remaining rows a moment later.
+  let searchTimer = null;
+  const localMatches = (q) => ASSET_DB.filter(a =>
+    a.ticker.toLowerCase().includes(q) ||
+    a.name.toLowerCase().includes(q) ||
+    a.market.toLowerCase().includes(q)
+  ).slice(0, 8);
+
   input.addEventListener('input', () => {
     const q = input.value.trim().toLowerCase();
+    clearTimeout(searchTimer);
     if (!q) { autocomplete.classList.add('hidden'); return; }
+    renderMatches(localMatches(q));
+    searchTimer = setTimeout(async () => {
+      try {
+        const { results } = await api(`/api/portfolio/search?q=${encodeURIComponent(q)}`);
+        for (const r of results) {
+          if (ASSET_DB.some(a => a.ticker === r.ticker)) continue;
+          const india = r.country === 'IN';
+          ASSET_DB.push({
+            ticker: r.ticker, name: r.name,
+            type: r.asset_class === 'equity' ? (india ? 'india' : 'stock') : r.asset_class,
+            market: r.asset_class === 'equity' ? (india ? 'India Stock' : 'US Stock') : r.asset_class === 'crypto' ? 'Crypto' : 'Commodity',
+          });
+        }
+        if (input.value.trim().toLowerCase() === q) renderMatches(localMatches(q));
+      } catch { /* the built-in list is still shown */ }
+    }, 200);
+  });
 
-    const matches = ASSET_DB.filter(a =>
-      a.ticker.toLowerCase().includes(q) ||
-      a.name.toLowerCase().includes(q) ||
-      a.market.toLowerCase().includes(q)
-    ).slice(0, 8);
-
+  function renderMatches(matches) {
     if (matches.length === 0) {
       autocomplete.innerHTML = '<div class="asset-no-results">No matching assets found. Press Enter to add custom ticker.</div>';
     } else {
@@ -1297,10 +1318,10 @@ function initModal() {
         return `
           <div class="asset-item${inPortfolio ? ' dimmed' : ''}" onclick="${inPortfolio ? '' : `selectAsset('${a.ticker}')`}">
             <div class="asset-item-left">
-              <div class="asset-item-icon ${a.type}">${a.ticker.slice(0,2)}</div>
+              <div class="asset-item-icon ${a.type}">${escapeHtml(a.ticker.slice(0,2))}</div>
               <div>
-                <div class="asset-item-name">${a.name}</div>
-                <div class="asset-item-ticker">${a.ticker}${inPortfolio ? ' • In portfolio' : ''}</div>
+                <div class="asset-item-name">${escapeHtml(a.name)}</div>
+                <div class="asset-item-ticker">${escapeHtml(a.ticker)}${inPortfolio ? ' • In portfolio' : ''}</div>
               </div>
             </div>
             <span class="asset-type-badge ${a.type}">${a.market}</span>
@@ -1309,7 +1330,7 @@ function initModal() {
       }).join('');
     }
     autocomplete.classList.remove('hidden');
-  });
+  }
 
   input.addEventListener('focus', () => {
     if (input.value.trim()) input.dispatchEvent(new Event('input'));

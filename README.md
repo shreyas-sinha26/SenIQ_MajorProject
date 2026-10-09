@@ -34,15 +34,21 @@ off, `v2.N` with them on. The latest is `v1.10` / `v2.10`.
 - **Multi-asset portfolio** — quantity and cost basis per holding, converted to USD before
   exposure weights are computed.
 - **Live prices** — crypto from CoinGecko (no key), US stocks from Finnhub (Yahoo as
-  fallback), Indian stocks from Yahoo in INR, commodities from Yahoo futures (FMP as fallback).
+  fallback), Indian stocks from Yahoo in INR, commodities from Yahoo futures (FMP as
+  fallback): gold, silver, crude oil, natural gas, copper, platinum, palladium, aluminium,
+  wheat, corn, soybeans, sugar, coffee, cotton and cocoa, each priced per its futures unit.
 - **Smart onboarding** — adding a holding returns a company brief and backfills its impact
   silently; a holding only alerts on events after it was added.
 
 ### News and sentiment
 - **Sources** — Finnhub company news, GDELT, and four Indian RSS feeds (Economic Times, Mint,
   Moneycontrol, Business Standard). Reddit ingest is built but needs credentials.
-- **Entity resolution** — a curated universe of 186 instruments (100 US, 57 India, 25 crypto,
-  4 commodities) and 192 executives decides which companies a story names.
+- **Entity resolution** — a curated universe of 197 instruments (100 US, 57 India, 25 crypto,
+  15 commodities) and 192 executives decides which companies a story names.
+- **Any S&P 1500 or Nifty 500 stock can be held** — a second, "listed" tier of 1,839 more
+  companies (1,400 US, 439 India: symbol, name, sector) can be searched, added and priced.
+  A listed company is matched in news strictly (its full name, or its symbol where that is
+  unambiguous), and only while someone holds it.
 - **Relevance and de-spam** — every story is graded Holdings / Markets / World / noise, and
   the same story from several outlets becomes one card.
 - **Sentiment reading** — **FinBERT**, a finance-trained model, runs locally and reads each
