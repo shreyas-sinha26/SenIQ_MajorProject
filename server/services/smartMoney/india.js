@@ -142,7 +142,7 @@ async function pollIndiaDeals(opts = {}) {
 // anything a user holds as an Indian stock.
 async function trackedIndianSymbols() {
   const rows = await query(
-    `SELECT ticker FROM companies WHERE country = 'IN' AND is_active = true AND asset_class = 'equity'
+    `SELECT ticker FROM companies WHERE country = 'IN' AND is_active = true AND tier = 'curated' AND asset_class = 'equity'
       UNION
      SELECT p.ticker
        FROM portfolio p LEFT JOIN companies c ON c.ticker = p.ticker

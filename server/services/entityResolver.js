@@ -76,6 +76,11 @@ const COMMODITY_HEADLINE = {
   XAU: /\b(gold|bullion)\b/gi,
   XAG: /\bsilver\b/gi,
 };
+// The later commodities are everyday words — a "sugar tax", a "coffee chain", "copper wire".
+// They count only when the headline also talks about a commodity as one: its price, its
+// futures, its crop or its trade.
+const COMMODITY_NEEDS_CONTEXT = new Set(['COPPER', 'XPT', 'XPD', 'ALUMINIUM', 'WHEAT', 'CORN', 'SOYBEAN', 'SUGAR', 'COFFEE', 'COTTON', 'COCOA']);
+const COMMODITY_CONTEXT = /\b(prices?|futures|rates?|rall(?:y|ies)|surges?|jumps?|rises?|gains?|falls?|slumps?|slips?|drops?|plunges?|climbs?|output|production|crop|harvest|exports?|imports?|supply|demand|stocks|inventor(?:y|ies)|mcx|ncdex|lme|per (?:tonne|ton|kg|quintal|bushel|pound|ounce))\b/i;
 // Companies whose NAME contains a commodity word. "Senco Gold jumps 8%" is a jeweller's
 // results, not the gold price, so the word inside one of these names never tags the
 // commodity. Most of them are outside the universe — they are listed only to be ruled out.
@@ -144,6 +149,41 @@ function universeRows() {
     }
   }
   return { companies, executives };
+}
+
+// ─── Holdings outside the curated universe ───────────────────
+// A held company with no hand-written entry is matched strictly: nobody has checked its name
+// against everyday words, and a loose match here is how "Trent" met "current".
+const LISTED = require('../data/listed.json').companies;
+const LISTED_BY_TICKER = new Map(LISTED.map((c) => [c.ticker, c]));
+const edge = (s) => `(?<![A-Za-z0-9])${escapeRegex(s)}(?![A-Za-z0-9])`;
+// Words that show a capitalised word is being used as a company's name.
+const COMPANY_CUE = "(?:['’]s\\b|\\s+(?:Inc|Corp|Corporation|Co|Ltd|Limited|Holdings|Group|shares?|stock|stocks)\\b)";
+
+/**
+ * Whether a text names a held company that is not in the curated universe. Pure.
+ *   symbol — in exchange notation ("NASDAQ: SEZL", "$SEZL") at any length; bare and
+ *            UPPERCASE only when long enough not to be a word: 5+ letters for a US listed
+ *            stock, 4+ for an Indian one (headlines do write "IRFC", "BHEL"), any length
+ *            for a ticker we know nothing about (how it always was).
+ *   name   — the name without its corporate tail ("Thor Industries"), as whole words and
+ *            with its capitals. A one-word name that is also an ordinary word ("Gap",
+ *            "Block") counts only beside a company cue ("Gap Inc", "Gap shares").
+ * `holding` = { ticker, name? }: for a listed ticker the name comes from listed.json.
+ */
+function namesHolding(holding, text) {
+  const sym = String(holding.ticker).toUpperCase();
+  const listed = LISTED_BY_TICKER.get(sym);
+  if (new RegExp(`(?:\\b(?:NYSE|NASDAQ|Nasdaq|NSE|BSE|AMEX)\\s*:\\s*|\\$)${escapeRegex(sym)}(?![A-Za-z0-9])`).test(text)) return true;
+  const bareFrom = !listed ? 1 : listed.country === 'IN' ? 4 : 5;
+  if (sym.length >= bareFrom && new RegExp(edge(sym)).test(text)) return true;
+  const core = listed ? listed.core : String(holding.name || '').trim();
+  if (core.length < (listed ? 2 : 4)) return false;
+  // Several words: as written, capitals included — "Preferred Bank" is the company, "the
+  // preferred bank for exporters" is not. A holding we know only by a typed name is looser.
+  if (/\s/.test(core)) return new RegExp(edge(core), listed ? '' : 'i').test(text);
+  if (listed && listed.plain) return new RegExp(`${edge(core).slice(0, -'(?![A-Za-z0-9])'.length)}${COMPANY_CUE}|\\b(?:shares|stock) of ${escapeRegex(core)}(?![A-Za-z0-9])`).test(text);
+  return new RegExp(edge(core)).test(text);
 }
 
 /**
@@ -282,7 +322,9 @@ function buildResolver(companies, executives) {
     if ([...tickers].some((t) => headlineOnly.has(t))) {
       const inHeadline = companiesIn(String(title));
       for (const t of [...tickers]) {
-        if (!headlineOnly.has(t) || inHeadline.has(t)) continue;
+        if (!headlineOnly.has(t)) continue;
+        if (COMMODITY_NEEDS_CONTEXT.has(t)) { if (!inHeadline.has(t) || !COMMODITY_CONTEXT.test(String(title))) tickers.delete(t); continue; }
+        if (inHeadline.has(t)) continue;
         if (!headlineNames(t, String(title))) tickers.delete(t);
       }
     }
@@ -296,9 +338,7 @@ function buildResolver(companies, executives) {
     for (const e of extra) {
       const t = typeof e === 'string' ? { ticker: e } : e;
       if (!t.ticker || tickers.has(t.ticker) || symbolByTicker.has(t.ticker)) continue;
-      const symRe = new RegExp(`\\b${escapeRegex(t.ticker.toUpperCase())}\\b`);
-      if (symRe.test(original)) { tickers.add(t.ticker); continue; }
-      if (t.name && t.name.length >= 4 && lower.includes(t.name.toLowerCase())) tickers.add(t.ticker);
+      if (namesHolding(t, original)) tickers.add(t.ticker);
     }
     // Explicit sector themes.
     for (const { re, sector } of sectorThemeRe) {
@@ -332,7 +372,7 @@ const TTL_MS = 10 * 60 * 1000;
 async function loadIndex(force = false) {
   if (_resolver && !force && Date.now() - _loadedAt < TTL_MS) return _resolver;
   const { query } = require('../db');
-  const companies = await query('SELECT ticker, name, aliases, sector, asset_class FROM companies WHERE is_active = true');
+  const companies = await query("SELECT ticker, name, aliases, sector, asset_class FROM companies WHERE is_active = true AND tier = 'curated'");
   const executives = await query('SELECT full_name, ticker, aliases FROM executives');
   _resolver = buildResolver(companies, executives);
   _loadedAt = Date.now();
@@ -350,20 +390,37 @@ async function seedUniverse() {
   const { companies, executives } = universeRows();
   for (const c of companies) {
     await execute(
-      `INSERT INTO companies (ticker, name, aliases, sector, asset_class, exchange, country, is_active, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7, true, now())
+      `INSERT INTO companies (ticker, name, aliases, sector, asset_class, exchange, country, is_active, tier, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7, true, 'curated', now())
        ON CONFLICT (ticker) DO UPDATE SET
          name=EXCLUDED.name, aliases=EXCLUDED.aliases, sector=EXCLUDED.sector,
          asset_class=EXCLUDED.asset_class, exchange=EXCLUDED.exchange, country=EXCLUDED.country,
-         is_active=true, updated_at=now()`,
+         is_active=true, tier='curated', updated_at=now()`,
       [c.ticker, c.name, c.aliases, c.sector, c.asset_class, c.exchange, c.country]
     );
   }
   // Tickers dropped from the file (renamed/delisted, e.g. TATAMOTORS, LTIM) stop
   // resolving but keep their row, so older events that reference them still join.
   await execute(
-    'UPDATE companies SET is_active = false, updated_at = now() WHERE is_active AND NOT (ticker = ANY($1))',
+    "UPDATE companies SET is_active = false, updated_at = now() WHERE is_active AND tier = 'curated' AND NOT (ticker = ANY($1))",
     [companies.map((c) => c.ticker)]
+  );
+  // The listed tier (listed.json): one statement for the whole file. A curated row is never
+  // overwritten — the hand-written entry wins — and a name dropped from the file goes inactive.
+  const listed = LISTED.filter((c) => !companies.some((k) => k.ticker === c.ticker));
+  await execute(
+    `INSERT INTO companies (ticker, name, sector, asset_class, exchange, country, is_active, tier, updated_at)
+     SELECT t, n, s, 'equity', e, c, true, 'listed', now()
+       FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[]) AS f(t, n, s, e, c)
+     ON CONFLICT (ticker) DO UPDATE SET
+       name=EXCLUDED.name, sector=EXCLUDED.sector, exchange=EXCLUDED.exchange, country=EXCLUDED.country,
+       is_active=true, updated_at=now()
+     WHERE companies.tier = 'listed'`,
+    [listed.map((c) => c.ticker), listed.map((c) => c.name), listed.map((c) => c.sector), listed.map((c) => c.exchange), listed.map((c) => c.country)]
+  );
+  await execute(
+    "UPDATE companies SET is_active = false, updated_at = now() WHERE is_active AND tier = 'listed' AND NOT (ticker = ANY($1))",
+    [listed.map((c) => c.ticker)]
   );
   for (const e of executives) {
     await execute(
@@ -383,8 +440,8 @@ async function seedUniverse() {
         WHERE f.full_name = e.full_name AND f.ticker = e.ticker)`,
     [executives.map((e) => e.full_name), executives.map((e) => e.ticker)]
   );
-  const n = (await query('SELECT count(*) c FROM companies WHERE is_active'))[0].c;
-  console.log(`   🏷️  universe seeded: ${n} companies, ${executives.length} executives`);
+  const n = (await query("SELECT count(*) FILTER (WHERE tier = 'curated') c, count(*) FILTER (WHERE tier = 'listed') l FROM companies WHERE is_active"))[0];
+  console.log(`   🏷️  universe seeded: ${n.c} companies, ${executives.length} executives; ${n.l} more listed`);
 }
 
-module.exports = { buildResolver, resolve, loadIndex, seedUniverse, universeRows, SECTOR_THEMES, AMBIGUOUS, AMBIGUOUS_SYMBOLS };
+module.exports = { buildResolver, namesHolding, resolve, loadIndex, seedUniverse, universeRows, SECTOR_THEMES, AMBIGUOUS, AMBIGUOUS_SYMBOLS };

@@ -312,7 +312,7 @@ async function loadUniverse(holdings) {
   const { query } = require('../db');
   // Commodities are left out: "what is driving gold?" is a market question, not a
   // request about a stock the user doesn't hold.
-  const rows = await query("SELECT ticker, name, aliases FROM companies WHERE is_active AND asset_class <> 'commodity'");
+  const rows = await query("SELECT ticker, name, aliases FROM companies WHERE is_active AND tier = 'curated' AND asset_class <> 'commodity'");
   const known = new Set(rows.map((r) => r.ticker));
   for (const h of holdings) {
     if (!known.has(h.ticker)) rows.push({ ticker: h.ticker, name: h.company_name || '', aliases: [] });
