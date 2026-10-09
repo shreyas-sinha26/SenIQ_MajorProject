@@ -92,6 +92,9 @@ const FEATURES = {
   // India side of those tabs: NSE bulk/block deals + insider trades. Opt-in
   // (INDIA_SMART_MONEY=1): the NSE routes are unofficial and their terms are unchecked.
   INDIA_SMART_MONEY: process.env.INDIA_SMART_MONEY === '1',
+  // IPO Watch: the calendar of Indian public issues, its own tab. Opt-in (IPO_WATCH=1) while
+  // the section is being built.
+  IPO_WATCH: process.env.IPO_WATCH === '1',
   // Claude writes the daily brief, Ask answers and the Pro alert narrative. Off unless
   // CLAUDE_REPORTS=1 — a key alone never starts spending.
   CLAUDE_REPORTS: process.env.CLAUDE_REPORTS === '1',
@@ -678,6 +681,52 @@ const INDIA_SMART_MONEY = {
   REPORT: { ROWS: 3, DEAL_DAYS: 7, INSIDER_DAYS: 90 },
 };
 
+// ─── IPO Watch (services/ipoWatch) ───────────────────────────
+// Runs only when FEATURES.IPO_WATCH is on. Dates are the exchange's, so "today" is too.
+const IPO_WATCH = {
+  TIMEZONE: 'Asia/Kolkata',
+  RECENT_LISTED_DAYS: 90,        // a listed issue stays on the calendar this long
+  UNLISTED_AFTER_CLOSE_DAYS: 10, // closed this long with no listing date on record → off the calendar
+  // Grey market premium is hearsay from one aggregator. A reading older than this is not
+  // shown at all — an old number passed off as current is worse than none.
+  GMP_STALE_HOURS: 36,           // the poll is daily; this allows one late run
+  // The calendar is polled once a day, never on boot: the sources are unofficial pages, so
+  // a restart loop must not turn into a burst of requests.
+  CRON: '15 9 * * *',            // 09:15, in TIMEZONE — as the market opens
+  // Sent on every request. Says who we are; override with IPO_WATCH_USER_AGENT.
+  USER_AGENT: process.env.IPO_WATCH_USER_AGENT || 'Mozilla/5.0 (compatible; SenIQ/1.0; admin@xynthis.com)',
+  INVESTORGAIN_URL: 'https://www.investorgain.com/report/live-ipo-gmp/331/',
+  INVESTORGAIN_SUBSCRIPTION_URL: 'https://www.investorgain.com/report/ipo-subscription-live/333/all/',
+  REQUEST_DELAY_MS: 1500,        // gap between two sources — they can be the same site
+  // The registry: stored stories are matched to an issue by name, and a listed issue is
+  // given its ticker.
+  LINK_WINDOW_DAYS: 2,           // how far back each news run looks for stories to link
+  LINK_BACKFILL_DAYS: 30,        // ...and each calendar poll, so a newly seen issue gets its earlier stories
+  MATCH_AFTER_LISTING_DAYS: 30,  // an issue's name stops matching news this long after it lists
+  SYMBOL_LOOKUP_DAYS: 14,        // how long after listing the ticker is still looked for
+  SYMBOL_LOOKUPS_PER_RUN: 20,    // ticker lookups a run — one request each, so a backlog drains over days
+  STORY_READS_PER_RUN: 60,       // linked stories read for tone a run (FinBERT, or the word list)
+  YAHOO_SEARCH_URL: 'https://query2.finance.yahoo.com/v1/finance/search',   // unofficial, like the price route
+  // US issues come from Finnhub's IPO calendar (FINNHUB_API_KEY), in the same daily poll.
+  FINNHUB_IPO_URL: 'https://finnhub.io/api/v1/calendar/ipo',
+  US_LOOKBACK_DAYS: 30,          // how far back each poll asks for US filings, pricings and withdrawals
+  US_LOOKAHEAD_DAYS: 60,         // ...and how far ahead (Finnhub rarely dates anything past the week)
+  // Returns after listing, read from Yahoo's daily prices for issues that have a ticker.
+  YAHOO_CHART_URL: 'https://query1.finance.yahoo.com/v8/finance/chart',
+  RETURN_SLACK_DAYS: 5,          // a horizon's close may be this many days late (weekends, holidays)
+  RETURN_GIVE_UP_DAYS: 100,      // stop asking for an issue's prices this long after it listed (the 3-month close is the last)
+  RETURN_LOOKUPS_PER_RUN: 20,    // price lookups a run — one request each
+  US_TIMEZONE: 'America/New_York',   // a US day's prices are final once this clock has moved past it
+  // Graduation into the company reference: the price feed's opening price on the listing day
+  // must be this close to the listing price the source gave, or the ticker is not trusted.
+  GRADUATE_PRICE_TOLERANCE: 0.02,
+  // US issues with a ticker get their company news fetched in the news pipeline, so stories
+  // exist to link: the newest few, a request each a pass.
+  MONITOR_TICKERS: 10,
+  MONITOR_DAYS: 30,
+  TIMEOUT_MS: 20000,
+};
+
 // ─── Strategy service (Phase 7) ──────────────────────────────
 // The Python backtest engine runs as its own HTTP service; SenIQ proxies to it.
 // When the service isn't running, strategy routes return 503 and the rest of the
@@ -753,4 +802,4 @@ const SESSION = {
   REAUTH_MINUTES: 10,    // how long a password confirmation covers sensitive actions
 };
 
-module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
+module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, STRATEGY_SERVICE, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };

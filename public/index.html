@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/css/style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
-<body class="no-strategies">
+<body class="no-strategies no-ipo-watch">
   <!-- ═══ AUTH VIEW ═══ -->
   <div id="auth-view" class="view">
     <div class="auth-split">
@@ -333,6 +333,10 @@
         <button class="main-tab" data-page="ai">
           <span class="material-symbols-outlined">psychology</span>
           <span class="main-tab-label">AI Workspace</span>
+        </button>
+        <button class="main-tab" data-page="ipo-watch" data-feature="ipo-watch">
+          <span class="material-symbols-outlined">event_upcoming</span>
+          <span class="main-tab-label">IPO Watch</span>
         </button>
 
         <div class="main-nav-group" data-feature="strategies">Strategies</div>
@@ -729,6 +733,35 @@
       </div><!-- /page-analytics -->
 
       <!-- ═══ PAGE: AI Workspace ═══ -->
+      <!-- ═══ PAGE: IPO Watch (calendar of Indian public issues) ═══ -->
+      <div id="page-ipo-watch" class="page hidden" data-feature="ipo-watch">
+        <section class="chart-section glass">
+          <div class="section-header">
+            <h2>IPO calendar</h2>
+            <span class="impact-subtitle" id="ipo-subtitle">Public issues, from announcement to listing</span>
+            <div class="scope-toggle" id="ipo-market-toggle">
+              <button class="scope-btn active" data-market="in">India</button>
+              <button class="scope-btn" data-market="us">US</button>
+            </div>
+            <div class="scope-toggle hidden" id="ipo-us-view-toggle" title="Deals: only issues that are expected, priced or trading">
+              <button class="scope-btn active" data-view="all">All</button>
+              <button class="scope-btn" data-view="deals">Deals</button>
+            </div>
+            <div class="scope-toggle hidden" id="ipo-spac-toggle" title="Blank-check companies: shells that list to buy a business later">
+              <button class="scope-btn active" data-spacs="0">Companies</button>
+              <button class="scope-btn" data-spacs="1">With SPACs</button>
+            </div>
+            <div class="scope-toggle" id="ipo-board-toggle">
+              <button class="scope-btn active" data-board="mainboard">Mainboard</button>
+              <button class="scope-btn" data-board="sme">SME</button>
+              <button class="scope-btn" data-board="all">All</button>
+            </div>
+          </div>
+          <div id="ipo-calendar"></div>
+          <p class="an-caption" id="ipo-source-note"></p>
+        </section>
+      </div>
+
       <div id="page-ai" class="page hidden">
         <!-- Daily Brief (E5 — the analyst voice) -->
         <section class="brief-section animate-in" style="--delay: 1" id="brief-section">
@@ -1303,6 +1336,7 @@
         document.querySelectorAll('[data-disclaimer]').forEach(el => { el.textContent = disclaimer; });
         // v2 (strategies, API/MCP) is hidden by default; shown only when the server enables it.
         if (features && features.strategies) document.body.classList.remove('no-strategies');
+        if (features && features.ipoWatch) document.body.classList.remove('no-ipo-watch');
       })
       .catch(() => {});
   </script>
