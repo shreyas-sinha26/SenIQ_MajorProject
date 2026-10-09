@@ -32,11 +32,34 @@ router.get('/', async (req, res) => {
     // coverage: 'full' for a ticker in the curated universe (aliases, executives, sector news),
     // 'basic' for anything else (matched on name and symbol only) — so thin news on such a
     // holding reads as a known limit, not a fault.
-    const universe = new Set((await query('SELECT ticker FROM companies WHERE is_active')).map((r) => r.ticker));
+    const universe = new Set((await query("SELECT ticker FROM companies WHERE is_active AND tier = 'curated'")).map((r) => r.ticker));
     res.json({ holdings: holdings.map((h) => ({ ...h, coverage: universe.has(h.ticker) ? 'full' : 'basic' })) });
   } catch (err) {
     console.error('List portfolio error:', err);
     res.status(500).json({ error: 'Failed to load portfolio' });
+  }
+});
+
+// ─── GET /api/portfolio/search?q= ────────────────────────────
+// The add-holding box: any company in the reference, curated or listed, by symbol or name.
+// An exact symbol comes first, then symbols that start with the text, then names.
+router.get('/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim().slice(0, 40).replace(/[%_\\]/g, '\\$&');
+    if (!q) return res.json({ results: [] });
+    const results = await query(
+      `SELECT ticker, name, asset_class, exchange, country, tier
+         FROM companies
+        WHERE is_active AND (ticker ILIKE $1 || '%' OR name ILIKE '%' || $1 || '%')
+        ORDER BY (upper(ticker) = upper($1)) DESC, (ticker ILIKE $1 || '%') DESC,
+                 (tier = 'curated') DESC, length(name), ticker
+        LIMIT 8`,
+      [q]
+    );
+    res.json({ results });
+  } catch (err) {
+    console.error('Asset search error:', err);
+    res.status(500).json({ error: 'Search failed' });
   }
 });
 
@@ -50,8 +73,11 @@ router.post('/', async (req, res) => {
     if (!isValidTicker(ticker)) {
       return res.status(400).json({ error: 'That does not look like a ticker symbol — use letters and digits, e.g. AAPL or RELIANCE.' });
     }
+    // The company reference knows a listed stock's name and, for an Indian one, its exchange
+    // (which is what prices it in rupees) — the client only sends the symbol.
+    const ref = assetClass === 'equity' ? await queryOne('SELECT name, exchange, country FROM companies WHERE ticker = $1 AND is_active', [ticker]) : null;
     const exchange = req.body.exchange == null || req.body.exchange === ''
-      ? null : String(req.body.exchange).trim().toUpperCase();
+      ? (ref && ref.country === 'IN' ? ref.exchange : null) : String(req.body.exchange).trim().toUpperCase();
     if (exchange && !/^[A-Z]{1,12}$/.test(exchange)) return res.status(400).json({ error: 'Unknown exchange' });
 
     if (!isLaunchAssetClass(assetClass)) {
@@ -65,7 +91,7 @@ router.post('/', async (req, res) => {
     if (quantity === INVALID) return res.status(400).json({ error: 'Quantity must be a non-negative number' });
     if (costBasis === INVALID) return res.status(400).json({ error: 'Cost basis must be a non-negative number' });
 
-    const companyName = name || getCompanyName(ticker);
+    const companyName = name || (ref && ref.name) || getCompanyName(ticker);
 
     const existing = await queryOne(
       'SELECT id FROM portfolio WHERE user_id = $1 AND ticker = $2',

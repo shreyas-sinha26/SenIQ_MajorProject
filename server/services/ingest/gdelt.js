@@ -15,7 +15,13 @@ const { hashId, clampText, fetchWithTimeout } = require('./util');
 // Tickers whose news GDELT exists to cover: every Indian name in the curated universe
 // (Finnhub's company feed is US-centric). This was a hand-kept list of 11; names added to the
 // universe since then got no targeted query.
-const INDIA_NAMES = new Map(UNIVERSE.filter((c) => c.country === 'IN').map((c) => [c.ticker, c.name]));
+// Listed-tier Indian names (the Nifty 500 beyond the curated ones) are covered the same way
+// once someone holds them, under the name a headline would use.
+const LISTED_INDIA = require('../../data/listed.json').companies.filter((c) => c.country === 'IN');
+const INDIA_NAMES = new Map([
+  ...LISTED_INDIA.map((c) => [c.ticker, c.core]),
+  ...UNIVERSE.filter((c) => c.country === 'IN').map((c) => [c.ticker, c.name]),
+]);
 const INDIA_TICKERS = new Set(INDIA_NAMES.keys());
 
 /**

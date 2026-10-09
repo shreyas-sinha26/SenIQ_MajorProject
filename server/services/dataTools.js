@@ -111,7 +111,7 @@ let _universeAt = 0;
 async function universeTickers() {
   if (_universe && Date.now() - _universeAt < 5 * 60 * 1000) return _universe;
   const { query } = require('../db');
-  const rows = await query('SELECT ticker FROM companies WHERE is_active');
+  const rows = await query("SELECT ticker FROM companies WHERE is_active AND tier = 'curated'");
   _universe = new Set(rows.map((r) => r.ticker));
   _universeAt = Date.now();
   return _universe;

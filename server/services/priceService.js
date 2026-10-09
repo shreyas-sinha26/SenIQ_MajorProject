@@ -46,6 +46,8 @@ const COMMODITY_YAHOO = {
   XAG: 'SI=F', SILVER: 'SI=F', SI: 'SI=F',
   XPT: 'PL=F', XPD: 'PA=F', HG: 'HG=F', COPPER: 'HG=F',
   WTI: 'CL=F', OIL: 'CL=F', CL: 'CL=F', BRENT: 'BZ=F', NG: 'NG=F',
+  ALUMINIUM: 'ALI=F', WHEAT: 'ZW=F', CORN: 'ZC=F', SOYBEAN: 'ZS=F',
+  SUGAR: 'SB=F', COFFEE: 'KC=F', COTTON: 'CT=F', COCOA: 'CC=F',
 };
 
 function getCached(ticker) {
@@ -80,6 +82,10 @@ async function fetchYahoo(symbol) {
     const price = meta?.regularMarketPrice;
     if (typeof price !== 'number' || !(price > 0)) return null;
     const prev = meta.chartPreviousClose ?? meta.previousClose;
+    // Grains, sugar, coffee and cotton are quoted in US cents ("USX"): a dollar price here.
+    if (meta.currency === 'USX') {
+      return { price: price / 100, currency: 'USD', changePct: typeof prev === 'number' && prev > 0 ? ((price - prev) / prev) * 100 : null };
+    }
     return {
       price,
       currency: meta.currency || 'USD',

@@ -214,12 +214,27 @@ const CRYPTO = [
   { ticker: 'NEAR', name: 'NEAR Protocol', coingeckoId: 'near' },
 ].map((c) => ({ ...c, sector: 'Crypto', assetClass: 'crypto', exchange: 'CRYPTO', country: 'GLOBAL' }));
 
-// ── Commodities (the launch set; prices via FMP for gold/silver only) ──
+// ── Commodities (prices: Yahoo front-month futures, see priceService.COMMODITY_YAHOO) ──
+// Brent is read with WTI as one "crude oil". The eleven after natural gas are everyday
+// words ("sugar", "copper", "corn"), so the resolver counts them only in a headline that
+// talks about the commodity as one — see COMMODITY_CONTEXT in entityResolver.js. Their
+// tickers are spelled out: the futures codes (CC, ZS, HG) are also stock symbols.
 const COMMODITY = [
   { ticker: 'XAU', name: 'Gold', aliases: ['bullion', 'yellow metal'] },
   { ticker: 'XAG', name: 'Silver' },
   { ticker: 'WTI', name: 'Crude Oil (WTI)', aliases: ['crude oil', 'brent crude', 'oil prices'] },
   { ticker: 'NG', name: 'Natural Gas', aliases: ['natgas'] },
+  { ticker: 'COPPER', name: 'Copper' },
+  { ticker: 'XPT', name: 'Platinum' },
+  { ticker: 'XPD', name: 'Palladium' },
+  { ticker: 'ALUMINIUM', name: 'Aluminium', aliases: ['aluminum'] },
+  { ticker: 'WHEAT', name: 'Wheat' },
+  { ticker: 'CORN', name: 'Corn', aliases: ['maize'] },
+  { ticker: 'SOYBEAN', name: 'Soybeans', aliases: ['soybean', 'soyabean'] },
+  { ticker: 'SUGAR', name: 'Sugar' },
+  { ticker: 'COFFEE', name: 'Coffee' },
+  { ticker: 'COTTON', name: 'Cotton' },
+  { ticker: 'COCOA', name: 'Cocoa' },
 ].map((c) => ({ ...c, sector: 'Commodities', assetClass: 'commodity', exchange: 'COMMODITY', country: 'GLOBAL' }));
 
 const UNIVERSE = [
