@@ -64,14 +64,14 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   open pull request *(checked 2026-10-09)*. Latest tags **`v1.12` / `v2.12`** on `d9ec9df`, the merge of pull request #13
   (IPO Watch; the tag also takes in pull request #12, the curated coins, which was merged untagged). The commits after it on
   `main` are handoff notes and the README's "latest tag" line. Untracked and never pushed: `samples/` and `.github/` (see §11).
-  **Open: pull request #14, branch `paper-ledger`** (the paper ledger, §5), pushed 2026-10-09 and
-  not merged. It is to be tagged **`v2.13` only**, with no `v1.13` (Annas's decision: it is
-  strategies-only work).
+  Since then pull request #14 (the paper ledger, §5) was merged as `f3638fb` and tagged
+  **`v2.13` only**: it is strategies-only work, so there is no `v1.13` (Annas's decision). The
+  latest tags are therefore **`v1.12` and `v2.13`**, on different commits.
 - **Tests** *(checked 2026-10-09)*: `npm test` passes — 24 files, 604 checks, offline
-  (no database or API calls). On `paper-ledger`: 25 files, 619 checks.
+  (no database or API calls). Since pull request #14: 25 files, 619 checks.
 - **Dev database** *(checked)*: Postgres `seniq`, all 42 migration files applied (latest
   `0041_ipo_graduation`). 1,960 articles, 334 events (2026-10-08, late). `0042_paper_ledger`
-  (on `paper-ledger`) is not applied yet; the next start on that code applies it. The dev
+  (pull request #14) is not applied yet; the next start applies it, v1 included. The dev
   database has no paper deployments.
 - **Nothing is running** *(checked late 2026-10-08)*: no dev server, no strategy engine, no
   `ollama serve`. Nothing is hosted. The next `npm start` will have Claude calls on.
@@ -288,7 +288,7 @@ data tools and strategy actions to API keys (Pro), with one shared rate budget p
 actions need a key created with write access. A clone of the repository has no engine, so
 every strategy route answers "engine offline".
 
-**Paper ledger (pull request #14, not merged).** The Paper Trade page replays a deployment
+**Paper ledger (pull request #14, `v2.13`).** The Paper Trade page replays a deployment
 each time it is opened and keeps nothing. A daily job (`services/paperLedger.js`) now also
 stores each deployment's fills and its closing value per completed day (`paper_fills`,
 `paper_equity`, migration `0042`), so a fill can be emailed and a later price revision cannot
@@ -797,7 +797,9 @@ hand-labelled sheets of (story, company) pairs (§8).
   tag → delete the branch. Annas runs the merge himself, for example
   `gh pr merge <N> --merge --delete-branch`.
 - **Tagging rule:** one commit, two annotated tags. `v1.N` is the commit run with strategies
-  off; `v2.N` is the same commit with `FEATURES_STRATEGIES=1`.
+  off; `v2.N` is the same commit with `FEATURES_STRATEGIES=1`. **Exception (Annas, 2026-10-09):**
+  a change that only touches the strategies side gets a `v2.N` tag alone. The two numbers can
+  therefore differ; the next change to both sides takes the next free number of each.
 - **`.github/workflows/ci.yml` is uncommitted on purpose.** A push that contains a workflow
   file is rejected until the token has the `workflow` scope
   (`gh auth refresh -h github.com -s workflow`, interactive).
@@ -820,6 +822,7 @@ hand-labelled sheets of (story, company) pairs (§8).
 | `v1.10` / `v2.10` | `839df81` | #10: the local model reads every story and its agreement with FinBERT is the confidence; optional fine-tuned FinBERT (off); two-sheet scoring; README results corrected |
 | `v1.11` / `v2.11` | `68ef315` | #11: two-tier company reference (1,839 listed companies: S&P 1500 and Nifty 500), strict matching for held listed names, listed names shielding curated ones, 15 commodities |
 | `v1.12` / `v2.12` | `d9ec9df` | #13: IPO Watch (opt-in) — Indian and US IPO calendar, grey market premium and subscription, stories linked and read for tone, outcomes to the three-month close, graduation into the company reference as an `ipo` tier. Also #12: the curated coins and crypto news feeds |
+| `v2.13` (no `v1.13`) | `f3638fb` | #14: the paper ledger — a daily job stores each paper deployment's fills and closing value from completed days, emails a new fill, and the record is read on the Paper Trade page, at `/v1/paper/:id/ledger` and through `get_paper_ledger` |
 
 Pull request #6 was closed by GitHub when its base branch was deleted; #7 replaced it.
 
@@ -849,10 +852,9 @@ migrations (`0031`–`0041`), `server/services/ipoWatch/`, a tab with an India /
 two touches on the news pipeline (company news for newly filed or priced US issues; linking
 and reading IPO stories at the end of each pass). `IPO_PLAN.md` is the full record.
 
-**Pull request #14** (`paper-ledger`) was pushed on 2026-10-09 and is **open**. The paper ledger
-(§5): migration `0042`, `server/services/paperLedger.js`, a scheduler job, three read paths and
-`scripts/paper_mark.js`. After Annas merges it (`gh pr merge 14 --merge --delete-branch`), tag the
-merge commit **`v2.13` only**, then update this section, §3 and the README's "latest tag" line.
+**Pull request #14** (`paper-ledger`) was merged by Annas on 2026-10-09 as `f3638fb`. Tagged
+**`v2.13` only**, and the branch deleted. The paper ledger (§5): migration `0042`,
+`server/services/paperLedger.js`, a scheduler job, three read paths and `scripts/paper_mark.js`.
 
 ---
 
