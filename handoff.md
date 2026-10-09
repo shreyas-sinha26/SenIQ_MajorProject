@@ -64,7 +64,7 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   open pull request *(checked 2026-10-09)*. Latest tags **`v1.10` / `v2.10`** on `839df81`, the merge of pull request #10
   (the final sentiment refinement and the corrected README results). The commits after it
   on `main` are handoff notes and the README's "latest tag" line. Untracked and never pushed: `samples/` and `.github/` (see §11).
-- **Tests** *(checked 2026-10-09)*: `npm test` passes — 23 files, 550 checks, offline
+- **Tests** *(checked 2026-10-09)*: `npm test` passes — 23 files, 554 checks, offline
   (no database or API calls).
 - **Dev database** *(checked)*: Postgres `seniq`, all 31 migration files applied (latest
   `0030_company_tier`). 1,960 articles, 334 events (2026-10-08, late).
@@ -155,7 +155,7 @@ cd ~/Downloads/SenIQ_MajorProject && read -s -p "New demo password: " PW && echo
 2. **Resolve entities** (`entityResolver.js`): which companies, executives, sectors or
    commodities a headline names, against a curated universe of 197 instruments (100 US, 57
    India, 25 crypto, 15 commodities) and 192 dated executives. A second, **listed** tier
-   (1,400 more US companies) is matched only for names someone holds — see "Company
+   (1,839 more companies: 1,400 US, 439 India) is matched only for names someone holds — see "Company
    reference: two tiers" in §8.
 3. **Grade relevance and cluster** (`newsRelevance.js`): each article is holding / market /
    world / none, decided by the headline. Duplicates across outlets share one cluster. Noise
@@ -506,11 +506,11 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   sector, and `plain` when the name is a single ordinary English word.
 - **US is in: 1,400 listed companies** = the S&P 1500 (Wikipedia's S&P 500 / 400 / 600 lists,
   CC BY-SA, taken 2026-10-09) less the 100 already curated.
-- **India is NOT in yet.** The Nifty 500 file must come from niftyindices.com; one plain
-  request from a session was refused and no disguised request was made. Annas downloads
-  `ind_nifty500list.csv`, saves it as `server/data/sources/nifty500.csv` (gitignored), then
-  `node scripts/build_listed_universe.js` and a restart. The parser, the sector mapping and
-  the targeted news search for held Indian listed names (`ingest/gdelt.js`) are ready.
+- **India is in: 439 listed companies** = the Nifty 500 (file downloaded by Annas from
+  niftyindices.com on 2026-10-09, kept as `server/data/sources/nifty500.csv`, gitignored) less
+  the 57 curated and placeholder rows ("Dummy HEG"). To refresh either market: replace the
+  source file(s), `node scripts/build_listed_universe.js`, restart. A session does not fetch
+  from NSE's sites; one plain request was refused and none was disguised.
 - **What a listed company gets:** it shows in the add-holding search
   (`GET /api/portfolio/search`, which the box calls after its built-in list), takes its name
   and, for India, its exchange from the reference when added, is priced like any stock, and
@@ -519,8 +519,16 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   held, and strictly (`entityResolver.namesHolding`): its name as whole words with its
   capitals; a one-word ordinary name ("Gap", "Block") only beside a company cue ("Gap Inc",
   "Gap shares"); its symbol bare only at 5+ letters (US) or 4+ (India), else in exchange
-  notation ("NYSE: THO", "$THO"). The same function now also matches holdings typed in by
-  hand, which fixed a substring match there ("Trent" inside "current").
+  notation ("NYSE: THO", "$THO"). An Indian symbol that is not an ordinary word is flagged
+  `brand` and matches in any capitals ("Paytm", "Nykaa"); CLEAN, AMBER, IDEA do not. A name
+  inside a longer known name belongs to the longer one ("Bank of India" is not matched in
+  "Reserve Bank of India" or "Union Bank of India"). The same function now also matches
+  holdings typed in by hand, which fixed a substring match there ("Trent" inside "current").
+- **Listed names also protect the curated tier:** a curated name or symbol inside a listed
+  company's longer name is no longer tagged — "ITC Hotels" is not ITC, "Adani Power" is not
+  Adani Enterprises, "Reliance Power" is not Reliance, "SBI Cards" is not SBI, "Apple
+  Hospitality REIT" is not Apple. Stories stored before this keep their old tags (no
+  clean-up script was written for it).
 - Everything that means "the universe" still reads the curated tier only: the resolver's
   index, Ask's other-stock check, the data tools' ticker list, India insider-trade tracking,
   the "full coverage" badge.
@@ -532,12 +540,15 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   talks about a commodity as one (`COMMODITY_CONTEXT`: price, futures, crop, exports…).
   Brent stays read together with WTI.
 - **Checked 2026-10-09** on a local run with Claude calls off: migration applied, 197 + 1,400
-  seeded, search returns listed names, the add-holding box shows them, live prices come back
+  seeded (then 1,839 with India, seeded directly; resolving a story takes about 1 ms), search returns listed names, the add-holding box shows them, live prices come back
   for listed stocks and the new commodities. **Not checked:** adding a listed holding end to
   end (it would have changed Annas's own portfolio) and a held listed name being matched in a
   real pipeline run.
-- Known limits: a listed company with a one-word ordinary name gets less news than it
-  should; multi-word names in an ALL-CAPS headline are missed; the commodity reading still
+- Known limits: an Indian company whose formal name is long and whose symbol is a word or
+  an abbreviation gets little news ("Home First Finance Company India", symbol HOMEFIRST);
+  Vedanta, Bosch and GAIL count as ordinary words and need a cue or their symbol — moving
+  such names into the curated tier is the fix; a listed company with a one-word ordinary
+  name gets less news than it should; multi-word names in an ALL-CAPS headline are missed; the commodity reading still
   follows the story's tone, not the price direction.
 
 **Entity resolution.**
@@ -628,7 +639,7 @@ Changes made by hand to the dev database on 2026-10-08, with backups in `samples
 | 41 of 128 stored commodity tags removed | `removed-commodity-tags-2026-10-08.json` |
 | 17 wrong ticker tags removed | `removed-ticker-tags-2026-10-08.json` |
 | 257 readings on 140 multi-company stories re-read per company (226 by the local model); none removed | `company-readings-before-2026-10-08.json` |
-| Migration `0030` (company tier); 1,400 listed companies and 11 commodities seeded on boot (2026-10-09) | none needed (re-seeded from files) |
+| Migration `0030` (company tier); 1,839 listed companies and 11 commodities seeded (2026-10-09) | none needed (re-seeded from files) |
 | 65 company tags removed from 37 roundup stories; 28 `__MARKET__` readings added; those stories re-graded | `roundup-tags-before-2026-10-08.json` |
 | 5 `event_outcomes` rows for Indian tickers had a pre-fix `price_at_event` blanked | none |
 | Account 36 rebalanced; marked verified by hand | none |
