@@ -575,10 +575,16 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   name), anywhere in the headline or summary. The seven word-names also need their capital.
   The older word-coins (Avalanche, Cosmos, Polygon; symbols NEAR, LINK, DOT, UNI, ETC) are
   not under this rule and still match on the capital or the bare symbol alone.
-- **Not done:** no pipeline run, so nothing new is stored or scored yet; the coins reach the
-  `companies` table when the server next seeds the universe. The rest of the top 100 as a
-  listed tier is not built (the listed tier is for companies today). The new coins' sentiment
-  has not been looked at.
+- **One pipeline run, 2026-10-09** (from the `crypto-kb` worktree, local database, email
+  off): 132 new stories stored, all read by FinBERT (Ollama was not running; GDELT returned
+  nothing). Coin readings in the database went from 73 to 228. New coins named: Sui 5,
+  Zcash 5, Monero 3, Render 2, Hyperliquid 2, Pepe 2; the other fourteen, none yet.
+- **The 20 new coins are inactive in the dev database until this branch is on the checkout
+  the server runs from.** Every boot seeds the universe from that checkout's own file and
+  switches off curated rows it does not list; a server started from `ipo-watch` did so
+  seconds after the run. Stored stories keep their tags. Sun Communities is off too until then.
+- **Not done:** the rest of the top 100 as a listed tier (the listed tier is for companies
+  today). The new coins' sentiment has not been looked at.
 - CoinGecko now calls Toncoin "Gram (prev. Toncoin)", symbol GRAM. The curated entry is
   left as TON / Toncoin: holdings are keyed by symbol, and "Gram" is an everyday word. The
   price key (`the-open-network`) still works.
