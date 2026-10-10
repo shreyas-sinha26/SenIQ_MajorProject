@@ -1,6 +1,6 @@
 # SenIQ — Handoff
 
-Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). Late on 2026-10-10 two pieces of uncommitted work on the branch `ipo-ask` (Ask reads IPO Watch; news retention) and a six-step plan were added (§3, §5, §7, §8, §10). On 2026-10-11 the first three steps of that plan were done: P1 committed, P2 run, P3 built and committed on the branch `listed-news` with its switch still off, and all three slices of P4 (the snapshot, price history, the page tools) built and committed on the branch `ask-tools`, and P5, the whole eval, run (§3, §8, §10). This file describes the project **as it stands now**. The previous
+Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). Late on 2026-10-10 two pieces of uncommitted work on the branch `ipo-ask` (Ask reads IPO Watch; news retention) and a six-step plan were added (§3, §5, §7, §8, §10). On 2026-10-11 the first three steps of that plan were done: P1 committed, P2 run, P3 built and committed on the branch `listed-news` with its switch still off, and all three slices of P4 (the snapshot, price history, the page tools) built and committed on the branch `ask-tools`, and P5, the whole eval, run (§3, §8, §10); then the last of P3's wrong matches fixed and P6, US coverage, built and committed on a fourth branch `us-news` with its switch off (§3, §5, §8, §10). This file describes the project **as it stands now**. The previous
 handoff was a session-by-session log (1,658 lines); it is still in git history
 (`git show 6ee98d9:handoff.md`) if a detail of how something was built is needed.
 
@@ -61,9 +61,9 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ## 3. Current state
 
-- **Git** *(checked 2026-10-11)*: the working tree is on the local branch `ask-tools`
-  (below), the last of three local branches stacked on `main`: `ipo-ask`, then
-  `listed-news`, then `ask-tools`. None is pushed; `main` is level with `origin/main`, no open pull
+- **Git** *(checked 2026-10-11)*: the working tree is on the local branch `us-news`
+  (below), the last of four local branches stacked on `main`: `ipo-ask`, then
+  `listed-news`, then `ask-tools`, then `us-news`. None is pushed; `main` is level with `origin/main`, no open pull
   request. Latest tags **`v1.14`** and **`v2.15`**, both on `d0aa0ca`, the merge of pull
   request #16 (IPO Watch's "Show all" button, §5). Before it: `v1.13` / `v2.14` on `71230ec`
   (pull request #15, the QA pass, §8). The two numbers differ because `v2.13` was
@@ -116,6 +116,21 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   31 files, 756 checks at that commit. **No real model has called any of the six new tools,
   and the page has not been opened with the change.** Ask now sends 17 tool definitions
   with every question (9,771 characters; the six new ones are 4,226 of them).
+- **A fourth local branch, `us-news`, not pushed** *(2026-10-11)*, branched from
+  `ask-tools` at `74087f9`: plan step P6 (below, and §10) as commit `8217423`, then a
+  commit of the documents. New: `server/services/usNews.js`, migration
+  `0044_us_news.sql`, `scripts/us_news.js`, `test/usNews.test.js`. Changed:
+  `services/ingest/finnhub.js` and `ingest/index.js` (the rotation's fetch, and the feeds
+  a story carries), `services/entityResolver.js` (the own-feed rule; initials in a name),
+  `scheduler.js` (the rotation, the drop, and the store step as its own function),
+  `services/outcomes.js`, `config.js` (`US_LISTED_NEWS`, `US_NEWS`), `.env.example`,
+  `package.json`, `test/listedUniverse.test.js`. With it `npm test` passes: 33 files, 808
+  checks. **`US_LISTED_NEWS` is not set in `.env`, so nothing more is fetched.** One thing
+  does change for a running server with the switch off: a US listed name someone holds is
+  now tagged only on stories from its own Finnhub feed (§8, "Stocks nobody holds").
+  **Migration `0044` is not applied to the dev database**; the next start applies it with
+  `0043` (two columns, no rows changed). The two commits before P6 on `ask-tools`,
+  `dd7a32c` and `74087f9`, are the last of P3's name fixes and their note.
 - **The local engine changed with the QA pass** *(2026-10-10)*: three files in `strategy-service/`
   (gitignored, so not in any commit): `service/signal_runner.py`, `engine/data/base.py`,
   `engine/analytics/walk_forward.py`, plus `tests/test_qa_fixes.py`. The files as they were
@@ -143,9 +158,10 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 **The plan agreed on 2026-10-10 (late).** Six steps, in this order, each its own piece of
 work with tests and a note in this file. What each step is, what was decided and what was
-measured to get there are in §10 ("Planned, not built"). **Steps P3 to P6 are not started.**
-On 2026-10-11 Annas said to commit (P1) and to run the four IPO cases (P2); both are done.
-The whole eval (P5) still needs his word, and so do a push, a pull request and a merge.
+measured to get there are in §10 ("Planned, not built"). **All six are built or run**
+*(2026-10-11)*; what is left is to switch things on. `INDIA_LISTED_NEWS` (P3) and
+`US_LISTED_NEWS` (P6) are both off and neither has been on in a running pipeline. Setting
+either, a push, a pull request and a merge each need Annas's word.
 
 - **P1. Done 2026-10-11.** The finished work on `ipo-ask` is two commits: `1f0e368` (Ask
   reads IPO Watch), then `acc3204` (news retention). Not pushed, not merged.
@@ -212,7 +228,9 @@ The whole eval (P5) still needs his word, and so do a push, a pull request and a
   so coverage has not started. The names that are another company's (§10) were fixed
   later the same day, and so were the three one-story mentions (a bank as the source of
   an analysis, a fund house as a speaker's employer, an IPO's registrar): commit `dd7a32c`
-  on `ask-tools`.
+  on `ask-tools`. The last three, all US names in an Indian outlet's story (`DLB`, `CMI`,
+  and "Colgate-Palmolive shares" with no "India" after it), are closed by P6's own-feed
+  rule on `us-news`.
 - **P4. Ask features on the data that exists:** the price-and-sentiment snapshot for a stock
   the user does not hold; price history; then the fund, politician, Indian investor, alerts
   and brief tools. **Slice 1, the snapshot, is built** (2026-10-11, commit `ee7b582` on
@@ -323,6 +341,28 @@ The whole eval (P5) still needs his word, and so do a push, a pull request and a
       anything about the other 38 cases. One run of each case.
 - **P6. US coverage,** last: the largest change in volume, and by then P3 will have shown
   how well the name matching holds.
+  **Built 2026-10-11, commit `8217423` on `us-news`** (§10 has the detail). Annas's four
+  answers at the start: the own-feed rule is for every US listed name, held or not; a
+  story the rotation brings in that names no company is dropped; the rotation takes the
+  US listed names and the curated US shares nobody holds; a new stacked branch, committed
+  as each piece passes its tests.
+  - **The rotation:** with `US_LISTED_NEWS=1` and a Finnhub key, each run of the pipeline
+    asks Finnhub for the company news of 30 US shares nobody holds, the ones checked
+    longest ago (`companies.news_checked_at`), one call a second. 1,501 names on the dev
+    database, so each comes round about every 8.3 hours.
+  - **The own-feed rule:** a US listed name is tagged only on a story fetched from its own
+    ticker's feed, and only if the story names it. It is on whenever a Finnhub key is set.
+  - **The drop:** a story only the rotation brought in is stored only if it is about a
+    company; the rest go before their tone is read.
+  - **Tried once against Finnhub, nothing stored** (`node scripts/us_news.js try 30 --from
+    D`): 30 names answered in 41 seconds with no refusal; 177 stories, 114 kept and 63
+    dropped; 24 of the 30 names had at least one story of their own.
+  - **The database-writing parts were run on a copy of the dev database** (made, checked
+    and removed the same day): the batch, the record of a visit, a new story stored with
+    its feed, a stored story gaining a name from that name's feed, and a second run that
+    stores and reads nothing twice.
+  - **Not done:** the switch is not set, the whole pipeline has never run with the change,
+    and FinBERT has read none of these stories.
 
 Left as it is for now: **retention stays off**; **Ask stays on `claude-haiku-4-5`**; nothing
 new goes on `/mcp` or `/v1` (every new tool is Ask only); hosting choices wait until there
@@ -418,12 +458,19 @@ cd ~/Downloads/SenIQ_MajorProject && read -s -p "New demo password: " PW && echo
 1. **Gather** articles from the enabled sources (`services/ingest/`): Finnhub company news,
    GDELT, four Indian RSS feeds (ET, Mint, Moneycontrol, Business Standard) and four crypto ones
    (CoinDesk, Cointelegraph, Decrypt, The Block). Reddit returns
-   nothing without credentials; X is a stub.
+   nothing without credentials; X is a stub. Finnhub company news is asked for held
+   tickers and IPO Watch's; with `US_LISTED_NEWS=1` also for 30 of the US shares nobody
+   holds, in rotation (`usNews.js`). Each Finnhub story carries the ticker whose feed it
+   came from (`articles.feeds`).
 2. **Resolve entities** (`entityResolver.js`): which companies, executives, sectors or
    commodities a headline names, against a curated universe of 218 instruments (100 US, 57
    India, 46 crypto, 15 commodities) and 192 dated executives. A second, **listed** tier
    (1,837 more companies: 1,398 US, 439 India) is matched only for names someone holds — see "Company
-   reference: two tiers" in §8.
+   reference: two tiers" in §8. Two switches widen that: `INDIA_LISTED_NEWS` matches the
+   Indian listed names in every story, and `US_LISTED_NEWS` fetches for the US ones. A US
+   listed name, held or not, is tagged only on a story from its own ticker's feed. A
+   story only the US rotation brought in is dropped here, before step 4, unless it is
+   about a company.
 3. **Grade relevance and cluster** (`newsRelevance.js`): each article is holding / market /
    world / none, decided by the headline. Duplicates across outlets share one cluster. Noise
    is kept but flagged and hidden.
@@ -439,7 +486,8 @@ cd ~/Downloads/SenIQ_MajorProject && read -s -p "New demo password: " PW && echo
    day (2 of them market-wide); the rest are filed as digest. A holding only alerts on events
    after it was added (`portfolio.monitoring_since`).
 8. **Outcomes** (`outcomes.js`): snapshots each event's features and the price 1 and 3 days
-   later, for tuning later. No reinforcement learning.
+   later, for tuning later. No reinforcement learning. Only for an event about a curated
+   name or someone's holding: each ticker costs a quote on every run.
 
 **Sentiment for a ticker** (`sentimentScoring.js`) is computed on read: an acute score over
 24–72 hours with a 7-day half-life, momentum (this week against last), and a z-score against
@@ -652,6 +700,7 @@ Two migrations share the number `0016`. This is harmless; do not rename an appli
 | `node scripts/india_smart_money.js poll` | One India poll (deals + up to 60 insider filings) |
 | `node scripts/ipo_watch.js poll \| link \| alias \| symbols \| returns \| retone \| graduate` | IPO Watch jobs by hand (see the file's header) |
 | `node scripts/retention.js [plan]` · `prune --write` · `check <file>` | What a retention run would remove (reads only); do it; count the stories in an archive. `--as-of YYYY-MM-DD` runs as if it were that day |
+| `node scripts/us_news.js [status]` · `try [N] [--from TICKER]` | Where the US rotation stands (needs migration `0044`); fetch N names' company news as a run would and show what would be kept and tagged. `try` stores nothing and makes one Finnhub call a name |
 | `node scripts/paper_mark.js [--write] [--force] [--no-email]` | The paper ledger job by hand (v2; needs the engine). Without `--write` it lists what is due |
 | `node scripts/india_smart_money.js history SYMBOL` | Pre-May-2026 insider trades for a symbol |
 | `node scripts/india_smart_money.js import <csv> [--dry-run]` | Load a deal file downloaded by hand |
@@ -687,6 +736,8 @@ All the write scripts are dry runs without their flag.
 | `FINBERT_CLASSIFY` | **`1`** | Local FinBERT scores new stories. Default is off. `FINBERT_MODE=hosted` uses the Hugging Face API instead |
 | `INDIA_SMART_MONEY`, `NSE_USER_AGENT` | **`1`**, set | India deals and insider trades. Default is off |
 | `IPO_WATCH` | **`1`** (since 2026-10-09) | `1` shows the IPO Watch tab and runs its daily poll. The US side also needs `FINNHUB_API_KEY`. Default is off |
+| `INDIA_LISTED_NEWS` | unset | `1` matches the 439 Indian listed names in the news, held or not. Default is off |
+| `US_LISTED_NEWS` | unset | `1` fetches company news for the US shares nobody holds, 30 a run. Needs `FINNHUB_API_KEY`. Default is off |
 | `RETENTION` | unset | `1` starts the daily job that archives and **removes** old stories. Default is off. Once it has removed anything, leave it on |
 | `RETENTION_ARCHIVE_DIR` | unset | Where archive files go; default `data/archive` (gitignored) |
 | `SMTP_HOST/PORT/USER/PASS`, `EMAIL_FROM` | set (Gmail app password) | All email while there is no domain |
@@ -863,6 +914,13 @@ All the write scripts are dry runs without their flag.
   not compared with another price source.
 - **`INDIA_LISTED_NEWS` in a running pipeline.** The switch has been measured on the
   stored stories and tested offline (§10); it has never been on while the pipeline ran.
+- **`US_LISTED_NEWS` in a running pipeline.** The fetch was tried once against Finnhub
+  with nothing stored, and the batch, the store step and a stored story gaining a name
+  were run on a copy of the dev database with the word list, not FinBERT (§10). The
+  pipeline itself has not run with the change: not a full run of 30 names every 10
+  minutes beside held tickers and quotes, not what Finnhub does over a day of it, not the
+  events and feed pages with a few hundred more tagged stories a day. How many new
+  stories a day it stores is an estimate (§10).
 - The Ollama fallbacks against a real local model.
 - The MCP server and `/v1` from a real client since 2026-10-07 (the QA pass called them with
   a test key only).
@@ -1280,7 +1338,43 @@ machine before the date fix that day had lookahead; do not reuse older figures.
   story: all 1,231 stored company readings belong to curated names. They can be searched,
   added and priced.
 - **A US name nobody holds gets almost nothing.** The RSS feeds are four Indian and four
-  crypto outlets; there is no general US feed.
+  crypto outlets; there is no general US feed. `US_LISTED_NEWS=1` (built 2026-10-11, off)
+  is what changes that: the rotation of §10.
+- **A US listed name is tagged only from its own ticker's Finnhub feed** *(2026-10-11,
+  branch `us-news`)*, held or not, and whether `US_LISTED_NEWS` is on or off, as long as
+  a Finnhub key is set. Someone who holds Colgate-Palmolive (`CL`) no longer gets an
+  Indian outlet's "Colgate-Palmolive shares" story, nor Dolby's holder a cinema opening
+  that mentions Dolby Atmos. The cost: a real story about such a name from an Indian or
+  crypto outlet, or from GDELT, is not tagged; Finnhub's feed for a held ticker runs
+  every 10 minutes and is where nearly all of its stories came from. With no Finnhub key
+  there is no such feed, and the name is matched in every story as before. `GOOG` is
+  outside the rule: it is tagged whenever `GOOGL` is. The curated US names are not in
+  the rule either; they are matched in every story.
+- **Limits of the US rotation** *(as built; none seen in a running pipeline)*:
+  - The feed is not enough by itself and neither is the name: about a third of what
+    Finnhub files under a ticker was about no company in the one batch tried (63 of 177).
+  - A headline that names no one still takes its companies from the summary, so a
+    passing mention there is tagged: in the batch tried, two FCC interviews from Disney's
+    feed were tagged `DIS`. Disney is a curated name; the rule for those is unchanged.
+  - A roundup the phrase list does not know is kept and tagged ("Top Stock Reports for
+    AMD, Palo Alto & ConocoPhillips" went to `AMD` and `COP`).
+  - A dropped story is fetched again at each visit for 7 days and dropped again. That
+    costs nothing when it goes before its tone is read; one dropped after (every name in
+    it a passing mention, by the per-company reading) is read again each time.
+  - A run's news calls are capped at 50 (`US_NEWS.CALLS_PER_RUN`): held tickers and IPO
+    Watch's come first and the rotation takes what is left, at most 30. With 50 or more
+    held tickers the rotation stops. The held fetch itself has no gap between calls and
+    no cap, as before.
+  - A refusal for the rate limit, or a request that fails, ends that run's rotation and
+    the names not reached go first next time. Any other refusal counts as checked. The
+    three tickers with a dot (`BF.B`, `CWEN.A`, `MOG.A`) were not in the batch tried.
+  - Each name gives at most its 10 newest stories of the last 7 days, held or rotated.
+  - Events are made for these stories and kept 7 days like any other. Outcome logging
+    is now limited to curated names and holdings, which is every event there was before.
+  - A stored story that turns up later in a US listed name's feed gains that name, with
+    the reading made then. Feeds added later are recorded for US listed names only.
+  - With `NEWS_EMBEDDINGS=1` there would be that many more stories to embed (not set
+    locally).
 - **Four listed names match wrongly, for anyone who adds them** *(measured 2026-10-10 by
   running the pipeline's matcher for all 1,837 names over the 2,484 stored stories; nothing
   changed)*: `QTWO` (Q2 Holdings) on every "Q2 results" headline, 76 stories; `BSE` (BSE
@@ -1480,10 +1574,10 @@ hand-labelled sheets of (story, company) pairs (§8).
     - "and" in a name of several words may be "&" or missing, as the feeds drop it
       (`VISL` gained "Vedanta Iron Steel shares…", `VOGL` "Vedanta Oil & Gas…").
     With the switch on, the stored stories would now gain 418 tags across 199 names.
-    **Still not handled:** a US name written exactly as its Indian namesake is ("Colgate-
-    Palmolive shares" in an Indian outlet, with no "India" after it). Plan step P6's rule,
-    that a US name is tagged only on a story from its own ticker's feed, is what covers
-    that.
+    A US name written exactly as its Indian namesake is ("Colgate-Palmolive shares" in an
+    Indian outlet, with no "India" after it) was left for plan step P6's rule, that a US
+    name is tagged only on a story from its own ticker's feed. **That rule is built**
+    *(2026-10-11, commit `8217423` on `us-news`)* and a test holds the case.
   - *A broker or rating agency giving its view of another company* (what `JEF` was): of the
     Indian names `JMFINANCIL` 5 of 7, `CRISIL` 5 of 6 ("Crisil Ratings affirms…"),
     `NUVAMA` 3 of 3, `ANGELONE` 2 of 4; of the US names `MCO` (Moody's) 2 of 2 and `EVR`
@@ -1511,7 +1605,12 @@ hand-labelled sheets of (story, company) pairs (§8).
     and C" drops only A), and the curated names, which are read as before.
   - *A passing mention in the summary under a headline that names no one:* `DLB` (Dolby
     Atmos in a cinema opening), `CMI` (Cummins as a competitor), and the US names in market
-    wraps. The curated names are read the same way. **Not fixed.**
+    wraps. The curated names are read the same way. **Fixed for the US listed names by
+    P6's own-feed rule** *(2026-10-11, `us-news`)*: both stories came from an Indian
+    outlet, not from the name's own feed. On the stored stories, none of which records a
+    feed, the rule leaves no US listed name a match but `GOOG` (65 matches across 41
+    names to 16, all `GOOG`'s). **Not fixed:** the same kind of mention of an Indian
+    listed name or a curated name, and one inside a story from the name's own feed.
   - Everything else read as right: about 190 of the 203 Indian names have no wrong match.
   The original plan's wording follows.
   Mark the names in §8 so they match only beside a company cue ("Q2
@@ -1620,7 +1719,47 @@ hand-labelled sheets of (story, company) pairs (§8).
   `QA.MAX_OUTPUT_TOKENS` (1,000) and an effort setting would have to change with it; it is
   not a one-line switch. The eval already checks that an expected tool was called. Wrong
   picks are first met by rewording or merging tool descriptions; Sonnet only if that fails.
-- **P6, US.** Rotate the roughly 1,500 US names nobody holds through the Finnhub fetch,
+- **P6, US: built 2026-10-11** (commit `8217423` on `us-news`; `services/usNews.js`).
+  As planned below, with these choices made at the start and while building:
+  - *The switch.* `US_LISTED_NEWS=1`, off by default and not set in `.env`. It needs
+    `FINNHUB_API_KEY`.
+  - *The names.* Every active US share in the reference that the run does not already
+    fetch for a holder or for IPO Watch: the listed tier, the curated US shares nobody
+    holds, and the US issues graduated from IPO Watch. 1,501 on the dev database.
+  - *The order.* `companies.news_checked_at` (migration `0044`): never-checked names
+    first in ticker order, then the longest unchecked. It is in the table so a restart
+    carries on where the last run stopped.
+  - *The pace.* 30 a run, one call a second, after the held fetch and never beside it.
+    Held, IPO and rotation calls together stay within 50 a run, leaving room in
+    Finnhub's 60 a minute for quotes.
+  - *Which feed a story came from* is no longer thrown away: `articles.feeds` holds the
+    tickers, and the same story from two feeds is one story with both.
+  - *The own-feed rule* (`isUsListed` and the `feeds` argument of `resolve` in
+    `entityResolver.js`): a US listed name counts only when its own ticker is among the
+    story's feeds, and the name must still be found. Annas chose it for held names too.
+  - *The drop* (`worthReading` in `usNews.js`, and once more after the per-company
+    reading): Annas chose to drop a story the rotation alone brought in when it names no
+    company. As built it is "about no company": a roundup that lists ten is dropped too,
+    since stored it would be graded a market story and shown to everyone. A story also
+    fetched for a holder or from a general feed is never dropped here.
+  - *A stored story in a new feed.* A story stored earlier for one ticker can turn up
+    later in a US listed name's feed. It is then read once more and the name added, the
+    readings it had left alone; a story stored as noise becomes a company story.
+  - *Outcome logging* is limited to events about a curated name or a holding. Without
+    that, every US name with an event in 7 days would cost a Finnhub quote on every run.
+  - *An initial in a name* matches with or without its full stop and space ("D. R.
+    Horton", "D.R. Horton", "DR Horton"): found in the batch tried, where two D.R. Horton
+    headlines from its own feed did not match the listed name. On the stored stories it
+    adds four right matches for Indian names (`JKCEMENT` 2, `KPRMILL`, `EIDPARRY`).
+  **Measured 2026-10-11:** one batch tried against Finnhub with nothing stored, the 30
+  names from `D` to `DLB` in ticker order: all answered in 41 seconds, no refusal; 177
+  stories; 114 kept and 63 dropped before any tone was read; 24 of 30 names had a story
+  of their own (Dominion 1, DuPont 8, Dollar General 7); 28 other names were tagged from
+  those feeds, all curated (Apple, Costco, JPMorgan). The batch holds several large
+  names (Disney, Dell, Deere, DoorDash), so it says little about the long tail. **Not
+  measured:** new stories a day (each visit returns much of what the last one did), and
+  anything over more than one batch. The plan as decided:
+- **P6, US (as planned 2026-10-10).** Rotate the roughly 1,500 US names nobody holds through the Finnhub fetch,
   about 30 a run. The free limit is 60 calls a minute and US quotes share it. Each name is
   then checked about every 8 hours, and nothing is missed between visits because a call
   asks for 7 days; held names stay on 10 minutes. A US listed name is tagged only when the
