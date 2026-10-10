@@ -1,6 +1,6 @@
 # SenIQ — Handoff
 
-Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). Late on 2026-10-10 two pieces of uncommitted work on the branch `ipo-ask` (Ask reads IPO Watch; news retention) and a six-step plan were added (§3, §5, §7, §8, §10). On 2026-10-11 the first three steps of that plan were done: P1 committed, P2 run, P3 built and committed on the branch `listed-news` with its switch still off, and the first slice of P4 (the snapshot) built and committed on the branch `ask-tools` (§3, §8, §10). This file describes the project **as it stands now**. The previous
+Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). Late on 2026-10-10 two pieces of uncommitted work on the branch `ipo-ask` (Ask reads IPO Watch; news retention) and a six-step plan were added (§3, §5, §7, §8, §10). On 2026-10-11 the first three steps of that plan were done: P1 committed, P2 run, P3 built and committed on the branch `listed-news` with its switch still off, and the first two slices of P4 (the snapshot, then price history) built and committed on the branch `ask-tools` (§3, §8, §10). This file describes the project **as it stands now**. The previous
 handoff was a session-by-session log (1,658 lines); it is still in git history
 (`git show 6ee98d9:handoff.md`) if a detail of how something was built is needed.
 
@@ -101,14 +101,17 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   holds one (nobody does). The branch holds `ipo-ask`'s two commits too, so one pull
   request from it would carry all three pieces of work.
 - **A third local branch, `ask-tools`, not pushed** *(2026-10-11)*, branched from
-  `listed-news` at `f7bc04d`: the first slice of plan step P4, the snapshot of a stock the
-  user does not hold, as commit `ee7b582`, then a commit of the documents. New:
-  `server/services/stockSnapshot.js`, `test/stockSnapshot.test.js`. Changed:
-  `services/qaTools.js` (the tool `get_stock_snapshot`), `services/qa.js` (the pre-check and
-  one line of the prompt), `services/dataTools.js` (`ASK_ONLY`), `config.js` (two `QA.SNAPSHOT_*`
-  limits), `eval/ask/cases.json` (36 cases), `eval/ask/lib.js`, `test/mcp.test.js`,
-  `package.json`. With it `npm test` passes: 30 files, 734 checks. **No real model has
-  called the new tool, and the page has not been opened with the change.**
+  `listed-news` at `f7bc04d`: the first two slices of plan step P4, each a commit followed
+  by a commit of the documents. `ee7b582`: the snapshot of a stock the user does not hold
+  (`server/services/stockSnapshot.js`, the tool `get_stock_snapshot`). `2587de8`: price
+  history (`server/services/priceHistory.js`, the tool `get_price_history`), and two
+  additions to the snapshot answer. Also changed: `services/qa.js` (the pre-check and two
+  lines of the prompt), `services/dataTools.js` (`ASK_ONLY`), `config.js` (the
+  `QA.SNAPSHOT_*` and `QA.PRICE_HISTORY_*` limits), `eval/ask/cases.json` (39 cases),
+  `eval/ask/lib.js`, `test/mcp.test.js`, `package.json`; new tests
+  `test/stockSnapshot.test.js` and `test/priceHistory.test.js`. With it `npm test` passes:
+  31 files, 756 checks. **No real model has called either new tool, and the page has not
+  been opened with the change.**
 - **The local engine changed with the QA pass** *(2026-10-10)*: three files in `strategy-service/`
   (gitignored, so not in any commit): `service/signal_runner.py`, `engine/data/base.py`,
   `engine/analytics/walk_forward.py`, plus `tests/test_qa_fixes.py`. The files as they were
@@ -183,9 +186,11 @@ The whole eval (P5) still needs his word, and so do a push, a pull request and a
 - **P4. Ask features on the data that exists:** the price-and-sentiment snapshot for a stock
   the user does not hold; price history; then the fund, politician, Indian investor, alerts
   and brief tools. **Slice 1, the snapshot, is built** (2026-10-11, commit `ee7b582` on
-  `ask-tools`; §10). Annas asked to check in after each slice, said each slice may be
+  `ask-tools`; §10), **and so is slice 2, price history** (2026-10-11, commit `2587de8`).
+  Annas asked to check in after each slice, said each slice may be
   committed locally once its tests pass, and said no paid run before P5. **Not started:**
-  price history and the page tools.
+  slice 3, the page tools (a fund's holdings, a politician's trades, Indian investors and
+  deals, the alerts list, the daily brief).
 - **P5. The whole Ask eval on Haiku 4.5.** It shows whether the extra tools confuse the
   model, and settles whether to move Ask to Sonnet 5.5.
 - **P6. US coverage,** last: the largest change in volume, and by then P3 will have shown
@@ -714,6 +719,12 @@ All the write scripts are dry runs without their flag.
   directly for six names against live prices. No model has chosen `get_stock_snapshot`,
   and the Ask page has not been opened with the change. Three eval cases wait for P5:
   `scope-05` (rewritten), `scope-06`, `scope-07`.
+- **Price history with a real model.** `get_price_history` was called directly for a US
+  share, an Indian share, a coin and a commodity (held and not), and the code-written
+  answer with the history line was run through `answerQuestion` (2026-10-11, no row added
+  to `claude_calls`). Whether a model quotes the figures as given, and whether it stays off
+  trend calls, is unmeasured: `history-01` to `history-03` wait for P5. The figures were
+  not compared with another price source.
 - **`INDIA_LISTED_NEWS` in a running pipeline.** The switch has been measured on the
   stored stories and tested offline (§10); it has never been on while the pipeline ran.
 - The Ollama fallbacks against a real local model.
@@ -1150,8 +1161,23 @@ machine before the date fix that day had lookahead; do not reuse older figures.
   even where the app has its price and its sentiment. On the branch `ask-tools` (2026-10-11)
   it answers with that price and sentiment reading instead; news detail, smart money and
   impact are still for holdings only.
-- **The snapshot answer does not decline advice in words.** "Should I buy Hero MotoCorp?"
-  gets the price and the reading and nothing about not advising; it gives no advice either.
+- **The snapshot answer declines advice in words when the question asks for it** (added
+  2026-10-11 at Annas's word): "Should I buy Hero MotoCorp?" opens with "SenIQ doesn't give
+  buy, sell or hold advice, or predictions." The question is read by a word list
+  (`ADVICE_ASKED` in `stockSnapshot.js`), so an oddly worded request gets the figures
+  without that line; it gives no advice either way.
+- **Price history is closing prices, as the source gives them.** Shares and commodities
+  come from Yahoo's chart route, coins from CoinGecko (one reading a UTC day). Nothing is
+  adjusted here, so a dividend is not added back and the figures are a price change, not a
+  total return. The highest and lowest are closes, not the day's extremes. The latest bar
+  can be a session still in progress. Yahoo's route is unofficial, as it is for Indian
+  quotes and IPO returns; a refusal gives "no price history right now".
+- **The periods are fixed:** 1 week, 1 month, 3 months, 6 months, 1 year and the calendar
+  year to date. Six months and the year to date were added to the four in the plan so the
+  model has no reason to work out a figure itself; any other period ("since March") is
+  answered from the month-end closes or not at all.
+- **A year of history is fetched each time it is asked for** and kept in memory for 15
+  minutes; nothing is stored.
 - **A typed name is looked up as the Add Asset search does**, by ticker prefix or a piece of
   the name, plus an exact alias. "Tata" fits many and the tool hands back five to choose
   from; a company outside the reference (Shopify) is "not found". A commodity question
@@ -1343,7 +1369,16 @@ hand-labelled sheets of (story, company) pairs (§8).
   when several match. The code-written snapshot of part 1 stays on the 218, the only names
   safe to pick out of free text. A listed name's sentiment reads "not tracked yet" until
   P3 and P6 land.
-- **P4, price history.** Daily bars fetched when asked, from the Yahoo route IPO returns and
+- **P4, price history: built 2026-10-11** (commit `2587de8` on `ask-tools`;
+  `services/priceHistory.js`). As decided below, with these choices made while building:
+  coins come from CoinGecko by their id, because a Yahoo symbol for a coin can belong to
+  another token; six months and the calendar year to date are given beside the four
+  periods; the result is about 1,600 characters. The tool takes a name or a ticker, held
+  or not, and a holding outside the reference still works. A question only about a stock
+  the user does not hold that asks about the past ("How has Tesla done this year?") gets
+  the same figures in the code-written answer, with no model call. Ask only: `ASK_ONLY`
+  names it, so no price bars reach `/mcp` or `/v1`. The plan as decided:
+  Daily bars fetched when asked, from the Yahoo route IPO returns and
   Indian quotes already use; nothing stored, and no need for the strategy engine. The tool
   returns figures worked out in code (change over 1 week, 1 month, 3 months and 1 year, the
   high and the low with their dates, average volume) and a short run of closes: a year of
