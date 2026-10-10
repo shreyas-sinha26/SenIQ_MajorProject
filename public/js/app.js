@@ -3308,8 +3308,10 @@ let ysInitDone = false;
 
 // "NVDA, BTC:CRYPTO, RELIANCE:NSE" → [{symbol, exchange}] (default US).
 function ysParseSymbols(text) {
+  // Every entry is sent: a sixth symbol or a misspelt market is refused by the server with
+  // the reason, where it used to be dropped here and the strategy saved without it.
   return String(text || '').split(',')
-    .map(t => t.trim()).filter(Boolean).slice(0, 5)
+    .map(t => t.trim()).filter(Boolean)
     .map(t => {
       const [symbol, exchange] = t.split(':').map(x => x.trim().toUpperCase());
       return { symbol, exchange: exchange || 'US' };
@@ -3351,6 +3353,7 @@ function initSaveModal() {
       modal.classList.add('hidden');
       showToast(`“${body.name}” saved to Your Strategies`, 'success');
       ysInitDone = false; // refresh the list on next visit
+      ptInitDone = false; // and the strategies offered on Paper Trade
     } catch (err) {
       if (err.status === 402) {
         errEl.textContent = 'Saving strategies is a Plus feature — upgrade to save.';
@@ -3363,18 +3366,28 @@ function initSaveModal() {
 }
 
 // ── The page ──
+// The list is read again on every visit (one cheap request), because a strategy can be saved
+// or removed elsewhere: by Ask, through the API, in another tab. The cards and their live
+// signals are redrawn only when the list is not the one already on screen.
+let ysShown = null;
+const ysListKey = (list) => JSON.stringify(list.map(s => [s.id, s.updated_at, s.name, s.symbols]));
+
 async function initStrategiesPage() {
-  if (ysInitDone) return;
-  ysInitDone = true;
   const statusEl = document.getElementById('ys-status');
   const listEl = document.getElementById('ys-list');
-  listEl.innerHTML = '';
-  statusEl.classList.remove('hidden');
-  statusEl.innerHTML = '<div class="empty-state small"><p>Loading your strategies…</p></div>';
+  const first = !ysInitDone;
+  ysInitDone = true;
+  if (first) {
+    ysShown = null;
+    listEl.innerHTML = '';
+    statusEl.classList.remove('hidden');
+    statusEl.innerHTML = '<div class="empty-state small"><p>Loading your strategies…</p></div>';
+  }
   let data;
   try {
     data = await api('/api/strategies/saved');
   } catch (err) {
+    if (!first) return; // a failed re-read leaves what is on screen
     ysInitDone = false;
     if (err.status === 402) {
       statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>Your Strategies is a Plus feature. <a href="#" onclick="switchToPage(\'profile\');return false;">Upgrade your plan</a> to save strategies and watch their live signals.</p></div>';
@@ -3383,9 +3396,13 @@ async function initStrategiesPage() {
     }
     return;
   }
-  statusEl.classList.add('hidden');
   const list = data.strategies || [];
+  const key = ysListKey(list);
+  if (key === ysShown) return;
+  ysShown = key;
+  statusEl.classList.add('hidden');
   if (!list.length) {
+    listEl.innerHTML = '';
     statusEl.classList.remove('hidden');
     statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">bookmarks</span><p>Nothing saved yet. Build one in the <a href="#" onclick="switchToPage(\'strategy-builder\');return false;">Strategy Builder</a>, or save a preset from the <a href="#" onclick="switchToPage(\'backtest\');return false;">Backtest page</a>.</p></div>';
     return;
@@ -3510,35 +3527,51 @@ async function ysBacktest(id) {
 // computed on read; and the ledger, the fills and daily values a daily job has
 // stored from completed days (it loads without the engine).
 let ptInitDone = false;
+let ptCanDeploy = true;          // false: the account is not on Pro (it may still hold deployments)
+const ptStateFailed = new Set(); // deployments whose live state could not be replayed
+
+const PT_UPSELL = 'Paper trading is a Pro feature. <a href="#" onclick="switchToPage(\'profile\');return false;">Upgrade your plan</a> to deploy strategies on virtual money.';
 
 async function initPaperPage() {
-  if (ptInitDone) return;
+  if (ptInitDone) {
+    // Back on the page: a card that said "engine offline" asks again. It used to keep
+    // saying so until the whole app was reloaded, though the engine was back.
+    [...ptStateFailed].forEach(ptLoadState);
+    return;
+  }
   ptInitDone = true;
+  ptStateFailed.clear();
   const statusEl = document.getElementById('pt-status');
   const listEl = document.getElementById('pt-list');
+  const formEl = document.getElementById('pt-deploy-form');
   statusEl.classList.remove('hidden');
   statusEl.innerHTML = '<div class="empty-state small"><p>Loading…</p></div>';
   listEl.innerHTML = '';
 
-  let saved, deployments;
+  // The deployments first: an account that has left Pro can still see, stop and delete
+  // what it started. The saved strategies (for the deploy form) only when it can deploy.
+  let saved = { strategies: [] }, deployments;
   try {
-    [saved, deployments] = await Promise.all([
-      api('/api/strategies/saved'),
-      api('/api/paper'),
-    ]);
+    deployments = await api('/api/paper');
+    ptCanDeploy = deployments.can_deploy !== false;
+    if (ptCanDeploy) saved = await api('/api/strategies/saved');
   } catch (err) {
     ptInitDone = false;
-    if (err.status === 402) {
-      statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>Paper trading is a Pro feature. <a href="#" onclick="switchToPage(\'profile\');return false;">Upgrade your plan</a> to deploy strategies on virtual money.</p></div>';
-    } else {
-      statusEl.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message || 'Could not load paper trading')}</p></div>`;
-    }
+    statusEl.innerHTML = err.status === 402
+      ? `<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>${PT_UPSELL}</p></div>`
+      : `<div class="empty-state"><p>${escapeHtml(err.message || 'Could not load paper trading')}</p></div>`;
     return;
   }
 
   const strategies = saved.strategies || [];
   const sel = document.getElementById('pt-strategy');
-  if (!strategies.length) {
+  if (!ptCanDeploy) {
+    formEl.classList.add('hidden');
+    const held = (deployments.deployments || []).length;
+    statusEl.innerHTML = `<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>${PT_UPSELL}${held
+      ? ' The deployments below were started on Pro. They are not being replayed or recorded now; you can still read what was recorded, stop them or delete them.' : ''}</p></div>`;
+  } else if (!strategies.length) {
+    formEl.classList.add('hidden');
     statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">candlestick_chart</span><p>Save a strategy first — build one in the <a href="#" onclick="switchToPage(\'strategy-builder\');return false;">Strategy Builder</a> or save a preset from the <a href="#" onclick="switchToPage(\'backtest\');return false;">Backtest page</a>, then deploy it here.</p></div>';
   } else {
     sel.innerHTML = strategies.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
@@ -3564,18 +3597,22 @@ async function initPaperPage() {
     form.dataset.wired = '1';
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const body = {
+        strategy_id: Number(document.getElementById('pt-strategy').value),
+        symbol: document.getElementById('pt-symbol').value.trim().toUpperCase(),
+        exchange: document.getElementById('pt-exchange').value,
+        initial_cash: document.getElementById('pt-cash').value.trim(),
+      };
+      // novalidate, like the Backtest form: the page names what is wrong itself.
+      const cash = body.initial_cash === '' ? NaN : Number(body.initial_cash);
+      const problem = !body.symbol ? { field: 'pt-symbol', message: 'Enter the symbol to trade' }
+        : (!Number.isFinite(cash) || cash < BT_CASH_MIN || cash > BT_CASH_MAX)
+          ? { field: 'pt-cash', message: `Paper cash must be between ${BT_CASH_MIN.toLocaleString()} and ${BT_CASH_MAX.toLocaleString()}` } : null;
+      if (problem) { showToast(problem.message, 'error'); document.getElementById(problem.field).focus(); return; }
       const btn = document.getElementById('pt-deploy');
       btn.disabled = true;
       try {
-        await api('/api/paper', {
-          method: 'POST',
-          body: JSON.stringify({
-            strategy_id: Number(document.getElementById('pt-strategy').value),
-            symbol: document.getElementById('pt-symbol').value.trim().toUpperCase(),
-            exchange: document.getElementById('pt-exchange').value,
-            initial_cash: document.getElementById('pt-cash').value || '100000',
-          }),
-        });
+        await api('/api/paper', { method: 'POST', body: JSON.stringify(body) });
         showToast('Deployed — trading starts with the next fresh signal', 'success');
         ptInitDone = false;
         initPaperPage();
@@ -3591,7 +3628,7 @@ async function initPaperPage() {
 function ptRenderList(list) {
   const listEl = document.getElementById('pt-list');
   if (!list.length) {
-    listEl.innerHTML = '<div class="empty-state small"><p>No deployments yet — deploy a saved strategy above.</p></div>';
+    listEl.innerHTML = ptCanDeploy ? '<div class="empty-state small"><p>No deployments yet — deploy a saved strategy above.</p></div>' : '';
     return;
   }
   listEl.innerHTML = list.map(d => `
@@ -3611,7 +3648,11 @@ function ptRenderList(list) {
       <div class="pt-state" id="pt-state-${d.id}"><span class="ys-loading">replaying…</span></div>
       <details class="pt-ledger" id="pt-ledger-${d.id}"><summary class="ys-loading">loading ledger…</summary></details>
     </div>`).join('');
-  list.forEach(d => { ptLoadState(d.id); ptLoadLedger(d.id); });
+  list.forEach(d => {
+    if (ptCanDeploy) ptLoadState(d.id);
+    else document.getElementById(`pt-state-${d.id}`).innerHTML = '<span class="ys-loading">live state is a Pro feature — the recorded ledger below is what was stored</span>';
+    ptLoadLedger(d.id);
+  });
 }
 
 // Recorded equity as a small line: one point per stored day.
@@ -3666,9 +3707,11 @@ async function ptLoadLedger(id) {
 
 async function ptLoadState(id) {
   const el = document.getElementById(`pt-state-${id}`);
-  if (!el) return;
+  if (!el) { ptStateFailed.delete(id); return; }
+  el.innerHTML = '<span class="ys-loading">replaying…</span>';
   try {
     const data = await api(`/api/paper/${id}/state`, { method: 'POST' });
+    ptStateFailed.delete(id);
     const m = data.report.metrics;
     const initial = Number(data.deployment.initial_cash);
     if (!data.n_bars) {
@@ -3692,7 +3735,9 @@ async function ptLoadState(id) {
       </div>
       ${posHtml}`;
   } catch (err) {
-    el.innerHTML = `<span class="ys-sig ys-sig-err">${escapeHtml(err.status === 503 ? 'engine offline' : (err.message || 'replay failed'))}</span>`;
+    ptStateFailed.add(id);
+    el.innerHTML = `<span class="ys-sig ys-sig-err">${escapeHtml(err.status === 503 ? 'The strategy engine is offline' : (err.message || 'replay failed'))}</span>
+      <button type="button" class="ys-btn pt-retry" onclick="ptLoadState(${id})" title="Try again"><span class="material-symbols-outlined">refresh</span></button>`;
   }
 }
 
