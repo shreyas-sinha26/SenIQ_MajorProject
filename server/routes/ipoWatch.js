@@ -6,11 +6,13 @@
 const { asyncRouter } = require('../middleware/asyncRouter');
 const { authMiddleware } = require('./auth');
 const { DISCLAIMER } = require('../config');
-const { STAGES, BOARDS, MARKETS, marketDate, listCalendar } = require('../services/ipoWatch');
+const { STAGES, BOARDS, MARKETS, marketDate, listCalendar, calendarAge } = require('../services/ipoWatch');
 const { storiesFor } = require('../services/ipoWatch/arc');
+const { idParam } = require('../middleware/idParam');
 
 const router = asyncRouter();
 router.use(authMiddleware);
+router.param('id', idParam('Issue not found'));
 
 // ─── GET /api/ipo-watch/calendar?market=in|us&board=mainboard|sme|all&spacs=1&stage=open ───
 router.get('/calendar', async (req, res) => {
@@ -24,15 +26,16 @@ router.get('/calendar', async (req, res) => {
 
   const asOf = marketDate();
   const issues = await listCalendar({ market, board, spacs: req.query.spacs === '1', stage, today: asOf });
-  res.json({ asOf, market, board, issues, disclaimer: DISCLAIMER });
+  const { updatedAt, stale } = await calendarAge(market);
+  res.json({ asOf, market, board, issues, updatedAt, stale, disclaimer: DISCLAIMER });
 });
 
 // ─── GET /api/ipo-watch/:id/stories ───────────────────────────────────────────
 // The stories linked to one issue, each with its tone, and the tone by day.
 router.get('/:id/stories', async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'bad issue id' });
-  res.json(await storiesFor(id));
+  const out = await storiesFor(Number(req.params.id));
+  if (!out) return res.status(404).json({ error: 'Issue not found' });
+  res.json(out);
 });
 
 module.exports = router;

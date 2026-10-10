@@ -686,7 +686,14 @@ const INDIA_SMART_MONEY = {
 // Runs only when FEATURES.IPO_WATCH is on. Dates are the exchange's, so "today" is too.
 const IPO_WATCH = {
   TIMEZONE: 'Asia/Kolkata',
-  RECENT_LISTED_DAYS: 90,        // a listed issue stays on the calendar this long
+  // A listed issue stays on the calendar this long. The 3-month close is first readable on
+  // day 91 (the first trading day on or after listing + 90, once that day is over), so the
+  // window runs as long as prices are fetched (RETURN_GIVE_UP_DAYS) — at 90 the issue left
+  // the page the day before its last figure could be shown.
+  RECENT_LISTED_DAYS: 100,
+  // The poll runs once a day and never on start, so a server that was down at poll time
+  // shows yesterday's calendar. Older than this and the page says so.
+  STALE_AFTER_HOURS: 30,
   UNLISTED_AFTER_CLOSE_DAYS: 10, // closed this long with no listing date on record → off the calendar
   // Grey market premium is hearsay from one aggregator. A reading older than this is not
   // shown at all — an old number passed off as current is worse than none.

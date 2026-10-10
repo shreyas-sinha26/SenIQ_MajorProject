@@ -169,8 +169,11 @@ function toneOf(stories) {
 
 // Everything the page shows for one issue's news: its stories (newest first), the arc and
 // the overall tone. `shared` marks a story that covers several issues, `passing` one that
-// names this issue only below the headline; neither has a reading.
+// names this issue only below the headline; neither has a reading. null when there is no
+// such issue.
 async function storiesFor(ipoId) {
+  const ipo = (await query('SELECT id, name, name_key, aliases FROM ipos WHERE id = $1', [ipoId]))[0];
+  if (!ipo) return null;
   const rows = await query(
     `SELECT a.id, a.title, a.url, a.source, a.platform, a.published_at,
             to_char(COALESCE(a.published_at, a.fetched_at) AT TIME ZONE $2, 'YYYY-MM-DD') AS day,
@@ -181,10 +184,9 @@ async function storiesFor(ipoId) {
       ORDER BY COALESCE(a.published_at, a.fetched_at) DESC`,
     [ipoId, IPO_WATCH.TIMEZONE]
   );
-  const ipo = (await query('SELECT id, name, name_key, aliases FROM ipos WHERE id = $1', [ipoId]))[0];
   const stories = rows.map((r) => {
     const shared = r.issues > 1;
-    const passing = !shared && Boolean(ipo) && !inHeadline(ipo, r.title);
+    const passing = !shared && !inHeadline(ipo, r.title);
     return {
       id: r.id, title: r.title, url: r.url, source: r.source, platform: r.platform, published_at: r.published_at, day: r.day,
       matched_on: r.matched_on, shared, passing,
