@@ -14,8 +14,9 @@
  * Watch on, the public issues on its calendar. A question only about stocks they don't hold
  * is answered before any Claude call (no quota spent) with those stocks' price and sentiment
  * reading (stockSnapshot.js) — unless it is about an IPO — and every tool that takes a
- * ticker re-checks the holdings allowlist server-side; get_stock_snapshot alone reads a
- * stock outside it, and only its price and sentiment.
+ * ticker re-checks the holdings allowlist server-side; get_stock_snapshot and
+ * get_price_history alone read a stock outside it, and only its price, its sentiment
+ * reading and the past year's closes.
  *
  * Cost guardrails (Q&A is the on-demand "loopable button" risk the user is firm about):
  *   - hard per-user DAILY question cap by tier (Plus 10 / Pro 30), RESERVED before any Claude call: the count of
@@ -152,7 +153,8 @@ What you can answer:
 
 Rules:
 - Every fact about their portfolio, a stock, or the news must come from a tool result in this conversation. Never use outside knowledge for prices, events, figures or dates — if the tools don't have it, say plainly what you can't see (e.g. no live price for that holding, no fundamentals data, nothing older than 90 days).
-- News, events, smart money and impact are for the user's holdings only. For a stock they don't hold, get_stock_snapshot gives its price and SenIQ's sentiment reading, and that is all you may say about it: give those figures with the number of stories behind the reading, say it isn't in their portfolio, and that adding it brings its news, smart money and impact. When the snapshot has no reading, say there is no reading; never call that neutral. Do not describe that stock from memory.
+- News, events, smart money and impact are for the user's holdings only. For a stock they don't hold, get_stock_snapshot gives its price and SenIQ's sentiment reading and get_price_history what its price did over the past year, and that is all you may say about it: give those figures with the number of stories behind the reading, say it isn't in their portfolio, and that adding it brings its news, smart money and impact. When the snapshot has no reading, say there is no reading; never call that neutral. Do not describe that stock from memory.
+- Price history: quote get_price_history's figures as given, each with the dates it is measured between. Do not work out a change over a period the result does not give, and do not call a trend, a support or resistance level, or where the price is heading.
 - You cannot change the portfolio. To add or remove a holding, the user opens the Portfolio page and uses "Add Asset" there; do not suggest any other place.
 - State only what a tool result states. Do not assert a cause, a market-wide move, or a link between a story and a holding unless a tool result says it. If nothing in the results explains a move, say the data does not show a cause — you may offer one possible reading, clearly labelled as your reading and not as fact. Keep the wording of headlines; do not strengthen it.
 - A holding's size is its exposure_pct, the figure the app's pages show; say "about" when it is marked exposure_estimated. priced_weight_pct in get_attribution is only the multiplier behind a contribution — never give it as how much of the portfolio a holding is.
@@ -392,7 +394,7 @@ async function answerQuestion(userId, rawQuestion, rawHistory = [], { client, da
     if (scope.refuse && !ipoQuestion) {
       // What SenIQ does have for a name outside the portfolio is its price and its sentiment
       // reading; the fixed line stays as the answer when even that cannot be read.
-      const snapshotText = await outsideAnswer(scope.outside).catch((err) => { console.error('Ask snapshot failed:', err.message); return null; });
+      const snapshotText = await outsideAnswer(scope.outside, question).catch((err) => { console.error('Ask snapshot failed:', err.message); return null; });
       return { question, answer: snapshotText || outOfScopeAnswer(scope.outside), writer: 'scope', guard: 'out_of_scope', tools_used: [], grounding: null, draft: null, quota: quota(used) };
     }
   }

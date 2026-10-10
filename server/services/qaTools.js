@@ -8,8 +8,9 @@
  * SCOPE IS ENFORCED HERE, not in the prompt: every ticker argument is checked against the
  * user's holdings (ctx.heldSet) before any query runs. A prompt-injected or confused model
  * asking for a stock the user doesn't own gets a not_in_portfolio error, never data.
- * The one exception is get_stock_snapshot: the price and sentiment reading of any company in
- * the reference, held or not, and nothing more (stockSnapshot.js).
+ * The exceptions are get_stock_snapshot and get_price_history: the price, the sentiment
+ * reading and the past year's prices of any company in the reference, held or not, and
+ * nothing more (stockSnapshot.js, priceHistory.js).
  */
 
 const { QA, SENTIMENT } = require('../config');
@@ -18,6 +19,7 @@ const { getImpactFeed } = require('./impactScoring');
 const { searchNews, getStory } = require('./newsSearch');
 const { listDisclosures, getDisclosure } = require('./disclosures');
 const { findCompany, snapshot } = require('./stockSnapshot');
+const { priceHistory } = require('./priceHistory');
 
 const round = (n, d = 2) => (n == null ? null : Math.round(n * 10 ** d) / 10 ** d);
 const day = (t) => (t ? new Date(t).toISOString().slice(0, 10) : null);
@@ -239,6 +241,11 @@ const TOOLS = [
     description: 'Price and sentiment for ONE company the user does NOT hold, by name or ticker: live price, day change %, and SenIQ\'s sentiment label and score with the number of stories behind it. This is everything SenIQ can say about a stock outside the portfolio: no news detail, smart money or impact. Use it when a question sets a held stock beside one that is not held. If several companies match the name, the result lists them: ask the user which one. For a held stock use the holding tools instead.',
     input_schema: { type: 'object', properties: { name: { type: 'string', description: 'The company\'s name or ticker as the user wrote it, e.g. "AMD" or "Hero MotoCorp".' } }, required: ['name'] },
   },
+  {
+    name: 'get_price_history',
+    description: 'What ONE price did over the past year, for a holding or any company, coin or commodity in SenIQ\'s reference, by name or ticker: the change over 1 week, 1 month, 3 months, 6 months, 1 year and the calendar year to date (each with the date and close it is measured from), the highest and lowest close with their dates, average daily volume, the latest daily closes and the month-end closes. Use for "how has X done this year / this month", "what was X\'s high", "how far is X off its peak". Closing prices only; it does not explain why the price moved (use the news tools for a holding).',
+    input_schema: { type: 'object', properties: { name: { type: 'string', description: 'The name or ticker as the user wrote it, e.g. "NVDA", "Bitcoin" or "Hero MotoCorp".' } }, required: ['name'] },
+  },
 ];
 
 // ── Executors ──
@@ -249,6 +256,20 @@ function requireHeld(ctx, raw) {
   if (!t) throw new ScopeError('ticker is required');
   if (!ctx.heldSet.has(t)) throw new ScopeError(`not_in_portfolio: ${t} is not in the user's portfolio, so no data is available for it. Tell the user it isn't tracked and that they can add it to their portfolio.`);
   return t;
+}
+
+// The company a typed name or ticker means, for the two tools that read outside the
+// portfolio: { company }, or the result to hand back when several match. A holding that is
+// not in the reference (a ticker the user typed in) is still theirs to ask about.
+async function namedCompany(name, ctx, kind) {
+  const typed = String(name || '').trim().slice(0, 40);
+  if (!typed) throw new ScopeError('name is required');
+  const found = await findCompany(typed);
+  if (found.company) return found;
+  if (found.matches) return { kind, matches: found.matches, note: 'Several companies match that name. Ask the user which one they mean; do not pick one.' };
+  const held = (ctx.holdings || []).find((h) => h.ticker === typed.toUpperCase().replace(/^\$/, ''));
+  if (held) return { company: { ticker: held.ticker, name: held.company_name || held.ticker, asset_class: held.asset_class, exchange: held.exchange, tier: 'held' } };
+  throw new ScopeError(`not_found: SenIQ's company reference has nothing called "${typed}", so there is nothing to show for it. Say so; do not describe it from memory.`);
 }
 
 const EXECUTORS = {
@@ -278,12 +299,13 @@ const EXECUTORS = {
   },
 
   async get_stock_snapshot({ name } = {}, ctx) {
-    const typed = String(name || '').trim().slice(0, 40);
-    if (!typed) throw new ScopeError('name is required');
-    const found = await findCompany(typed);
-    if (found.none) throw new ScopeError(`not_found: SenIQ's company reference has nothing called "${typed}", so there is no price or sentiment for it. Say so; do not describe it from memory.`);
-    if (found.matches) return { kind: 'stock_snapshot', matches: found.matches, note: 'Several companies match that name. Ask the user which one they mean; do not pick one.' };
-    return snapshot(found.company, { held: ctx.heldSet.has(found.company.ticker) });
+    const found = await namedCompany(name, ctx, 'stock_snapshot');
+    return found.company ? snapshot(found.company, { held: ctx.heldSet.has(found.company.ticker) }) : found;
+  },
+
+  async get_price_history({ name } = {}, ctx) {
+    const found = await namedCompany(name, ctx, 'price_history');
+    return found.company ? priceHistory(found.company, { held: ctx.heldSet.has(found.company.ticker) }) : found;
   },
 
   async get_attribution(_args, ctx) {

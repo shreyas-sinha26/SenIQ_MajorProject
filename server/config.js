@@ -477,6 +477,13 @@ const QA = {
   // A stock the user does not hold (services/stockSnapshot.js): price and sentiment only.
   SNAPSHOT_MAX_NAMES: 3,             // names snapshotted in one code-written answer; the rest are named as not shown
   SNAPSHOT_MATCHES: 5,               // companies offered back when a typed name fits several
+  // Price history (services/priceHistory.js): daily bars fetched when asked, never stored.
+  PRICE_HISTORY_PERIODS: [['1_week', 7], ['1_month', 30], ['3_months', 91], ['6_months', 182], ['1_year', 365]],
+  PRICE_HISTORY_SLACK_DAYS: 5,       // a year of bars can start a weekend short of a year back
+  PRICE_HISTORY_RECENT: 10,          // latest daily closes in the result
+  PRICE_HISTORY_VOLUME_SESSIONS: 20, // the recent average volume, about a month of sessions
+  PRICE_HISTORY_TTL_MS: 15 * 60 * 1000,
+  PRICE_HISTORY_TIMEOUT_MS: 8000,
   // IPO Watch tools (services/ipoTools.js, only with FEATURES.IPO_WATCH) — the calendar, read-only.
   IPO_MAX_ISSUES: 10,                // issue cards in one get_ipo_calendar result; fewer when they would not fit MAX_TOOL_RESULT_CHARS
   IPO_RANK_TOP: 5,                   // names in an ordering (most subscribed, highest premium)

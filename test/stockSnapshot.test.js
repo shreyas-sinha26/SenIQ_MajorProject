@@ -116,12 +116,40 @@ const reading = (count, score = 0.5, z = null, points = 12) => ({ label: score >
     assert.ok(lib.adviceCheck ? lib.adviceCheck(a).pass : !/\b(buy|sell|hold|should)\b/i.test(a));
   });
 
+  console.log('a question that asks what to do, or about the past:');
+  check('advice asked: the answer says SenIQ does not advise, first, and still gives the figures', () => {
+    for (const q of ['Should I buy Hero MotoCorp?', 'Is Tesla a good buy right now?', 'Is it a good time to sell Microsoft?', 'Will Tesla go up next week?', 'What is the price target for AMD?', 'Tesla: buy or sell?', 'Is Infosys worth buying?', 'Can you recommend Tesla?'])
+      assert.ok(S.asksForAdvice(q), q);
+    for (const q of ['How is Microsoft\'s sentiment looking?', 'Give me the latest news on Tesla', 'What is the price of AMD?', 'Did insiders sell Tesla shares?', 'How has Tesla done this year?'])
+      assert.ok(!S.asksForAdvice(q), q);
+    const snap = S.buildSnapshot(HERO, { price: 4895.5, currency: 'INR', changePct: 0.8 }, reading(2), { now: NOW });
+    const a = S.snapshotAnswer([snap], [], { advice: true });
+    assert.ok(a.startsWith("SenIQ doesn't give buy, sell or hold advice, or predictions. Here is what it has.\nHEROMOTOCO isn't in your portfolio"));
+    assert.ok(a.includes('Price ₹4,895.50') && !S.snapshotAnswer([snap]).includes('advice'));
+  });
+  check('the past asked: what the price did is added under each name', () => {
+    for (const q of ['How has Tesla done this year?', 'Tesla performance over the last 6 months', 'What is the 52-week high of AMD?', 'How did Microsoft do last month?', 'Tesla price history'])
+      assert.ok(S.asksAboutHistory(q), q);
+    for (const q of ['What is the price of AMD?', 'How is Microsoft\'s sentiment looking?', 'Should I buy Hero MotoCorp?'])
+      assert.ok(!S.asksAboutHistory(q), q);
+    const h = { currency: 'INR', last_close: { date: '2026-10-09', close: 4895.5 }, highest_close: { date: '2025-12-05', close: 6350.5 }, lowest_close: { date: '2026-06-08', close: 4775.5 },
+      changes: { '1_week': { change_pct: -5.27 }, '1_month': { change_pct: -6.18 }, '3_months': { change_pct: 1.5 }, '6_months': null, '1_year': null, year_to_date: null }, history_starts: '2026-06-01' };
+    const line = S.historyLine(h);
+    assert.strictEqual(line, 'Closing prices to 2026-10-09 (its history here starts 2026-06-01): 1 week -5.27%, 1 month -6.18%, 3 months +1.50%. Highest close in the period ₹6,350.50 on 2025-12-05, lowest ₹4,775.50 on 2026-06-08.');
+    assert.strictEqual(S.historyLine({ history: null }), 'There is no price history for it right now.');
+    const snap = S.buildSnapshot(HERO, { price: 4895.5, currency: 'INR', changePct: 0.8 }, reading(2), { now: NOW });
+    const a = S.snapshotAnswer([snap], [], { histories: { HEROMOTOCO: h } }).split('\n');
+    assert.ok(/price and sentiment reading, and what the price did over the past year\.$/.test(a[0]));
+    assert.ok(a[1].startsWith('Hero MotoCorp (HEROMOTOCO): Price') && a[2] === line);
+  });
+
   console.log('the tool:');
   check('it is one of Ask\'s tools, with an executor, and takes a name', () => {
     const t = TOOLS.find((x) => x.name === 'get_stock_snapshot');
     assert.ok(t && typeof EXECUTORS.get_stock_snapshot === 'function');
     assert.deepStrictEqual(t.input_schema.required, ['name']);
-    assert.strictEqual(TOOLS[TOOLS.length - 1].name, 'get_stock_snapshot');   // appended: the cached prefix before it is unchanged
+    // Appended after the tools that were there before: the cached prefix ahead of them is unchanged.
+    assert.deepStrictEqual(TOOLS.slice(-2).map((x) => x.name), ['get_stock_snapshot', 'get_price_history']);
   });
   await checkAsync('no name is an error the model can read, and no lookup is made', async () => {
     const r = await runTool({ id: 't1', name: 'get_stock_snapshot', input: {} }, { heldSet: new Set() });
