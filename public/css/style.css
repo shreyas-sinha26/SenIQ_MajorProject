@@ -1845,6 +1845,9 @@ body input::placeholder, body textarea::placeholder { color: #94A3B8; }
 .ipo-story-list li .ht-senti-label { min-width: 34px; text-align: center; font-family: var(--mono); flex-shrink: 0; }
 .ipo-story-list a { color: var(--text); text-decoration: none; }
 .ipo-story-list a:hover { text-decoration: underline; }
+.ipo-stories-more { margin-top: 12px; background: none; border: 1px solid var(--glass-brd); border-radius: 999px; padding: 4px 12px; font-size: .76rem; font-weight: 600; color: var(--royal); cursor: pointer; font-family: inherit; }
+.ipo-stories-more:hover { background: rgba(30,64,175,.08); }
+.ipo-stories-more:focus-visible { outline: 2px solid var(--royal); outline-offset: 2px; }
 .ipo-add { background: none; border: 1px solid var(--glass-brd); border-radius: 999px; padding: 1px 8px; font-size: .68rem; font-weight: 600; color: var(--royal); cursor: pointer; font-family: inherit; }
 .ipo-add:hover { background: rgba(30,64,175,.08); }
 .ipo-add:disabled { opacity: .5; cursor: default; }
