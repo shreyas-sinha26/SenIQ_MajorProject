@@ -17,6 +17,7 @@ const { query, queryOne, execute } = require('../db');
 const { authMiddleware } = require('./auth');
 const { attachTier, requireTier, requireAdmin } = require('../middleware/tier');
 const { assertPublicUrl, UnsafeUrlError } = require('../services/safeFetch');
+const { idParam } = require('../middleware/idParam');
 const { SMART_MONEY, INDIA_SMART_MONEY, FEATURES, DISCLAIMER } = require('../config');
 const { pollSmartMoney, polKey } = require('../services/smartMoney');
 const { pollIndiaSmartMoney } = require('../services/smartMoney/india');
@@ -199,12 +200,12 @@ router.post('/follow', async (req, res) => {
       resolvedLabel = inst.name;
     } else if (entity_type === 'in_investor') {
       // Indian investors are the curated list — the ref must be one of its slugs.
-      const inv = INVESTOR_BY_SLUG[ref];
+      const inv = Object.hasOwn(INVESTOR_BY_SLUG, ref) ? INVESTOR_BY_SLUG[ref] : null;
       if (!inv) return res.status(404).json({ error: 'Unknown investor slug' });
       resolvedLabel = inv.name;
     } else {
       // Normalize politician names to the same key the emitter uses.
-      resolvedLabel = label || ref;
+      resolvedLabel = String(label || ref).trim().slice(0, 120);
       ref = polKey(ref);
     }
 
@@ -283,6 +284,7 @@ router.post('/webhooks', requireTier('pro'), async (req, res) => {
   }
 });
 
+router.param('id', idParam('Webhook not found'));
 router.delete('/webhooks/:id', async (req, res) => {
   try {
     const result = await execute('DELETE FROM webhooks WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);

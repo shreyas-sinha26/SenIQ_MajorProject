@@ -84,8 +84,10 @@ router.post('/signup', rateLimit(loginLimiter), async (req, res) => {
 // ─── POST /api/auth/login ────────────────────────────────────
 router.post('/login', rateLimit(loginLimiter), async (req, res) => {
   try {
-    const { email, password } = req.body || {};
-    if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
+    const { password } = req.body || {};
+    // Sign-up trims the address, so sign-in does too: a pasted trailing space is not a wrong password.
+    const email = typeof (req.body || {}).email === 'string' ? req.body.email.trim() : '';
+    if (typeof password !== 'string' || !email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
@@ -196,6 +198,10 @@ router.post('/change-password', authMiddleware, async (req, res) => {
       if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
     }
 
+    if (user.password_hash && await bcrypt.compare(newPassword, user.password_hash)) {
+      return res.status(400).json({ error: 'The new password is the same as the current one' });
+    }
+
     const hash = await bcrypt.hash(newPassword, 10);
     await queryOne('UPDATE users SET password_hash = $1, password_changed_at = to_timestamp($2) WHERE id = $3', [hash, nowSeconds(), req.user.id]);
     // Every other session ends here; this one carries on.
@@ -214,8 +220,8 @@ router.post('/change-password', authMiddleware, async (req, res) => {
 // stays testable locally.
 router.post('/forgot-password', rateLimit(resetLimiter), async (req, res) => {
   try {
-    const { email } = req.body || {};
-    if (typeof email !== 'string' || !email) return res.status(400).json({ error: 'Email is required' });
+    const email = typeof (req.body || {}).email === 'string' ? req.body.email.trim() : '';
+    if (!email) return res.status(400).json({ error: 'Email is required' });
 
     const reply = { message: 'If that email is registered, a reset link is on its way.' };
     const user = await queryOne('SELECT id, name FROM users WHERE LOWER(email) = LOWER($1)', [email]);
@@ -223,13 +229,22 @@ router.post('/forgot-password', rateLimit(resetLimiter), async (req, res) => {
 
     const tok = await createToken(user.id, 'reset', AUTH_LIMITS.TOKEN_TTL_MIN.RESET);
     const link = `${APP_URL}/app?reset=${tok}`;
-    const sent = await sendEmail({
+    const message = {
       to: email, kind: 'reset', userId: user.id,
       subject: 'Reset your SenIQ password',
       text: `Hi ${user.name},\n\nReset your SenIQ password here:\n${link}\n\nThe link is valid for ${AUTH_LIMITS.TOKEN_TTL_MIN.RESET} minutes and works once. If you didn't request this, ignore this email — your password is unchanged.`,
-    });
+    };
 
-    if (!sent.delivered && !isProd) reply.devResetLink = link; // local dev without an email key
+    // In production the send runs after the answer. Waiting for the mail server made a
+    // registered address answer seconds slower than an unknown one — the same message, but
+    // the delay told a caller which addresses have accounts. sendEmail never throws and
+    // records a failure in email_log.
+    if (isProd) {
+      sendEmail(message);
+      return res.json(reply);
+    }
+    const sent = await sendEmail(message);
+    if (!sent.delivered) reply.devResetLink = link; // local dev without a working email provider
     res.json(reply);
   } catch (err) {
     console.error('Forgot password error:', err);

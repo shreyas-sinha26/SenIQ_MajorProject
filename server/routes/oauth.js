@@ -197,8 +197,11 @@ async function upsertOAuthUser(provider, profile) {
 }
 
 // ─── GET /api/auth/oauth/:provider — start the flow ─────────
+// The provider named in the URL, or null. An own-key check: PROVIDERS['constructor'] exists too.
+const providerFor = (key) => (Object.hasOwn(PROVIDERS, key) ? PROVIDERS[key] : null);
+
 router.get('/:provider', (req, res) => {
-  const provider = PROVIDERS[req.params.provider];
+  const provider = providerFor(req.params.provider);
   if (!provider) return failRedirect(res, 'Unknown sign-in provider');
   if (!provider.cfg().enabled) {
     return failRedirect(res, `${provider.label} sign-in isn't configured on this server`);
@@ -221,8 +224,9 @@ router.get('/:provider', (req, res) => {
 // ─── GET /api/auth/oauth/:provider/callback ──────────────────
 router.get('/:provider/callback', async (req, res) => {
   const providerKey = req.params.provider;
-  const provider = PROVIDERS[providerKey];
-  if (!provider || !provider.cfg().enabled) return failRedirect(res, 'Unknown sign-in provider');
+  const provider = providerFor(providerKey);
+  if (!provider) return failRedirect(res, 'Unknown sign-in provider');
+  if (!provider.cfg().enabled) return failRedirect(res, `${provider.label} sign-in isn't configured on this server`);
 
   try {
     const { code, state, error } = req.query;

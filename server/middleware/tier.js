@@ -10,15 +10,18 @@
 const { queryOne } = require('../db');
 const { TIERS, TIER_ORDER } = require('../config');
 
+// Is this one of our plan names? An own-key check: TIERS['constructor'] is truthy too.
+const isTier = (tier) => typeof tier === 'string' && Object.hasOwn(TIERS, tier);
+
 function tierConfig(tier) {
-  return TIERS[tier] || TIERS.free;
+  return isTier(tier) ? TIERS[tier] : TIERS.free;
 }
 
 // Load {tier, isAdmin} for a user id from the DB (defaults to free if the row/columns are missing).
 async function getUserTier(userId) {
   try {
     const row = await queryOne('SELECT subscription_tier, is_admin FROM users WHERE id = $1', [userId]);
-    const tier = row && TIERS[row.subscription_tier] ? row.subscription_tier : 'free';
+    const tier = row && isTier(row.subscription_tier) ? row.subscription_tier : 'free';
     return { tier, isAdmin: !!(row && row.is_admin) };
   } catch {
     return { tier: 'free', isAdmin: false };
@@ -31,7 +34,7 @@ async function attachTier(req, res, next) {
   // authMiddleware has already read this user's row; fall back to a lookup without it.
   const row = req.userRow;
   const { tier, isAdmin } = row
-    ? { tier: TIERS[row.subscription_tier] ? row.subscription_tier : 'free', isAdmin: !!row.is_admin }
+    ? { tier: isTier(row.subscription_tier) ? row.subscription_tier : 'free', isAdmin: !!row.is_admin }
     : await getUserTier(req.user.id);
   req.tier = tier;
   req.isAdmin = isAdmin;
@@ -65,4 +68,4 @@ async function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { tierConfig, getUserTier, attachTier, requireTier, requireAdmin, upsell, TIER_ORDER };
+module.exports = { isTier, tierConfig, getUserTier, attachTier, requireTier, requireAdmin, upsell, TIER_ORDER };

@@ -44,7 +44,10 @@ const { threadDigest } = require('./askThreads');
 
 // ── Pure helpers ──
 function sanitizeQuestion(raw) {
-  const q = String(raw || '').replace(/\s+/g, ' ').trim();
+  // A question is text. A number or an object sent in its place is no question at all
+  // (String({}) would otherwise be asked, and saved, as "[object Object]").
+  if (typeof raw !== 'string') return '';
+  const q = raw.replace(/\s+/g, ' ').trim();
   if (!q) return '';
   return q.length > QA.MAX_QUESTION_CHARS ? q.slice(0, QA.MAX_QUESTION_CHARS) : q;
 }

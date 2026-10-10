@@ -26,6 +26,7 @@ const { startScheduler } = require('./scheduler');
 const { initSentry, sentryErrorHandler, captureException } = require('./observability');
 
 const app = express();
+app.disable('x-powered-by'); // no need to tell a scanner which framework this is
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
@@ -151,6 +152,17 @@ app.get('/docs', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'docs.html'));
 });
 
+// ─── Not found ──────────────────────────────────────────────
+// An /api path no router answered is a 404 in JSON, whatever the method — a script calling
+// a mistyped route must not get the app's HTML back with a 200.
+app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
+// A path that names a file (/.env, /favicon.ico, /old.js) and was not served from public/
+// does not exist. Only real pages fall through to the app below.
+app.get('*', (req, res, next) => {
+  if (/(^|\/)\.[^/]|\.[a-z0-9]{1,8}$/i.test(req.path)) return res.status(404).type('text/plain').send('Not found');
+  next();
+});
+
 // ─── SPA Fallback (the app: auth + dashboard) ───────────────
 // Everything else (e.g. /app, /app?auth=signup, deep links) loads index.html.
 app.get('*', (req, res) => {
@@ -158,6 +170,16 @@ app.get('*', (req, res) => {
 });
 
 // ─── Error handling ─────────────────────────────────────────
+// A body the JSON parser refused is the caller's mistake, not ours: answer 400 or 413 and
+// log nothing — the parser attaches the raw body to its error, and on a sign-in request
+// that body holds a password.
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'That request is too large' });
+  if (err && (err.type === 'entity.parse.failed' || err.type === 'encoding.unsupported' || err.type === 'charset.unsupported')) {
+    return res.status(400).json({ error: 'The request body is not valid JSON' });
+  }
+  next(err);
+});
 // Sentry first (reports the error), then a generic JSON 500 (never leak stacks).
 app.use(sentryErrorHandler());
 app.use((err, req, res, _next) => {
