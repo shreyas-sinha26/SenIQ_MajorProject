@@ -628,6 +628,51 @@ check('a listed issue stays on the calendar until its last return can be shown',
   assert.ok(IPO_WATCH.RECENT_LISTED_DAYS >= IPO_WATCH.RETURN_GIVE_UP_DAYS);
 });
 
+// The page's own drawing of an issue's news lives in public/js/app.js (browser code). The
+// two functions are lifted out as text and run against a small stand-in for the page.
+const appJs = require('node:fs').readFileSync(require('node:path').join(__dirname, '../public/js/app.js'), 'utf8');
+const lift = (from, to) => { const a = appJs.indexOf(from), b = appJs.indexOf(to, a); assert.ok(a >= 0 && b > a, `not found: ${from}`); return appJs.slice(a, b); };
+const page = new Function(`
+  const escapeHtml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const ipoDay = (d) => d || '—';
+  const ipoArcChart = () => '';
+  ${lift('const IPO_STORIES_SHOWN', '// Tone by day as a small chart')}
+  ${lift('function renderIpoStories', '// Top-level page switcher')}
+  return { renderIpoStories, ipoToggleAllStories, IPO_STORIES_SHOWN };
+`)();
+const storyRow = (n) => ({ id: n, title: `Story ${n}`, url: `https://example.test/${n}`, source: 'example.test', day: `2026-10-${String(n).padStart(2, '0')}`, sentiment: { label: 'positive', score: 0.7, model: 'finbert' } });
+const drawn = (count) => page.renderIpoStories({ name: 'Jio Platforms' }, { stories: Array.from({ length: count }, (_, i) => storyRow(count - i)), arc: [], tone: { label: 'positive', score: 0.7, stories: count } });
+const items = (html) => html.match(/<li[^>]*>/g) || [];
+
+check('an issue\'s news opens on its latest 5 stories; the rest wait behind "Show all N stories"', () => {
+  assert.strictEqual(page.IPO_STORIES_SHOWN, 5);
+  const html = drawn(13);
+  assert.strictEqual(items(html).length, 13); // every story is in the page …
+  assert.strictEqual(items(html).filter((li) => /ipo-story-extra hidden/.test(li)).length, 8); // … eight of them hidden
+  assert.deepStrictEqual(items(html).slice(0, 5), ['<li>', '<li>', '<li>', '<li>', '<li>']);
+  assert.ok(html.indexOf('Story 13') < html.indexOf('Story 9') && html.indexOf('Story 9') < html.indexOf('ipo-story-extra')); // the newest five, in order, come first
+  assert.match(html, /<button type="button" class="ipo-stories-more" aria-expanded="false" data-total="13">Show all 13 stories<\/button>/);
+  assert.match(html, /from 13 stories read/); // the tone line still speaks for all of them
+});
+check('five stories or fewer: all shown, and no button', () => {
+  for (const count of [1, 4, 5]) {
+    const html = drawn(count);
+    assert.strictEqual(items(html).length, count);
+    assert.ok(!/ipo-story-extra|ipo-stories-more/.test(html), `${count} stories drew a button`);
+  }
+  assert.match(drawn(6), /Show all 6 stories/);
+});
+check('the button opens the rest and closes them again', () => {
+  const extras = Array.from({ length: 8 }, () => { const cls = new Set(['ipo-story-extra', 'hidden']); return { classList: { toggle: (c, on) => (on ? cls.add(c) : cls.delete(c)), has: (c) => cls.has(c) } }; });
+  const attrs = { 'aria-expanded': 'false' };
+  const btn = { dataset: { total: '13' }, textContent: 'Show all 13 stories', getAttribute: (k) => attrs[k], setAttribute: (k, v) => { attrs[k] = v; },
+    closest: () => ({ querySelectorAll: () => extras }) };
+  page.ipoToggleAllStories(btn);
+  assert.deepStrictEqual([attrs['aria-expanded'], btn.textContent, extras.some((e) => e.classList.has('hidden'))], ['true', 'Show the latest 5', false]);
+  page.ipoToggleAllStories(btn);
+  assert.deepStrictEqual([attrs['aria-expanded'], btn.textContent, extras.every((e) => e.classList.has('hidden'))], ['false', 'Show all 13 stories', true]);
+});
+
 (async () => {
   for (const step of pending) await step();
   console.log(`\n${passed} IPO Watch checks passed`);
