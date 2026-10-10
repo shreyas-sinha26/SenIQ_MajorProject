@@ -132,6 +132,90 @@ check('engine offline / rejected / bad input come back as errors, never numbers'
   assert.deepStrictEqual([noSeniq.ok, called], [false, 0]);
 });
 
+section('\nstarting capital (one rule for the page, /v1, MCP and the comparison):');
+const { parseCapital } = require('../server/services/strategyClient');
+check('absent → the default; a number in range is passed on as written', () => {
+  assert.deepStrictEqual(parseCapital(undefined), { ok: true, value: '100000' });
+  assert.deepStrictEqual(parseCapital(''), { ok: true, value: '100000' });
+  assert.deepStrictEqual(parseCapital('250000'), { ok: true, value: '250000' });
+  assert.deepStrictEqual(parseCapital(1000), { ok: true, value: '1000' });
+  assert.deepStrictEqual(parseCapital('100000000'), { ok: true, value: '100000000' });
+  assert.deepStrictEqual(parseCapital('2500.50'), { ok: true, value: '2500.5' });
+});
+check('0, a negative, 1e30, text and non-numbers are refused, never replaced', () => {
+  for (const bad of [0, '0', -5, '999', '1e30', 1e30, '100000001', 'abc', '  ', 'NaN', 'Infinity', true, {}, [100000]]) {
+    const out = parseCapital(bad);
+    assert.strictEqual(out.ok, false, `accepted ${JSON.stringify(bad)}`);
+    assert.ok(/between 1,000 and 100,000,000/.test(out.error));
+  }
+});
+check('the comparison refuses a bad starting capital before calling the engine', async () => {
+  let called = 0;
+  const out = await S.compareWithoutSeniq({ ...ARGS, initial_cash: '1e30' }, { engine: async () => { called++; return reply(1, 1, 1); }, seniqData: async () => null });
+  assert.deepStrictEqual([out.ok, out.status, called], [false, 400, 0]);
+  assert.ok(/Starting capital/.test(out.error));
+});
+
+// The page's own checks live in public/js/app.js (browser code). The functions below are
+// pure, so they are lifted out of the file as text and run here.
+section('\nBacktest and Strategy Builder inputs (public/js/app.js):');
+const appJs = require('node:fs').readFileSync(require('node:path').join(__dirname, '../public/js/app.js'), 'utf8');
+const lift = (from, to) => { const a = appJs.indexOf(from), b = appJs.indexOf(to, a); assert.ok(a >= 0 && b > a, `not found: ${from}`); return appJs.slice(a, b); };
+const page = new Function(`
+  const SB_PARAMS = { ema: { period: 20 }, macd: { fast: 12, slow: 26 }, 'seniq:congress_net_buys': { window_days: 30, politician: '' } };
+  const SB_PARAM_LABELS = { window_days: 'days', politician: 'member (optional)' };
+  const sbFnLabel = (fn) => fn.toUpperCase();
+  ${lift('const BT_CASH_MIN', '// "Did the SenIQ signal help?"')}
+  ${lift('// A number input\'s value:', 'function sbShowErrors')}
+  return { btCheckInputs, sbCheckUi, sbNum };
+`)();
+const BT = { symbol: 'AAPL', start_date: '2025-10-10', end_date: '2026-10-10', initial_cash: '100000' };
+check('Backtest: a good form passes; each bad field is named with a message', () => {
+  assert.strictEqual(page.btCheckInputs(BT), null);
+  assert.strictEqual(page.btCheckInputs({ ...BT, symbol: '' }).field, 'bt-symbol');
+  assert.strictEqual(page.btCheckInputs({ ...BT, end_date: '' }).field, 'bt-end');
+  assert.strictEqual(page.btCheckInputs({ ...BT, start_date: '' }).field, 'bt-start');
+  assert.ok(/after the From date/.test(page.btCheckInputs({ ...BT, end_date: '2025-10-10' }).message));
+  for (const cash of ['1e30', '0', '', '999', '-1', '100000001']) {
+    const out = page.btCheckInputs({ ...BT, initial_cash: cash });
+    assert.strictEqual(out && out.field, 'bt-cash', `accepted ${JSON.stringify(cash)}`);
+    assert.ok(/between 1,000 and 100,000,000/.test(out.message));
+  }
+});
+const UI = { factors: [{ fn: 'ema', params: { period: 20 } }, { fn: 'ema', params: { period: 50 } }],
+  entry: [{ left: 'f1', op: 'crossover', right: 'f2', num: '' }], exit: [{ left: 'f1', op: 'crossunder', right: 'f2', num: '' }],
+  stop: '', target: '', sizingType: 'percent_equity', sizingValue: 25 };
+check('Builder: a blank is kept as a blank, not turned into a number', () => {
+  assert.strictEqual(page.sbNum(''), '');
+  assert.strictEqual(page.sbNum('0'), 0);
+  assert.strictEqual(page.sbNum('2.5'), 2.5);
+  assert.strictEqual(page.sbNum('14'), 14);
+});
+check('Builder: the default strategy has nothing to fix', () => assert.deepStrictEqual(page.sbCheckUi(UI), []));
+check('Builder: a period of 0, blank or 2.5 is named, row and all', () => {
+  const at = (period) => page.sbCheckUi({ ...UI, factors: [{ fn: 'ema', params: { period } }, UI.factors[1]] });
+  assert.deepStrictEqual(at(0), ['Indicator f1 (EMA): period is 0 — it must be a whole number from 1 to 500.']);
+  assert.deepStrictEqual(at(''), ['Indicator f1 (EMA): period is empty — enter a whole number from 1 to 500.']);
+  assert.strictEqual(at(2.5).length, 1);
+  assert.strictEqual(at(501).length, 1);
+  assert.deepStrictEqual(at(500), []);
+  const days = page.sbCheckUi({ ...UI, factors: [...UI.factors, { fn: 'seniq:congress_net_buys', params: { window_days: 400, politician: '' } }] });
+  assert.deepStrictEqual(days, ['Indicator f3 (SENIQ:CONGRESS_NET_BUYS): days is 400 — it must be a whole number from 1 to 365.']);
+});
+check('Builder: sizing, stop, target and a blank comparison number are checked too', () => {
+  assert.ok(/Position size is 0%/.test(page.sbCheckUi({ ...UI, sizingValue: 0 })[0]));
+  assert.ok(/Position size is empty/.test(page.sbCheckUi({ ...UI, sizingValue: '' })[0]));
+  assert.strictEqual(page.sbCheckUi({ ...UI, sizingValue: 101 }).length, 1);
+  assert.deepStrictEqual(page.sbCheckUi({ ...UI, sizingType: 'fixed_cash', sizingValue: 5000 }), []);
+  assert.ok(/Cash per trade is 0/.test(page.sbCheckUi({ ...UI, sizingType: 'fixed_cash', sizingValue: 0 })[0]));
+  assert.ok(/Stop-loss is 0/.test(page.sbCheckUi({ ...UI, stop: '0' })[0]));
+  assert.ok(/Take-profit is 150/.test(page.sbCheckUi({ ...UI, target: '150' })[0]));
+  assert.deepStrictEqual(page.sbCheckUi({ ...UI, stop: '5', target: '12' }), []);
+  const blank = page.sbCheckUi({ ...UI, entry: [...UI.entry, { left: 'f1', op: 'gt', right: '__num__', num: '' }] });
+  assert.deepStrictEqual(blank, ['Entry rule 2: enter the number to compare with.']);
+  assert.deepStrictEqual(page.sbCheckUi({ ...UI, entry: [{ left: 'f1', op: 'gt', right: '__num__', num: '0' }] }), []);
+});
+
 section('13F plumbing:');
 check('one statement per fund and filing: adding outranks trimming outranks no change', () => {
   const rows = [

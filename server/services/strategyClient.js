@@ -40,6 +40,20 @@ function flattenDetail(data) {
     : data.detail;
 }
 
+// A backtest's starting capital: a plain number inside the same bounds a paper deployment
+// uses. Absent → the default. Anything else is refused with a message instead of being
+// replaced or passed on: "0" used to become 100,000 without a word, and 1e30 reached the
+// engine, failed there and came back as "engine offline".
+const CAPITAL = { MIN: 1000, MAX: 100000000, DEFAULT: 100000 };
+const CAPITAL_ERROR = 'Starting capital must be a number between 1,000 and 100,000,000.';
+function parseCapital(raw) {
+  if (raw == null || raw === '') return { ok: true, value: String(CAPITAL.DEFAULT) };
+  if (typeof raw !== 'number' && typeof raw !== 'string') return { ok: false, error: CAPITAL_ERROR };
+  const n = typeof raw === 'number' ? raw : (raw.trim() === '' ? NaN : Number(raw));
+  if (!Number.isFinite(n) || n < CAPITAL.MIN || n > CAPITAL.MAX) return { ok: false, error: CAPITAL_ERROR };
+  return { ok: true, value: String(n) };
+}
+
 // Same normalization the web routes apply: [{symbol, exchange}], max 5.
 function cleanSymbols(raw) {
   if (!Array.isArray(raw)) return [];
@@ -85,4 +99,4 @@ async function replayPaper(row) {
   });
 }
 
-module.exports = { callService, flattenDetail, cleanSymbols, iso, replayPaper, MAX_WATCH_SYMBOLS, WARMUP_DAYS };
+module.exports = { callService, flattenDetail, cleanSymbols, parseCapital, CAPITAL, iso, replayPaper, MAX_WATCH_SYMBOLS, WARMUP_DAYS };

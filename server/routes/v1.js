@@ -14,7 +14,7 @@ const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne } = require('../db');
 const { DISCLAIMER, STRATEGY_SERVICE } = require('../config');
 const { resolveApiKey, heavyLimiter, lightLimiter } = require('../services/apiKeyGate');
-const { callService, flattenDetail, cleanSymbols, replayPaper, MAX_WATCH_SYMBOLS } = require('../services/strategyClient');
+const { callService, flattenDetail, cleanSymbols, parseCapital, replayPaper, MAX_WATCH_SYMBOLS } = require('../services/strategyClient');
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
 const { DATA_TOOLS, runDataTool } = require('../services/dataTools');
 const { saveStrategy, deployPaper, stopPaper, strategyToJson, deploymentToJson } = require('../services/strategyStore');
@@ -110,6 +110,8 @@ router.post('/backtest', gate(heavyLimiter), async (req, res) => {
   if ((!strategy && !custom) || !symbol || !start_date || !end_date) {
     return res.status(400).json({ error: 'strategy (or custom), symbol, start_date and end_date are required' });
   }
+  const capital = parseCapital(initial_cash);
+  if (!capital.ok) return res.status(400).json({ error: capital.error });
   const seniqData = custom ? await seniqDataIfNeeded(custom, symbol) : null;
   passthrough(res, await callService('/api/backtest', {
     method: 'POST',
@@ -121,7 +123,7 @@ router.post('/backtest', gate(heavyLimiter), async (req, res) => {
       exchange: exchange || 'US',
       start_date,
       end_date,
-      initial_cash: String(initial_cash || '100000'),
+      initial_cash: capital.value,
       seniq_data: seniqData,
     },
   }));

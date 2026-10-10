@@ -18,7 +18,7 @@ const { STRATEGY_SERVICE } = require('../config');
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
 
 const { saveStrategy, strategyToJson, MAX_SAVED_STRATEGIES } = require('../services/strategyStore');
-const { callService, flattenDetail, cleanSymbols } = require('../services/strategyClient');
+const { callService, flattenDetail, cleanSymbols, parseCapital } = require('../services/strategyClient');
 const { userRateLimit, LIMITS } = require('../middleware/rateLimit');
 const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../services/strategySignals');
 
@@ -77,6 +77,8 @@ router.post('/backtest', requireTier('plus'), engineLimit, async (req, res) => {
   if ((!strategy && !custom) || !symbol || !start_date || !end_date) {
     return res.status(400).json({ error: 'strategy (or custom), symbol, start_date and end_date are required' });
   }
+  const capital = parseCapital(initial_cash);
+  if (!capital.ok) return res.status(400).json({ error: capital.error });
   // Builder specs with SenIQ factors get that ticker's raw signal history
   // pushed along; the service derives + aligns the series.
   const seniqData = custom ? await seniqDataIfNeeded(custom, symbol) : null;
@@ -91,7 +93,7 @@ router.post('/backtest', requireTier('plus'), engineLimit, async (req, res) => {
       exchange: exchange || 'US',
       start_date,
       end_date,
-      initial_cash: String(initial_cash || '100000'),
+      initial_cash: capital.value,
       seniq_data: seniqData,
     },
   });
