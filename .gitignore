@@ -26,6 +26,8 @@ boot.err.log
 data/*.db
 data/*.db-shm
 data/*.db-wal
+# Stories removed by the retention job, archived first (services/retention.js).
+data/archive/
 *.sqlite
 *.sqlite3
 

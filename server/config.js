@@ -95,6 +95,9 @@ const FEATURES = {
   // IPO Watch: the calendar of Indian public issues, its own tab. Opt-in (IPO_WATCH=1) while
   // the section is being built.
   IPO_WATCH: process.env.IPO_WATCH === '1',
+  // News retention: a daily job that archives and then REMOVES old stories (RETENTION below).
+  // Off unless RETENTION=1. `node scripts/retention.js` shows what a run would remove without it.
+  RETENTION: process.env.RETENTION === '1',
   // Claude writes the daily brief, Ask answers and the Pro alert narrative. Off unless
   // CLAUDE_REPORTS=1 — a key alone never starts spending.
   CLAUDE_REPORTS: process.env.CLAUDE_REPORTS === '1',
@@ -687,6 +690,26 @@ const INDIA_SMART_MONEY = {
   REPORT: { ROWS: 3, DEAL_DAYS: 7, INSIDER_DAYS: 90 },
 };
 
+// ─── News retention (services/retention.js) ──────────────────
+// How long a stored story is kept, counted from the later of the day it was published and
+// the day it was fetched. Before a story goes it is written to an archive file, and what the
+// strategy factors need from it is added to its ticker's day in sentiment_daily.
+const RETENTION = {
+  // A story the pipeline judged irrelevant, with no sentiment reading and no IPO link: it is
+  // kept only so the fetchers do not store it twice. Not below IPO_WATCH.LINK_BACKFILL_DAYS —
+  // a newly seen issue is still matched against stories that old.
+  UNUSED_DAYS: 30,
+  // Every other story. The app reads 90 days (SENTIMENT.BASELINE_DAYS, NEWS_SEARCH.WINDOW_DAYS,
+  // QA.NEWS_DAYS_MAX), which is also about as long as a run of news is found to move a share;
+  // one more quarter is kept so recent history can be read again by a better sentiment model.
+  USED_DAYS: 180,
+  CRON: '45 4 * * *',            // daily, after the Ask thread purge; only when FEATURES.RETENTION
+  // Where the archive files go (gzip, one JSON story per line). On a host without a lasting
+  // disk this must point at storage that survives a deploy.
+  ARCHIVE_DIR: process.env.RETENTION_ARCHIVE_DIR || 'data/archive',   // relative to the project root
+  ARCHIVE_BATCH: 500,            // stories read per query while the archive is written
+};
+
 // ─── IPO Watch (services/ipoWatch) ───────────────────────────
 // Runs only when FEATURES.IPO_WATCH is on. Dates are the exchange's, so "today" is too.
 const IPO_WATCH = {
@@ -832,4 +855,4 @@ const SESSION = {
   REAUTH_MINUTES: 10,    // how long a password confirmation covers sensitive actions
 };
 
-module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, STRATEGY_SERVICE, PAPER, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
+module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, RETENTION, STRATEGY_SERVICE, PAPER, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
