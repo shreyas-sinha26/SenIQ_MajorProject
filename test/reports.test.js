@@ -5,7 +5,7 @@
  */
 
 const assert = require('node:assert');
-const { guardCheck } = require('../server/services/reports');
+const { guardCheck, briefQuota } = require('../server/services/reports');
 const { buildDiff } = require('../server/services/grounding');
 const { deterministicBrief, parseClaudeOutput } = require('../server/services/briefWriter');
 const { sanitizeQuestion, deterministicAnswer } = require('../server/services/qa');
@@ -20,6 +20,13 @@ const base = { flagOn: true, hasKey: true, userCallsToday: 0, quota: 1, globalSp
 
 console.log('guardCheck (E5 cost guardrails):');
 check('all clear → allow', () => assert.strictEqual(guardCheck(base).allow, true));
+check('the brief allowance follows the plan: Free none, Plus one, Pro two', () => {
+  assert.deepStrictEqual(['free', 'plus', 'pro'].map(briefQuota), [0, 1, 2]);
+  assert.deepStrictEqual([undefined, null, 'constructor', 'enterprise'].map(briefQuota), [0, 0, 0, 0]);
+  // A Free account never reaches Claude: its brief is one it cannot open.
+  assert.strictEqual(guardCheck({ ...base, userCallsToday: 0, quota: briefQuota('free') }).reason, 'user_quota_exceeded');
+  assert.strictEqual(guardCheck({ ...base, userCallsToday: 1, quota: briefQuota('pro') }).allow, true);
+});
 check('flag off → block', () => assert.strictEqual(guardCheck({ ...base, flagOn: false }).reason, 'claude_reports_disabled'));
 check('no api key → block', () => assert.strictEqual(guardCheck({ ...base, hasKey: false }).reason, 'no_api_key'));
 check('user quota spent → block', () => assert.strictEqual(guardCheck({ ...base, userCallsToday: 1 }).reason, 'user_quota_exceeded'));
@@ -71,6 +78,15 @@ check('deterministic brief leads with most important', () => {
 check('quiet day when no events', () => {
   const b = deterministicBrief({ most_important: null, top_events: [], changed: { has_prior: true }, portfolio: { top_holdings: [] }, smart_money: {} });
   assert.ok(/quiet/i.test(b.headline));
+});
+check('smart money: each stock is named once, and one trade is "trade", not "trade(s)"', () => {
+  const base = { most_important: ev(1, { title: 'Big merger' }), top_events: [ev(1, { title: 'Big merger' })], changed: { has_prior: false }, portfolio: { top_holdings: [] } };
+  const three = deterministicBrief({ ...base, smart_money: { congress: [{}, {}, {}], institutions: [{ ticker: 'AAPL' }, { ticker: 'AAPL' }, { ticker: 'AAPL' }, { ticker: 'NVDA' }] } });
+  assert.ok(/institutional moves on AAPL, NVDA\./.test(three.narrative), three.narrative);
+  assert.ok(/3 recent congressional trades in your names/.test(three.narrative), three.narrative);
+  const one = deterministicBrief({ ...base, smart_money: { congress: [{}], india_deals: [{ ticker: 'TCS' }], india_insiders: [{ ticker: 'TCS' }] } });
+  assert.ok(/1 recent congressional trade in your names; 1 bulk or block deal on TCS; an insider trade disclosed on TCS\./.test(one.narrative), one.narrative);
+  assert.ok(!/\(s\)/.test(three.narrative + one.narrative));
 });
 check('parseClaudeOutput splits HEADLINE marker', () => {
   const { headline, narrative } = parseClaudeOutput('HEADLINE: Tesla drags 18% of your book\n\nYour portfolio...');

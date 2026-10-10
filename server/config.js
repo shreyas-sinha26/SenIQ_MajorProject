@@ -409,7 +409,8 @@ const REPORTS = {
   TOP_HOLDINGS: 12,              // trim the packet to the top-N holdings by exposure
   TOP_EVENTS: 6,                 // and the top-N impact events
   MAX_NEWS_CHARS: 280,           // clamp each untrusted headline/summary before prompting
-  PER_USER_DAILY_QUOTA: 1,       // Plus=1, Pro=2 (+1 manual) once tiers land; blocked before any call
+  // Claude-written briefs a day are set per plan (TIERS[tier].claudeReportsPerDay: Free 0,
+  // Plus 1, Pro 2) and checked before any call — see reports.briefQuota.
   GLOBAL_DAILY_USD_CEILING: 5,   // global kill-switch: stop calling Claude past this day's spend
   // Haiku 4.5 pricing ($/1M tokens) for the cost estimate logged per call.
   PRICE_PER_MTOK: { input: 1.0, output: 5.0 },

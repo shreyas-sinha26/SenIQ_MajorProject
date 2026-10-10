@@ -234,7 +234,8 @@ check('a report with only Indian rows, only US rows, or both still draws', async
 });
 check('the brief\'s fallback text mentions them', () => {
   const packet = { most_important: null, top_events: [], changed: { has_prior: false }, portfolio: { top_holdings: [] }, smart_money: INDIA_SM };
-  assert.ok(/Smart money: 2 bulk or block deal\(s\) on RELIANCE; insider trade\(s\) disclosed on BAJAJFINSV\./.test(deterministicBrief(packet).narrative));
+  const text = deterministicBrief(packet).narrative;
+  assert.ok(/Smart money: 2 bulk or block deals on RELIANCE; (an insider trade|insider trades) disclosed on BAJAJFINSV\./.test(text), text);
 });
 
 section('when it is due:');
