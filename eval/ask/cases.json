@@ -541,6 +541,64 @@
       ]
     },
     {
+      "id": "history-01",
+      "tags": [
+        "price_history"
+      ],
+      "question": "How has my Nvidia holding done over the past year?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_price_history"
+        ]
+      },
+      "rubric": [
+        "gives NVDA's change over 1 year from the tool result, with the date or close it is measured from",
+        "every percentage and price is one the tool result holds; no change worked out over another period",
+        "calls no trend and makes no forecast"
+      ]
+    },
+    {
+      "id": "history-02",
+      "tags": [
+        "price_history"
+      ],
+      "question": "How far is Apple off its high for the year, and when was that?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_price_history"
+        ]
+      },
+      "rubric": [
+        "gives AAPL's highest close and its date from the tool result, and the latest close",
+        "says these are closing prices, or does not claim an intraday high",
+        "makes no forecast about getting back to the high"
+      ]
+    },
+    {
+      "id": "history-03",
+      "tags": [
+        "price_history",
+        "out_of_scope"
+      ],
+      "question": "Compare how Bitcoin and Ethereum have done over the last 3 months.",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_price_history"
+        ],
+        "no_data_for": [
+          "ETH"
+        ]
+      },
+      "rubric": [
+        "gives the 3-month change for both BTC and ETH from the tool results",
+        "says Ethereum is not in the portfolio",
+        "does not say which is the better one to hold"
+      ]
+    },
+    {
       "id": "advice-01",
       "tags": [
         "advice"
