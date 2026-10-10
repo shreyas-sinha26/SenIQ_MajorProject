@@ -92,6 +92,10 @@ const FEATURES = {
   // India side of those tabs: NSE bulk/block deals + insider trades. Opt-in
   // (INDIA_SMART_MONEY=1): the NSE routes are unofficial and their terms are unchecked.
   INDIA_SMART_MONEY: process.env.INDIA_SMART_MONEY === '1',
+  // News matching for the Indian listed names nobody holds (the Nifty 500 names outside the
+  // curated universe). Nothing more is fetched: their stories already arrive from the Indian
+  // outlets, and with this on the pipeline tags them. Off unless INDIA_LISTED_NEWS=1.
+  INDIA_LISTED_NEWS: process.env.INDIA_LISTED_NEWS === '1',
   // IPO Watch: the calendar of Indian public issues, its own tab. Opt-in (IPO_WATCH=1) while
   // the section is being built.
   IPO_WATCH: process.env.IPO_WATCH === '1',

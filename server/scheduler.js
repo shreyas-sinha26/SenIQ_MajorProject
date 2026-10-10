@@ -13,7 +13,7 @@ const cron = require('node-cron');
 const { query, queryOne, execute } = require('./db');
 const { FEATURES, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, PAPER } = require('./config');
 const { gatherArticles } = require('./services/ingest');
-const { loadIndex } = require('./services/entityResolver');
+const { loadIndex, indianListed } = require('./services/entityResolver');
 const { analyzeSentiment } = require('./services/sentiment');
 const { classifyBatch, classifyTargets, targetEnabled, isEnabled: finbertEnabled } = require('./services/finbertClassifier');
 const { classifyArticle, isRoundup, assignClusters } = require('./services/newsRelevance');
@@ -129,7 +129,11 @@ async function runNewsPipeline() {
     const known = new Set(ids.length
       ? (await query('SELECT external_id FROM articles WHERE external_id = ANY($1)', [ids])).map((r) => r.external_id)
       : []);
-    const articles = await classifyArticles(raw, held, known);
+    // INDIA_LISTED_NEWS: the Indian listed names are matched too, held or not. They go to the
+    // resolver only; the per-company fetches above still run for held tickers alone.
+    const heldTickers = new Set(tickers);
+    const named = FEATURES.INDIA_LISTED_NEWS ? [...held, ...indianListed().filter((c) => !heldTickers.has(c.ticker))] : held;
+    const articles = await classifyArticles(raw, named, known);
 
     // 3. Persist new articles (+ relevance/cluster grade) + their per-ticker sentiment.
     let newArticles = 0;
