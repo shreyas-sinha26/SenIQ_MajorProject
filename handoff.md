@@ -1,6 +1,6 @@
 # SenIQ — Handoff
 
-Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). Late on 2026-10-10 two pieces of uncommitted work on the branch `ipo-ask` (Ask reads IPO Watch; news retention) and a six-step plan were added (§3, §5, §7, §8, §10). On 2026-10-11 the first three steps of that plan were done: P1 committed, P2 run, P3 built and committed on the branch `listed-news` with its switch still off, and all three slices of P4 (the snapshot, price history, the page tools) built and committed on the branch `ask-tools` (§3, §8, §10). This file describes the project **as it stands now**. The previous
+Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). Late on 2026-10-10 two pieces of uncommitted work on the branch `ipo-ask` (Ask reads IPO Watch; news retention) and a six-step plan were added (§3, §5, §7, §8, §10). On 2026-10-11 the first three steps of that plan were done: P1 committed, P2 run, P3 built and committed on the branch `listed-news` with its switch still off, and all three slices of P4 (the snapshot, price history, the page tools) built and committed on the branch `ask-tools`, and P5, the whole eval, run (§3, §8, §10). This file describes the project **as it stands now**. The previous
 handoff was a session-by-session log (1,658 lines); it is still in git history
 (`git show 6ee98d9:handoff.md`) if a detail of how something was built is needed.
 
@@ -180,6 +180,29 @@ The whole eval (P5) still needs his word, and so do a push, a pull request and a
     left out, a listing price mixed with the listing-day change, and the advice question
     not declined in words. **Not done:** any change to the prompt or the tool result for
     these. Total spent on P2: $0.108.
+- **Each session's high and low in Ask** *(2026-10-11, at Annas's word; committed on
+  `ask-tools`; `npm test` passes: 32 files, 781 checks; the eval has 46 cases)*. Asked
+  "what was Apple's high today", Ask had only closes. Now:
+  - `get_price_history` reads each session's high and low for shares and commodities and
+    gives `latest_session` (its date, high, low and close), `highest_price` and
+    `lowest_price` (the highest and lowest price traded in the year, with the date and how
+    far the last close stands from each), beside the highest and lowest close as before.
+    On the dev machine: Apple's latest session, 2026-10-09, high 338.61 and low 330.70;
+    its highest price of the year 345.34 on 2026-09-22, where its highest close is 341.07
+    on 2026-09-25.
+  - The snapshot of a stock the user does not hold gives the latest session's high and
+    low, from the quote (`dayHigh`, `dayLow` added to what `priceService` returns from
+    Finnhub and Yahoo; other callers ignore them).
+  - **A coin has no session:** it gets its high and low over the last 24 hours, from a
+    second CoinGecko route, and its highest and lowest of the year stay daily readings.
+    The snapshot of a coin has no range.
+  - **The open is not read** (Annas: not important).
+  - "Today" is the latest trading session, which on a weekend or a holiday is an earlier
+    day; the result and the code-written answer say "latest session" and give its date.
+  - Nothing is stored and nothing is on a page, `/mcp` or `/v1`, as decided on 2026-10-10.
+  - **No model has answered such a question.** Two cases wait for the next run:
+    `history-04` ("What was Apple's high today?") and `scope-08` (the same for Tesla,
+    answered by code).
 - **P3. Fix the listed names that match wrongly, then switch on news matching for the 439
   Indian listed names.** Small, and it repairs a fault that exists today (§8, "Stocks nobody
   holds"). Early, because coverage needs days of running before it shows anything.
@@ -196,6 +219,105 @@ The whole eval (P5) still needs his word, and so do a push, a pull request and a
   **P4 is built; nothing in it has been run with a real model.**
 - **P5. The whole Ask eval on Haiku 4.5.** It shows whether the extra tools confuse the
   model, and settles whether to move Ask to Sonnet 5.5.
+  **Run 2026-10-11 at Annas's word: 44 cases, all answered, $0.967 spent** (run
+  `eval/ask/runs/2026-10-10T19-05-53`; Haiku 4.5 answers, Sonnet 5.5 judge, through the
+  router; one run of each case). Set beside the last whole run (2026-10-08, 30 cases,
+  $0.475, before the IPO tools and the six P4 tools).
+  - **The extra tools did not confuse the model.** The expected tool was called in 33 of
+    34 cases that name one. The one miss is the case's fault: "Have any politicians traded
+    my stocks?" was answered correctly from `get_politician_trades` where the case expected
+    `get_smart_money` (the judge passed every line). All twelve cases written for the new
+    tools picked the tool meant for them. So nothing here argues for Sonnet 5.5.
+  - **Checks made in code: 34 of 44 pass every one** (26 of 30 before; on the same 30
+    cases, 25 now). Writer 44 of 44, no data leak 8 of 8, no advice wording 42 of 42,
+    figures grounded 35 of 42, length 39 of 42.
+  - **The judge: 10 of 42 pass every line** (2 of 28 before). Its grounded line 16 of 42
+    (2 of 28), no advice 41 of 42, gaps said 12 of 18, length 35 of 42; the lines written
+    for each case 81 of 95 (37 of 50 before).
+  - **Each question costs more.** On the same 30 cases the input went from 5,883 tokens a
+    question to 10,758, and the cost of an answer from $0.0070 to $0.0119. No call read
+    from the cache (`cache_read` 0 on every row). The tool definitions and the prompt are
+    sent on both rounds of a question.
+  - **Faults in the new tools' answers, none fixed yet:**
+    - `pages-03`: rupee values turned into crore wrongly, ten times too large ("1,075
+      crore" for ₹1,075,420,825, which is 107.5 crore). The tool gives rupees and the model
+      did the conversion.
+    - `history-02` ("how far is Apple off its high"): the model worked out the gap itself
+      (4.43, 1.3%), which the prompt forbids; the figures are right, and the tool does not
+      give them.
+    - `pages-01`: "$299 billion" for 299,253,556,246, a fair rounding the code check
+      cannot follow.
+    - `news-04`: `get_price_history` was called beside the news tool for "what happened
+      with TCS over the last month", and the answer says the price "declined through most
+      of the month", which the closes given do not show.
+    - `history-01`: the period is said to end on 10 October; the last close is 9 October.
+    - `pages-04` and `pages-05`: 12 and 11 sentences, one per alert or trade, against a
+      guide of 2 to 6.
+    - `scope-06`: Microsoft's price left out though the snapshot had it. `scope-04` ("Any
+      news on Paytm?") called no tool and offered the snapshot instead of giving it.
+  - **Faults that are not new:** `smart-02` gives a fund's position size as the amount it
+    sold (it failed on 2026-10-08 too; `get_smart_money` does not say which the figure
+    is); `market-02` ties rate news to holdings no result links it to, and says holdings
+    are "likely less rate-sensitive"; `edu-02` runs to 9 sentences; `ipo-04` again lists
+    the next issues without saying it does not advise, the second answer in a row to do so.
+  - **The judge marks down an answer for naming the user's holdings** when no tool result
+    lists them (`pages-02`, `pages-03`, `pages-05`, `scope-04`, `market-02`). The model
+    reads them from the question's own "My holdings" line, which the judge is not shown.
+    Some of the 26 failures on its grounded line are this and not a fault in the answer.
+  - Not done at the time: any fix, and a second run of any case. The fixes and a pilot on
+    Claude Haiku 5.5 followed the same day (next item).
+- **After P5: the fixes, and a six-case pilot on Claude Haiku 5.5** *(2026-10-11, at
+  Annas's word; committed on `ask-tools` with the high and low below, and the output limit
+  raised to 3,000 tokens in the commit after)*.
+  - **Fixes made** (`npm test` passes: 32 files, 778 checks):
+    - Money is given in the unit a reader uses, worked out in code: "₹107.54 crore",
+      "₹32.94 lakh", "$299.25 billion" (`moneyText` in `pageTools.js`; the `value` and
+      `total_value` fields of the fund and India tools). The raw rupee and dollar figures
+      are no longer in those results.
+    - `get_price_history` gives how far the last close stands from the highest and the
+      lowest close (`last_close_vs_highest`, `last_close_vs_lowest`), and its note says
+      the period's end date and not to describe the days between the closes listed.
+    - `get_smart_money`'s note says a fund's shares and value are the size of its position,
+      not the amount bought or sold. The fields are unchanged (the tool is on `/mcp` and
+      `/v1`).
+    - The system prompt is rewritten, shorter than before (4,481 characters against
+      4,521) with four rules added: figures as given and no arithmetic; advice declined in
+      the first sentence when asked for, and only then; at most five rows of a list, with
+      how many more; call the snapshot instead of offering it. The IPO prompt names
+      "whether to apply", says a stale calendar must be said, and that a listing date
+      already past is not "expected".
+    - The judge is shown the holdings the model is given with the question
+      (`eval/ask/lib.js`, `run.js`).
+  - **Not fixed: nothing is cached.** The cause is found: the app reaches Claude through
+    the router's `/chat/completions` (`llmClient.js`), and the request it builds there
+    carries no cache marker, though `qa.js` sets one. The router's documentation does not
+    say how it takes one, so nothing was added.
+  - **The pilot: six cases on `anthropic/claude-haiku-5.5` through the router, $0.063
+    spent** (run `eval/ask/runs/2026-10-10T19-32-24`; `AIROUTER_MODEL` set for the run
+    only; `move-01`, `scope-05`, `history-02`, `pages-03`, `pages-04`, `ipo-04`).
+    - **It works through the router**: tools were called and answered over two or three
+      rounds, and the reply names the model as Haiku 5.5.
+    - **It costs about a sixth.** $0.0016 to $0.0028 an answer, as the router billed it,
+      against $0.0123 to $0.0135 for the same cases on Haiku 4.5. Input was about 29%
+      higher in tokens (14,800 to 15,400 against 11,500 to 11,900 for two rounds).
+    - **Two of six were cut off by the 1,000-token output limit**, which now has to hold
+      the model's thinking as well: `ipo-04` came back empty (not scored) and `pages-03`
+      stops mid-sentence. `QA.MAX_OUTPUT_TOKENS` has to rise before Haiku 5.5 is used.
+    - **The four that were scored pass every check made in code** (on Haiku 4.5 with the
+      old prompt, three of these four failed one). The crore figure is right
+      ("₹107.54 crore"), the distance from Apple's high is quoted from the result
+      ("$4.43 below that high, or 1.3% below it"), and the alerts answer gives five, says
+      how many more, and says an alert is what was flagged then.
+    - **The judge passed every line on one of four.** Length on three (7 or 8 sentences,
+      and the cut-off one). `move-01` ended a "why is my portfolio down" answer with "SenIQ
+      does not give advice or predictions. Educational only, not investment advice.",
+      which nobody asked for; the prompt was reworded after the run to say "only when
+      asked" and that wording has not been run. `scope-05` was marked down for naming the
+      "Add Asset" button, which is in the prompt and not in a tool result.
+    - **Run before the high and low were added** (next item), so it says nothing of them.
+    - **What the pilot does not show:** which of the improvement is the model and which
+      the fixes (both changed at once; the same cases were not re-run on Haiku 4.5), and
+      anything about the other 38 cases. One run of each case.
 - **P6. US coverage,** last: the largest change in volume, and by then P3 will have shown
   how well the name matching holds.
 
@@ -1180,7 +1302,8 @@ machine before the date fix that day had lookahead; do not reuse older figures.
 - **Price history is closing prices, as the source gives them.** Shares and commodities
   come from Yahoo's chart route, coins from CoinGecko (one reading a UTC day). Nothing is
   adjusted here, so a dividend is not added back and the figures are a price change, not a
-  total return. The highest and lowest are closes, not the day's extremes. The latest bar
+  total return. The highest and lowest were closes only until 2026-10-11; each session's
+  high and low are now read too (below). A day's open is not read. The latest bar
   can be a session still in progress. Yahoo's route is unofficial, as it is for Indian
   quotes and IPO returns; a refusal gives "no price history right now".
 - **The periods are fixed:** 1 week, 1 month, 3 months, 6 months, 1 year and the calendar
@@ -1438,7 +1561,22 @@ hand-labelled sheets of (story, company) pairs (§8).
   outside the holdings, the alerts list, the daily brief. About four tools, by combining.
   The pages' plan limits carry over. The cost is that every tool's definition is sent with
   every question.
-- **P5, the model.** Ask stays on `claude-haiku-4-5`, the newest Haiku there is. The step up
+- **P5, the model: Claude Haiku 5.5 now exists** *(found 2026-10-11)*.
+  Released 2026-10-07, id `claude-haiku-5-5` (`anthropic/claude-haiku-5.5` on the router,
+  which lists it). The line below, "the newest Haiku there is", was true when written on
+  2026-10-10 by the notes then to hand and is not true now. From Anthropic's pages: $0.10
+  and $0.50 a million tokens for a prompt up to 100,000 tokens (Haiku 4.5 is $1 and $5);
+  the same text counts as about 30% more tokens; thinking is on by default and counts
+  toward `max_tokens` (Ask's limit is 1,000); a prompt caches from 512 tokens (4,096 on
+  Haiku 4.5); `temperature` other than 1 is refused (Ask sends none). **Nothing has been
+  run on it.** The app reaches Claude through the router's `/chat/completions`
+  (`llmClient.js`), which sends no cache marker (why no call reads from the cache), no
+  effort setting, and does not carry thinking blocks between the rounds of a question;
+  how Haiku 5.5 behaves through that route is unknown. `REPORTS.PRICE_PER_MTOK` and four
+  `MODEL` settings in `config.js` name Haiku 4.5 and its price. `AIROUTER_MODEL` in the
+  environment changes the router model without a code change, which is the way to try it
+  on the eval first.
+- **P5, the model (as decided 2026-10-10).** Ask stays on `claude-haiku-4-5`, the newest Haiku there is. The step up
   is Sonnet 5.5, at $2 and $10 a million tokens against $1 and $5. It thinks by default, so
   `QA.MAX_OUTPUT_TOKENS` (1,000) and an effort setting would have to change with it; it is
   not a one-line switch. The eval already checks that an expected tool was called. Wrong
