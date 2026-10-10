@@ -211,6 +211,21 @@ function setIpoTier(rows) {
 const edge = (s) => `(?<![A-Za-z0-9])${escapeRegex(s)}(?![A-Za-z0-9])`;
 // Words that show a capitalised word is being used as a company's name.
 const COMPANY_CUE = "(?:['’]s\\b|\\s+(?:Inc|Corp|Corporation|Co|Ltd|Limited|Holdings|Group|shares?|stock|stocks)\\b)";
+// Listed names that a headline mostly uses for something else. Each counts only beside a word
+// that makes it the company ("BSE shares", "CME Group", "JM Financial Ltd", "shares of
+// Jefferies"), and a possessive is not one: the other uses take it too ("BSE's Sensex",
+// "MSCI's broadest index", "GIFT City's", "People's Bank of China"). Found by running this
+// matcher for every listed name over the stored stories and reading the matches (2026-10-10
+// and -11). The cost: a story about one of them that names it bare ("JM Financial among top
+// losers") is not tagged.
+const LISTED_NEEDS_CUE = new Set([
+  // a quarter, an exchange or its index, a word, a place, a person, a fund's name
+  'QTWO', 'BSE', 'NDAQ', 'CME', 'MSCI', 'STT', 'ROG', 'ATUL', 'CHCO', 'PPLI', 'XYZ',
+  // a broker or a rating agency, named for its view of another company
+  'JEF', 'MCO', 'EVR', 'JMFINANCIL', 'CRISIL', 'NUVAMA', 'ANGELONE',
+]);
+// "stock" is not a cue in front of what a market has ("Nasdaq stock futures", "BSE stock exchange").
+const STRICT_CUE = '\\s+(?:Inc|Corp|Corporation|Co|Ltd|Limited|Holdings?|Group|[Ss]hares?|[Ss]tock(?!\\s+(?:[Mm]arkets?|[Ee]xchanges?|[Ff]utures|[Ii]nd(?:ex|ices)|[Pp]icks?|[Ii]deas?)\\b))\\b';
 
 /**
  * Whether a text names a held company that is not in the curated universe. Pure.
@@ -221,22 +236,31 @@ const COMPANY_CUE = "(?:['’]s\\b|\\s+(?:Inc|Corp|Corporation|Co|Ltd|Limited|Ho
  *   name   — the name without its corporate tail ("Thor Industries"), as whole words and
  *            with its capitals. A one-word name that is also an ordinary word ("Gap",
  *            "Block") counts only beside a company cue ("Gap Inc", "Gap shares").
+ *            A name in LISTED_NEEDS_CUE needs a cue however it is written (name or bare
+ *            symbol, one word or several), and the possessive is not one.
  * `holding` = { ticker, name? }: for a listed ticker the name comes from listed.json.
  */
 function namesHolding(holding, text) {
   const sym = String(holding.ticker).toUpperCase();
   const listed = LISTED_BY_TICKER.get(sym) || IPO_TIER.get(sym);
+  const strict = !!listed && LISTED_NEEDS_CUE.has(sym);
   if (new RegExp(`(?:\\b(?:NYSE|NASDAQ|Nasdaq|NSE|BSE|AMEX)\\s*:\\s*|\\$)${escapeRegex(sym)}(?![A-Za-z0-9])`).test(text)) return true;
-  const bareFrom = !listed ? 1 : listed.country === 'IN' ? 4 : 5;
+  const bare = sym.length >= (!listed ? 1 : listed.country === 'IN' ? 4 : 5);
   // `brand`: an Indian symbol that is the name headlines use, in any capitals ("Paytm").
-  if (sym.length >= bareFrom && new RegExp(edge(sym), listed && listed.brand ? 'i' : '').test(text)) return true;
+  if (bare && !strict && new RegExp(edge(sym), listed && listed.brand ? 'i' : '').test(text)) return true;
   const core = listed ? listed.core : String(holding.name || '').trim();
   if (core.length < (listed ? 2 : 4)) return false;
+  const open = '(?<![A-Za-z0-9])';
+  const close = '(?![A-Za-z0-9])';
+  const cued = (forms, cue) => new RegExp(`${open}(${forms})${cue}|\\b(?:[Ss]hares|[Ss]tock) of (${forms})${close}`, 'g');
   let re;
+  // Every way the name is written: the name and, where a bare symbol counts, the symbol (a
+  // brand also as headlines write it, "Nuvama", "Crisil").
+  if (strict) re = cued([...new Set([core, ...(bare ? [sym, ...(listed.brand ? [sym[0] + sym.slice(1).toLowerCase()] : [])] : [])])].map(escapeRegex).join('|'), STRICT_CUE);
   // Several words: as written, capitals included — "Preferred Bank" is the company, "the
   // preferred bank for exporters" is not. A holding we know only by a typed name is looser.
-  if (/\s/.test(core)) re = new RegExp(edge(core), listed ? 'g' : 'gi');
-  else if (listed && listed.plain) re = new RegExp(`${edge(core).slice(0, -'(?![A-Za-z0-9])'.length)}${COMPANY_CUE}|\\b(?:shares|stock) of ${escapeRegex(core)}(?![A-Za-z0-9])`, 'g');
+  else if (/\s/.test(core)) re = new RegExp(edge(core), listed ? 'g' : 'gi');
+  else if (listed && listed.plain) re = cued(escapeRegex(core), COMPANY_CUE);
   else re = new RegExp(edge(core), 'g');
   // The name inside a longer company's name is that other company: "Bank of India" in
   // "Union Bank of India", "Tata Motors" in "Tata Motors Passenger Vehicles".
@@ -253,6 +277,10 @@ function namesHolding(holding, text) {
   }
   return false;
 }
+
+// The Indian listed names, as the `extra` list the resolver takes: with INDIA_LISTED_NEWS on
+// the pipeline matches them in the news whether anyone holds them or not.
+const indianListed = () => LISTED.filter((c) => c.country === 'IN').map((c) => ({ ticker: c.ticker, name: c.name }));
 
 // Names that are not companies we hold a row for, but contain one's name.
 const OTHER_NAMES = ['reserve bank of india', 'export-import bank of india', 'securities and exchange board of india', 'south indian bank'];
@@ -555,4 +583,4 @@ async function seedUniverse() {
   console.log(`   🏷️  universe seeded: ${n.c} companies, ${executives.length} executives; ${n.l} more listed`);
 }
 
-module.exports = { buildResolver, namesHolding, coreName, setIpoTier, resolve, loadIndex, seedUniverse, universeRows, SECTOR_THEMES, AMBIGUOUS, AMBIGUOUS_SYMBOLS, OTHER_VENTURES };
+module.exports = { buildResolver, namesHolding, indianListed, LISTED_NEEDS_CUE, coreName, setIpoTier, resolve, loadIndex, seedUniverse, universeRows, SECTOR_THEMES, AMBIGUOUS, AMBIGUOUS_SYMBOLS, OTHER_VENTURES };
