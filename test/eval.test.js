@@ -92,6 +92,10 @@ check('prompt fences every untrusted part and clamps huge evidence', () => {
   for (const tag of ['<question>', '<turns>', '<tool_results>', '<answer>', '<rubric>']) assert.ok(p.includes(tag), tag);
   assert.ok(p.includes('[truncated for the grader]') && p.length < 30000);
   assert.ok(lib.judgePrompt(CASE, { answer: '', evidence: [] }, lines).includes('(empty)'));
+  // The judge is told the holdings the model is told, so naming them is not marked ungrounded.
+  const withHoldings = lib.judgePrompt(CASE, { ...GOOD, holdings: ['AAPL', 'NVDA'] }, lines);
+  assert.ok(/<holdings_given_with_the_question>\nAAPL, NVDA\n/.test(withHoldings) && /needs no tool result/.test(withHoldings));
+  assert.ok(!lib.judgePrompt(CASE, GOOD, lines).includes('holdings_given_with_the_question'));
 });
 check('schema pins the ids and verdict values', () => {
   const s = lib.judgeSchema(['g1', 'c1']);

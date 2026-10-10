@@ -441,6 +441,22 @@
       "rubric": []
     },
     {
+      "id": "scope-08",
+      "tags": [
+        "out_of_scope",
+        "precheck",
+        "snapshot"
+      ],
+      "question": "What was Tesla's high today?",
+      "expect": {
+        "writer": "scope",
+        "no_data_for": [
+          "TSLA"
+        ]
+      },
+      "rubric": []
+    },
+    {
       "id": "scope-03",
       "tags": [
         "out_of_scope",
@@ -596,6 +612,24 @@
         "gives the 3-month change for both BTC and ETH from the tool results",
         "says Ethereum is not in the portfolio",
         "does not say which is the better one to hold"
+      ]
+    },
+    {
+      "id": "history-04",
+      "tags": [
+        "price_history"
+      ],
+      "question": "What was Apple's high today?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_price_history"
+        ]
+      },
+      "rubric": [
+        "gives the latest session's high from the tool result",
+        "gives that session's date, and does not call it today if the session was an earlier day",
+        "does not give a closing price as the high"
       ]
     },
     {

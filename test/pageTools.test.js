@@ -64,7 +64,7 @@ check('a politician by surname; an Indian investor by its name or the name NSE p
 console.log('the rows Ask is shown:');
 check('a 13F position: its share of the fund, the change as filed, and whether the user holds it', () => {
   assert.deepStrictEqual(P.holdingRow({ ticker: 'NVDA', issuer_name: 'NVIDIA CORPORATION', value: '186580000', change_type: 'new' }, 1381198076, held),
-    { issuer: 'NVIDIA CORPORATION', ticker: 'NVDA', value_usd: 186580000, pct_of_fund: 13.51, change: 'new', held_by_user: true });
+    { issuer: 'NVIDIA CORPORATION', ticker: 'NVDA', value: '$186.58 million', pct_of_fund: 13.51, change: 'new', held_by_user: true });
   const r = P.holdingRow({ ticker: null, issuer_name: 'GOODYEAR TIRE &amp; RUBR CO', value: '9956701', change_type: 'baseline' }, 0, held);
   assert.deepStrictEqual([r.issuer, r.ticker, r.pct_of_fund, r.change, 'held_by_user' in r], ['GOODYEAR TIRE & RUBR CO', null, null, 'no earlier quarter to compare', false]);
 });
@@ -77,10 +77,21 @@ check('a congressional trade keeps both dates and the amount band as disclosed',
 });
 check('an Indian deal names the client as NSE does, and the investor when it is one SenIQ follows', () => {
   const d = { deal_type: 'bulk', deal_date: '2026-10-07', ticker: 'RELIANCE', security_name: 'Reliance Industries', client_name: 'LIFE INSURANCE CORPORATION OF INDIA', investor_slug: 'lic', side: 'buy', quantity: '1000', price: '55.64', value: '55640.4' };
-  assert.deepStrictEqual(P.dealRow(d, held), { client: 'LIFE INSURANCE CORPORATION OF INDIA', investor: 'LIC', deal: 'bulk', action: 'buy', ticker: 'RELIANCE', company: 'Reliance Industries', shares: 1000, price_inr: 55.64, value_inr: 55640, traded: '2026-10-07', held_by_user: true });
+  assert.deepStrictEqual(P.dealRow(d, held), { client: 'LIFE INSURANCE CORPORATION OF INDIA', investor: 'LIC', deal: 'bulk', action: 'buy', ticker: 'RELIANCE', company: 'Reliance Industries', shares: 1000, price_inr: 55.64, value: '₹55,640', traded: '2026-10-07', held_by_user: true });
   assert.ok(!('investor' in P.dealRow({ ...d, investor_slug: null, ticker: 'SUZLON' }, held)) && !('investor' in P.dealRow({ ...d, investor_slug: 'constructor' }, held)));
   const i = P.insiderRow({ ticker: 'RELIANCE', company: 'Reliance Industries Limited', person: 'A B', category: 'Promoter', mode: 'Market Purchase', side: 'buy', quantity: '960', value: null, trade_from: '2026-02-02', disclosed_at: '2026-02-09' }, held);
-  assert.deepStrictEqual([i.action, i.shares, i.value_inr, i.traded, i.disclosed, i.held_by_user], ['buy', 960, null, '2026-02-02', '2026-02-09', true]);
+  assert.deepStrictEqual([i.action, i.shares, i.value, i.traded, i.disclosed, i.held_by_user], ['buy', 960, null, '2026-02-02', '2026-02-09', true]);
+});
+check('money is given in the unit a reader uses, so the model converts nothing', () => {
+  // The eval's failure: ₹1,075,420,825 was called "1,075 crore"; it is 107.54 crore.
+  assert.strictEqual(P.moneyText('1075420825.44', 'INR'), '₹107.54 crore');
+  assert.strictEqual(P.moneyText(3294168, 'INR'), '₹32.94 lakh');
+  assert.strictEqual(P.moneyText(55640.4, 'INR'), '₹55,640');
+  assert.strictEqual(P.moneyText(299253556246, 'USD'), '$299.25 billion');
+  assert.strictEqual(P.moneyText(65950296923, 'USD'), '$65.95 billion');
+  assert.strictEqual(P.moneyText(580504, 'USD'), '$580,504');
+  assert.strictEqual(P.moneyText(null, 'USD'), null);
+  assert.strictEqual(P.dealRow({ deal_type: 'bulk', deal_date: '2026-10-07', ticker: 'MONEYVIEW', client_name: 'X', side: 'sell', quantity: '19328196', price: '55.64', value: '1075420825.44' }, held).value, '₹107.54 crore');
 });
 check('an alert: when it was made, without the page\'s emoji, its text cut to length', () => {
   const a = P.alertRow({ ticker: 'MARKET', alert_type: 'market_event', sentiment_label: 'neutral', message: `📊 Markets: ${'x'.repeat(400)}`, read: false, delivery: 'digest', created_at: '2026-10-10T16:20:07.602Z' });

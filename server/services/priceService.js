@@ -66,7 +66,8 @@ async function fetchFinnhub(ticker, apiKey) {
     if (!res.ok) return null;
     const d = await res.json();
     // c = current price, dp = percent change. c:0 → can't price (e.g. non-US on free tier).
-    return d && d.c ? { price: d.c, currency: 'USD', changePct: d.dp ?? null } : null;
+    // h / l = the session's high and low (0 when Finnhub has none).
+    return d && d.c ? { price: d.c, currency: 'USD', changePct: d.dp ?? null, dayHigh: d.h || null, dayLow: d.l || null } : null;
   } catch { return null; }
 }
 
@@ -82,14 +83,18 @@ async function fetchYahoo(symbol) {
     const price = meta?.regularMarketPrice;
     if (typeof price !== 'number' || !(price > 0)) return null;
     const prev = meta.chartPreviousClose ?? meta.previousClose;
+    // The latest session's high and low, where the feed gives them.
+    const range = (k) => (typeof meta[k] === 'number' && meta[k] > 0 ? meta[k] / (meta.currency === 'USX' ? 100 : 1) : null);
+    const day = { dayHigh: range('regularMarketDayHigh'), dayLow: range('regularMarketDayLow') };
     // Grains, sugar, coffee and cotton are quoted in US cents ("USX"): a dollar price here.
     if (meta.currency === 'USX') {
-      return { price: price / 100, currency: 'USD', changePct: typeof prev === 'number' && prev > 0 ? ((price - prev) / prev) * 100 : null };
+      return { price: price / 100, currency: 'USD', changePct: typeof prev === 'number' && prev > 0 ? ((price - prev) / prev) * 100 : null, ...day };
     }
     return {
       price,
       currency: meta.currency || 'USD',
       changePct: typeof prev === 'number' && prev > 0 ? ((price - prev) / prev) * 100 : null,
+      ...day,
     };
   } catch { return null; }
 }
@@ -186,7 +191,7 @@ async function getQuotes(holdings) {
     if (out[ticker] !== undefined) continue;
 
     const cached = getCached(ticker);
-    if (cached) { out[ticker] = { price: cached.price, currency: cached.currency, changePct: cached.changePct ?? null }; continue; }
+    if (cached) { out[ticker] = { price: cached.price, currency: cached.currency, changePct: cached.changePct ?? null, dayHigh: cached.dayHigh ?? null, dayLow: cached.dayLow ?? null }; continue; }
 
     if (h.assetClass === 'crypto') {
       const id = coingeckoIdFor(ticker);

@@ -3,8 +3,9 @@
  *
  * Daily bars are fetched when a question asks, never stored, and never shown: no page, no
  * /mcp tool and no /v1 route carries them. What reaches the model is a set of figures worked
- * out here — the change over fixed periods, the highest and lowest close with their dates,
- * average volume — and two short runs of closes. A year of daily bars would not fit a tool
+ * out here — the change over fixed periods, the highest and lowest price traded and the
+ * highest and lowest close with their dates, the latest session's high and low, average
+ * volume — and two short runs of closes. A year of daily bars would not fit a tool
  * result, and a model left to do the arithmetic gets it wrong.
  *
  * Shares and commodities come from Yahoo's chart route (the one priceService uses for Indian
@@ -22,8 +23,8 @@ const addDays = (date, n) => new Date(Date.parse(date) + n * 86400e3).toISOStrin
 
 // ── Pure ──
 
-// Yahoo's chart reply → { currency, bars: [{ date, close, volume }] }, oldest first, in the
-// exchange's own dates. Days with no close are dropped. A price in US cents ("USX": grains,
+// Yahoo's chart reply → { currency, bars: [{ date, close, high, low, volume }] }, oldest first, in the
+// exchange's own dates. A day's open is not read: nobody asks for it. Days with no close are dropped. A price in US cents ("USX": grains,
 // sugar, coffee, cotton) becomes dollars. Pure.
 function parseYahoo(json) {
   const r = json?.chart?.result?.[0];
@@ -32,21 +33,25 @@ function parseYahoo(json) {
   const offset = (r.meta?.gmtoffset || 0) * 1000;
   const cents = r.meta?.currency === 'USX';
   const bars = r.timestamp
-    .map((t, i) => ({ date: new Date(t * 1000 + offset).toISOString().slice(0, 10), close: q.close?.[i], volume: q.volume?.[i] }))
+    .map((t, i) => ({ date: new Date(t * 1000 + offset).toISOString().slice(0, 10), close: q.close?.[i], high: q.high?.[i], low: q.low?.[i], volume: q.volume?.[i] }))
     .filter((b) => typeof b.close === 'number' && b.close > 0)
-    .map((b) => ({ date: b.date, close: px(cents ? b.close / 100 : b.close), volume: typeof b.volume === 'number' && b.volume > 0 ? b.volume : null }));
+    .map((b) => {
+      const price = (v) => (typeof v === 'number' && v > 0 ? px(cents ? v / 100 : v) : null);
+      return { date: b.date, close: price(b.close), high: price(b.high), low: price(b.low), volume: typeof b.volume === 'number' && b.volume > 0 ? b.volume : null };
+    });
   return { currency: cents ? 'USD' : r.meta?.currency || null, bars };
 }
 
 // CoinGecko's market_chart reply → the same shape, one bar a UTC day (the last reading of
-// a day wins: the final point is "now"). Volume there is the day's traded value in USD. Pure.
+// a day wins: the final point is "now"). Volume there is the day's traded value in USD. It
+// gives one reading a day and no high or low, so a coin's bars carry none. Pure.
 function parseCoinGecko(json) {
   const byDay = new Map();
   const vols = new Map((json?.total_volumes || []).map(([t, v]) => [new Date(t).toISOString().slice(0, 10), v]));
   for (const [t, p] of json?.prices || []) {
     if (typeof p !== 'number' || !(p > 0)) continue;
     const date = new Date(t).toISOString().slice(0, 10);
-    byDay.set(date, { date, close: px(p), volume: typeof vols.get(date) === 'number' && vols.get(date) > 0 ? Math.round(vols.get(date)) : null });
+    byDay.set(date, { date, close: px(p), high: null, low: null, volume: typeof vols.get(date) === 'number' && vols.get(date) > 0 ? Math.round(vols.get(date)) : null });
   }
   return { currency: 'USD', bars: [...byDay.values()] };
 }
@@ -76,6 +81,20 @@ function summarize(bars) {
   let high = first;
   let low = first;
   for (const b of bars) { if (b.close > high.close) high = b; if (b.close < low.close) low = b; }
+  // The highest and lowest price traded, from each session's high and low, where the source
+  // gives them (shares and commodities; not coins). These are what "its high" usually means.
+  let traded = {};
+  const ranged = bars.filter((b) => b.high != null && b.low != null);
+  if (ranged.length === bars.length) {
+    let top = bars[0];
+    let bottom = bars[0];
+    for (const b of bars) { if (b.high > top.high) top = b; if (b.low < bottom.low) bottom = b; }
+    traded = {
+      highest_price: { date: top.date, price: top.high, last_close_below_by: px(top.high - last.close), last_close_pct_below: round(((top.high - last.close) / top.high) * 100) },
+      lowest_price: { date: bottom.date, price: bottom.low, last_close_above_by: px(last.close - bottom.low), last_close_pct_above: round(((last.close - bottom.low) / bottom.low) * 100) },
+      latest_session: { date: last.date, high: last.high, low: last.low, close: last.close },
+    };
+  }
   const vols = bars.map((b) => b.volume).filter((v) => v != null);
   const recentVols = bars.slice(-QA.PRICE_HISTORY_VOLUME_SESSIONS).map((b) => b.volume).filter((v) => v != null);
   const avg = (xs) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
@@ -90,20 +109,26 @@ function summarize(bars) {
     changes,
     highest_close: { date: high.date, close: high.close },
     lowest_close: { date: low.date, close: low.close },
+    // How far the last close stands from the two, so nobody has to subtract.
+    last_close_vs_highest_close: { below_by: px(high.close - last.close), pct_below: round(((high.close - last.close) / high.close) * 100) },
+    last_close_vs_lowest_close: { above_by: px(last.close - low.close), pct_above: round(((last.close - low.close) / low.close) * 100) },
+    ...traded,
     avg_daily_volume: vols.length ? { [`last_${QA.PRICE_HISTORY_VOLUME_SESSIONS}_sessions`]: avg(recentVols), period: avg(vols) } : null,
     recent_closes: bars.slice(-QA.PRICE_HISTORY_RECENT).map((b) => [b.date, b.close]),
     month_end_closes: monthEnds.slice(-12),
   };
 }
 
-const NOTE = 'Closing prices. Quote these figures as given, each with its dates; do not work out a change over any other period. The latest session may still be in progress. Describe what the price did: do not call a trend, forecast, or say whether it is a good time to buy or sell.';
+const NOTE = 'Changes and closes are closing prices. highest_price and lowest_price are the highest and lowest prices TRADED in the period (each session\'s high and low), and are what "its high" or "its low" means; highest_close and lowest_close are closing prices. latest_session is the most recent trading session, which may not be today: give its date. Quote these figures as given, each with its dates; do not work out a change over any other period, and do not describe what the price did on days between the closes listed. The period ends on period.to. The latest session may still be in progress. Describe what the price did: do not call a trend, forecast, or say whether it is a good time to buy or sell.';
+const COIN_NOTE = ' This is a coin: it trades all day, there is one price reading a day here and no session high or low, so the highest and lowest are daily readings; last_24_hours is its high and low over the last 24 hours.';
 
 // The tool result for one company. Pure.
-function buildHistory(company, { currency, bars, volumeUnit }, { held = false } = {}) {
+function buildHistory(company, { currency, bars, volumeUnit, last24h = null }, { held = false } = {}) {
   const s = summarize(bars);
   const head = { kind: 'price_history', ticker: company.ticker, name: company.name || company.ticker, held };
   if (!s) return { ...head, history: null, note: 'No price history is available for it right now. Say so; do not describe its past prices from memory.' };
-  return { ...head, currency, ...s, ...(s.avg_daily_volume ? { volume_unit: volumeUnit } : {}), note: NOTE };
+  const coin = !s.highest_price;
+  return { ...head, currency, ...s, ...(last24h ? { last_24_hours: last24h } : {}), ...(s.avg_daily_volume ? { volume_unit: volumeUnit } : {}), note: NOTE + (coin ? COIN_NOTE : '') };
 }
 
 // ── Network ──
@@ -139,6 +164,9 @@ async function fetchHistory(company) {
     const src = sourceFor(company, (company.asset_class || company.assetClass || 'equity') === 'equity' ? await indianMarkets() : {});
     if (src && src.coin) {
       data = { ...parseCoinGecko(await getJson(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(src.coin)}/market_chart?vs_currency=usd&days=365&interval=daily`)), volumeUnit: 'USD traded a day' };
+      // The last 24 hours' high and low come from a second route; without it the rest still stands.
+      const m = await getJson(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(src.coin)}`).then((j) => (Array.isArray(j) ? j[0] : null)).catch(() => null);
+      if (m && m.high_24h > 0 && m.low_24h > 0) data.last24h = { high: px(m.high_24h), low: px(m.low_24h) };
     } else if (src) {
       for (const sym of src.yahoo) {
         const parsed = await getJson(`${IPO_WATCH.YAHOO_CHART_URL}/${encodeURIComponent(sym)}?range=1y&interval=1d`).then(parseYahoo).catch(() => null);
