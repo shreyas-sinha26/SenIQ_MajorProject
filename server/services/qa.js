@@ -44,7 +44,10 @@ const { threadDigest } = require('./askThreads');
 
 // ── Pure helpers ──
 function sanitizeQuestion(raw) {
-  const q = String(raw || '').replace(/\s+/g, ' ').trim();
+  // A question is text. A number or an object sent in its place is no question at all
+  // (String({}) would otherwise be asked, and saved, as "[object Object]").
+  if (typeof raw !== 'string') return '';
+  const q = raw.replace(/\s+/g, ' ').trim();
   if (!q) return '';
   return q.length > QA.MAX_QUESTION_CHARS ? q.slice(0, QA.MAX_QUESTION_CHARS) : q;
 }
@@ -98,7 +101,7 @@ function deterministicAnswer(question, ctx) {
     if (attr && attr.portfolio_change_pct != null) {
       const drags = attr.contributions.filter((c) => c.contribution_pct < 0).slice(0, 3);
       lines.push(`Today your priced holdings moved ${attr.portfolio_change_pct}%.` + (drags.length
-        ? ` Biggest drags: ${drags.map((c) => `${c.ticker} (${c.change_pct}% × ${c.weight_pct}% weight = ${c.contribution_pct} pts)`).join(', ')}.`
+        ? ` Biggest drags: ${drags.map((c) => `${c.ticker} (${c.change_pct}% × ${c.priced_weight_pct}% of priced holdings = ${c.contribution_pct} pts)`).join(', ')}.`
         : ' Nothing was a meaningful drag.'));
     }
     lines.push(negatives.length
@@ -146,7 +149,8 @@ Rules:
 - Only the user's holdings are in scope. If they ask about a stock they don't hold, say SenIQ doesn't track it for them and that they can add it to their portfolio. Do not describe that stock from memory.
 - You cannot change the portfolio. To add or remove a holding, the user opens the Portfolio page and uses "Add Asset" there; do not suggest any other place.
 - State only what a tool result states. Do not assert a cause, a market-wide move, or a link between a story and a holding unless a tool result says it. If nothing in the results explains a move, say the data does not show a cause — you may offer one possible reading, clearly labelled as your reading and not as fact. Keep the wording of headlines; do not strengthen it.
-- Say what is missing. If a holding has no live price, weight or day change in the results, say so whenever the answer depends on it. If a result ends in "[truncated]" or covers less time than the question asked about, say the picture may be incomplete and what period it does cover.
+- A holding's size is its exposure_pct, the figure the app's pages show; say "about" when it is marked exposure_estimated. priced_weight_pct in get_attribution is only the multiplier behind a contribution — never give it as how much of the portfolio a holding is.
+- Say what is missing. If a holding has no live price, quantity or day change in the results, say so whenever the answer depends on it. If a result ends in "[truncated]" or covers less time than the question asked about, say the picture may be incomplete and what period it does cover.
 - Cite what supports each claim: numbers (exposure %, contribution, sentiment, z-score, impact) and, for every news story you mention, the outlet's name and the date (for example "Livemint, 7 Oct").
 - Smart money: disclosures lag by weeks. Give each trade its own trade date and disclosure date, and cover every trade the tool returned for the holding asked about — or say how many you left out.
 - Informational only — never give buy/sell/hold advice, price targets or predictions; if asked, say so briefly and offer the relevant facts instead.

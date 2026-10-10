@@ -7,8 +7,8 @@
 const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne } = require('../db');
 const { authMiddleware } = require('./auth');
-const { attachTier, requireAdmin } = require('../middleware/tier');
-const { TIERS } = require('../config');
+const { attachTier, requireAdmin, isTier } = require('../middleware/tier');
+const { isId } = require('../middleware/idParam');
 
 const router = asyncRouter();
 router.use(authMiddleware, attachTier, requireAdmin);
@@ -42,7 +42,8 @@ router.get('/ask-grounding', async (req, res) => {
 router.put('/tier', async (req, res) => {
   try {
     const { tier, userId } = req.body || {};
-    if (!TIERS[tier]) return res.status(400).json({ error: 'Invalid tier' });
+    if (!isTier(tier)) return res.status(400).json({ error: 'Invalid tier' });
+    if (userId != null && !isId(typeof userId === 'number' ? userId : String(userId))) return res.status(404).json({ error: 'User not found' });
     const targetId = userId || req.user.id;
     const updated = await queryOne(
       `UPDATE users SET subscription_tier = $1, subscription_updated_at = now()

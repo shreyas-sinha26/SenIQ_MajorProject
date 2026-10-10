@@ -14,7 +14,7 @@
  */
 
 const PRESETS_DOC = require('../data/seniqPresets.json');
-const { callService, flattenDetail } = require('./strategyClient');
+const { callService, engineFailure, parseCapital } = require('./strategyClient');
 const { seniqDataIfNeeded } = require('./signalHistory');
 
 const COMBINATORS = new Set(['all', 'any']);
@@ -140,15 +140,17 @@ async function compareWithoutSeniq({ custom, symbol, exchange, start_date, end_d
   const stripped = stripSeniq(custom);
   if (!stripped.ok) return { ok: false, status: 400, error: stripped.error };
 
-  const base = { params: {}, strategy: null, symbol, exchange: exchange || 'US', start_date, end_date, initial_cash: String(initial_cash || '100000') };
+  const capital = parseCapital(initial_cash);
+  if (!capital.ok) return { ok: false, status: 400, error: capital.error };
+  const base = { params: {}, strategy: null, symbol, exchange: exchange || 'US', start_date, end_date, initial_cash: capital.value };
   const [a, b] = await Promise.all([
     engine('/api/backtest', { method: 'POST', body: { ...base, custom, seniq_data: await seniqData(custom, symbol) } }),
     engine('/api/backtest', { method: 'POST', body: { ...base, custom: stripped.spec, seniq_data: null } }),
   ]);
   for (const out of [a, b]) {
     if (out.status === 200) continue;
-    if ([400, 404, 422].includes(out.status)) return { ok: false, status: 400, error: flattenDetail(out.data) || 'invalid backtest request' };
-    return { ok: false, status: 503, error: 'Strategy engine is offline — try again later.' };
+    const f = engineFailure(out, 'invalid backtest request');
+    return { ok: false, status: f.status === 404 ? 400 : f.status, error: f.error };
   }
 
   const withRun = runSummary(a.data);

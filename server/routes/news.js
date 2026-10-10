@@ -15,9 +15,13 @@ const { attachTier, requireTier } = require('../middleware/tier');
 const { userRateLimit, LIMITS } = require('../middleware/rateLimit');
 const { EXECUTORS: ASK_TOOLS, ScopeError } = require('../services/qaTools');
 const { loadSentimentBreakdown } = require('../services/sentimentBreakdown');
+const { isValidTicker } = require('../services/assetRegistry');
+const { classifyBatch, isEnabled: finbertEnabled } = require('../services/finbertClassifier');
+const { idParam } = require('../middleware/idParam');
 
 const router = asyncRouter();
 router.use(authMiddleware, attachTier);
+router.param('id', idParam('Alert not found'));
 
 // ─── GET /api/news/feed ──────────────────────────────────────
 // Phase 3.5: a de-spammed feed in the three buckets a user actually cares about —
@@ -135,6 +139,8 @@ router.get('/feed', async (req, res) => {
 router.get('/sentiment/:ticker', userRateLimit(LIMITS.LIVE_NEWS), async (req, res) => {
   try {
     const ticker = req.params.ticker.toUpperCase();
+    // Each call asks the news provider live, so only for something that can be a symbol.
+    if (!isValidTicker(ticker)) return res.status(400).json({ error: 'That does not look like a ticker symbol' });
     const apiKey = process.env.FINNHUB_API_KEY || '';
     const articles = await fetchNewsForTickers([ticker], apiKey);
 
@@ -262,7 +268,8 @@ router.put('/alerts/read-all', async (req, res) => {
 // ─── PUT /api/news/alerts/:id/read ───────────────────────────
 router.put('/alerts/:id/read', async (req, res) => {
   try {
-    await execute('UPDATE alerts SET read = true WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    const result = await execute('UPDATE alerts SET read = true WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Alert not found' });
     res.json({ success: true });
   } catch (err) {
     console.error('Mark alert read error:', err);
@@ -274,7 +281,8 @@ router.put('/alerts/:id/read', async (req, res) => {
 // Negative engagement signal (E3 outcome logging) — distinct from "read".
 router.put('/alerts/:id/dismiss', async (req, res) => {
   try {
-    await execute('UPDATE alerts SET dismissed = true WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    const result = await execute('UPDATE alerts SET dismissed = true WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Alert not found' });
     res.json({ success: true });
   } catch (err) {
     console.error('Dismiss alert error:', err);
@@ -307,8 +315,15 @@ router.post('/analyze', userRateLimit(LIMITS.ANALYZE), async (req, res) => {
     summary = summarizeArticle('', inputText);
   }
 
-  // Step 2: sentiment + ticker matching
-  const sentiment = analyzeSentiment(inputText);
+  // Step 2: sentiment + ticker matching. The reading comes from the model that scores the
+  // news feed (FinBERT) when it is on, so the same headline reads the same here as there;
+  // the word list stands in when it is off or fails, and says so (`model`).
+  const byWords = analyzeSentiment(inputText);
+  let sentiment = { ...byWords, model: 'lexicon' };
+  if (finbertEnabled()) {
+    const read = await classifyBatch([inputText]).catch(() => null);
+    if (read && read[0]) sentiment = { label: read[0].label, score: read[0].score, confidence: read[0].confidence, model: read[0].model || 'finbert', details: byWords.details };
+  }
   const tickers = matchTickers(inputText);
 
   // Step 3: LLM explanation with portfolio context (graceful fallback if Ollama is down)

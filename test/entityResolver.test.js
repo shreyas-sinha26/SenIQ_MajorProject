@@ -51,6 +51,16 @@ check('new CEO resolves: John Ternus → AAPL', () => assert.ok(tk('John Ternus 
 check('chair still resolves: Warren Buffett → BRK.B', () => assert.ok(tk('Warren Buffett trims a stake').includes('BRK.B')));
 check('surname alias: "Musk" → TSLA', () => assert.deepStrictEqual(tk('Musk pay package faces a new vote'), ['TSLA']));
 check('surname alias is case-sensitive: "musk" → nothing', () => assert.deepStrictEqual(tk('a musk fragrance launch'), []));
+check('an executive\'s other venture is not their listed company: SpaceX and Starlink are not Tesla', () => {
+  assert.deepStrictEqual(tk("Elon Musk's SpaceX files to go public at a $1.5 trillion valuation"), []);
+  assert.deepStrictEqual(tk('Starlink wins India licence, Musk says service starts in weeks'), []);
+  assert.deepStrictEqual(resolve('Musk says xAI will double its Memphis data centre', 'The Grok maker is raising $20 billion.').tickers, []);
+  assert.deepStrictEqual(resolve("Musk's SpaceX wins a $5 billion NASA contract", '').executives, []);
+});
+check('the company named beside the other venture still counts', () => {
+  assert.deepStrictEqual(tk('Musk says SpaceX and Tesla will share a chip plant'), ['TSLA']);
+  assert.deepStrictEqual(resolve('Musk says SpaceX and Tesla will share a chip plant', '').executives, ['elon musk']);
+});
 check('"Sachin Gupta" does NOT match Achin Gupta (CIPLA)', () => assert.deepStrictEqual(tk('Sachin Gupta joins a fintech startup'), []));
 check('accented name: Carol Tomé → UPS', () => assert.ok(tk('Carol Tomé says volumes are recovering').includes('UPS')));
 
@@ -184,6 +194,21 @@ check('real commodity headlines still resolve', () => {
 check('a company and the commodity in one headline: the commodity still counts', () => {
   assert.deepStrictEqual(tk('Senco Gold falls as gold prices hit a record'), ['XAU']);
   assert.deepStrictEqual(full('Oil India gains as oil tops $90', 'Crude oil rallied overnight.'), ['WTI']);
+});
+
+check('a commodity word describing something else is not the commodity', () => {
+  // The stored headline that reached a gold holder's feed as high-impact gold news.
+  assert.deepStrictEqual(tk('SIM-Swap Fraudster Who Spent Stolen Crypto on Gold Grills and Dubai Trips Jailed'), []);
+  assert.deepStrictEqual(tk('India wins Olympic gold medal in javelin'), []);
+  assert.deepStrictEqual(tk('Markets find a silver lining in weak jobs data'), []);
+  assert.deepStrictEqual(tk('Why this fund is the gold standard for index investors'), []);
+  assert.deepStrictEqual(tk('Palm oil prices jump on Indonesia export curbs'), []);
+  assert.deepStrictEqual(tk('Olive oil shortage pushes up grocery bills'), []);
+  // The commodity itself is untouched, including beside one of the phrases.
+  assert.deepStrictEqual(tk('Gold rush: prices hit a record as investors pile in'), ['XAU']);
+  assert.deepStrictEqual(tk('Gold Prices Hit Record High As Dollar Slides'), ['XAU']);
+  assert.deepStrictEqual(tk('Gold medal for bullion: gold tops $4,000'), ['XAU']);
+  assert.deepStrictEqual(full('Oil prices rise as palm oil also gains', 'Crude oil climbed.'), ['WTI']);
 });
 
 console.log('crypto and India coverage:');

@@ -75,9 +75,29 @@ function assetClassOf(ticker) {
 }
 
 // ─── API Helper ──────────────────────────────────────────────
+// The header's status light: green "Live" while requests are being answered, "Offline" once
+// one cannot reach the server at all. Set from api(), so it follows what the page sees.
+function setConnection(online) {
+  const el = document.getElementById('live-indicator');
+  if (!el || el.classList.contains('offline') === !online) return;
+  el.classList.toggle('offline', !online);
+  el.querySelector('.live-label').textContent = online ? 'Live' : 'Offline';
+  el.title = online ? '' : 'SenIQ cannot be reached. What you see is the last data loaded.';
+}
+
 async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
-  const res = await fetch(`${API}${path}`, { ...opts, headers, credentials: 'same-origin' });
+  let res;
+  try {
+    res = await fetch(`${API}${path}`, { ...opts, headers, credentials: 'same-origin' });
+  } catch {
+    // The browser's own wording here is "Failed to fetch", which tells a user nothing.
+    setConnection(false);
+    const err = new Error('SenIQ cannot be reached right now. Check your connection and try again.');
+    err.offline = true;
+    throw err;
+  }
+  setConnection(true);
   const data = await res.json().catch(() => ({}));
   // The session ended on the server (idle, expired, or signed out elsewhere).
   if (res.status === 401 && currentUser && !path.startsWith('/api/auth/')) sessionEnded();
@@ -348,15 +368,19 @@ async function showDashboard() {
   syncBrowserTimeZone();
   await Promise.all([loadPortfolio(), loadNewsFeed(), loadAlerts(), loadPortfolioSentiment(), loadImpactFeed(), loadDailyBrief(), loadSmartMoney(), loadAskThreads()]);
 
-  // Auto-refresh every 60s
+  // Auto-refresh every 60s. Prices and weights come from outside price sources with their
+  // own limits, so the holdings are re-read on every fifth beat only.
   if (refreshInterval) clearInterval(refreshInterval);
+  let beat = 0;
   refreshInterval = setInterval(() => {
     loadNewsFeed(); loadAlerts(); loadPortfolioSentiment(); loadImpactFeed(); loadSmartMoney();
+    if (++beat % PORTFOLIO_REFRESH_BEATS === 0) loadPortfolio();
   }, 60000);
 }
 
 // ─── Portfolio ───────────────────────────────────────────────
 let holdings = [];
+const PORTFOLIO_REFRESH_BEATS = 5; // holdings (prices, weights) are re-read every 5th refresh
 
 async function loadPortfolio() {
   try {
@@ -383,37 +407,57 @@ function renderHoldings() {
     return;
   }
 
+  // The stories-behind-the-score row, if one is open, is put back after the redraw.
+  const openDrivers = grid.querySelector('.ht-drivers-row');
+  const openFor = openDrivers && openDrivers.previousElementSibling ? openDrivers.previousElementSibling.dataset.ticker : null;
+
   grid.innerHTML = holdings.map(h => {
-    let rowClass = '';
+    let rowClass = h.pending ? 'row-pending' : '';
     if (activeFilter) {
-      rowClass = h.ticker === activeFilter ? 'row-active' : 'row-dimmed';
+      rowClass += h.ticker === activeFilter ? ' row-active' : ' row-dimmed';
     }
     const cls = h.asset_class || 'equity';
     const clsLabel = { equity: 'Equity', crypto: 'Crypto', commodity: 'Commodity' }[cls] || cls;
-    const exposure = h.weight_pct != null
-      ? `${h.weight_pct}%`
-      : h.quantity != null ? `${h.quantity} units` : '—';
-    const priceInline = h.price != null
+    // One figure for "how much of the portfolio is this", the same one the Dashboard, the
+    // news cards and Analytics use. A holding with no quantity or no price has no value of
+    // its own, so it is counted at the average size of the others and marked as an estimate.
+    const estimated = h.weight_pct == null;
+    const exposure = h.exposure_pct != null
+      ? `<span${estimated ? ' class="ht-estimate" title="An estimate: this holding has no quantity or no price, so it is counted at the average size of your other holdings. For an exact share, remove it and add it again with a quantity."' : ''}>${estimated ? '≈' : ''}${h.exposure_pct}%</span>`
+      : '—';
+    const priceInline = h.pending
+      ? '<span class="ht-price muted">adding…</span>'
+      : h.price != null
       ? `<span class="ht-price">${fmtPrice(h.price, h.currency)}${h.change_pct != null
           ? ` <span class="ht-chg ${h.change_pct >= 0 ? 'up' : 'down'}">${h.change_pct >= 0 ? '▲' : '▼'}${Math.abs(h.change_pct).toFixed(2)}%</span>`
           : ''}</span>`
       : '<span class="ht-price muted">—</span>';
+    // Every redraw (a filter, an add, a refresh) starts from the scores already loaded,
+    // so the columns never fall back to dashes while the next refresh is on its way.
+    const s = cachedSentiments[h.ticker];
+    const reading = s ? s.label : 'neutral';
+    const sentiLabel = !s ? '—' : s.label === 'positive' ? 'Bullish' : s.label === 'negative' ? 'Bearish' : 'Neutral';
     return `
-    <tr class="${rowClass}" data-ticker="${escapeHtml(h.ticker)}" onclick="toggleFilter('${escapeHtml(h.ticker)}')">
+    <tr class="${rowClass.trim()}" data-ticker="${escapeHtml(h.ticker)}" onclick="toggleFilter('${escapeHtml(h.ticker)}')">
       <td>
         <div class="ht-ticker">${escapeHtml(h.ticker)} <span class="asset-class-badge ${cls}">${clsLabel}</span>${h.coverage === 'basic' ? ' <span class="coverage-badge" title="Outside SenIQ\'s curated list of companies. News is matched on the name and symbol only, so expect fewer stories and a thinner sentiment score.">Basic coverage</span>' : ''} ${priceInline}</div>
         <div class="ht-name">${escapeHtml(h.company_name || h.ticker)}</div>
       </td>
       <td class="ht-exposure">${exposure}</td>
-      <td><span class="ht-senti-label neutral" id="senti-label-${escapeHtml(h.ticker)}">—</span></td>
-      <td><button class="ht-score-why" type="button" title="See the stories behind this score" onclick="event.stopPropagation(); toggleSentimentDrivers('${escapeHtml(h.ticker)}')"><span class="ht-score neutral" id="score-${escapeHtml(h.ticker)}">—</span><span class="ht-score-caret" aria-hidden="true">▾</span></button></td>
-      <td><span class="ht-headline" id="headline-${escapeHtml(h.ticker)}">—</span></td>
+      <td><span class="ht-senti-label ${reading}" id="senti-label-${escapeHtml(h.ticker)}">${sentiLabel}</span></td>
+      <td><button class="ht-score-why" type="button" title="See the stories behind this score" onclick="event.stopPropagation(); toggleSentimentDrivers('${escapeHtml(h.ticker)}')"><span class="ht-score ${reading}" id="score-${escapeHtml(h.ticker)}">${s ? Math.round(s.score * 100) : '—'}</span><span class="ht-score-caret" aria-hidden="true">▾</span></button></td>
+      <td><span class="ht-headline" id="headline-${escapeHtml(h.ticker)}">${s ? escapeHtml(s.recentHeadline || '—') : '—'}</span></td>
       <td class="ht-actions">
         <button class="ht-info" onclick="event.stopPropagation(); openBriefFor('${escapeHtml(h.ticker)}')" title="Company brief">ℹ</button>
         <button class="ht-remove" onclick="event.stopPropagation(); removeStock('${escapeHtml(h.ticker)}')" title="Remove">×</button>
       </td>
     </tr>
   `}).join('');
+
+  if (openFor) {
+    const row = grid.querySelector(`tr[data-ticker="${CSS.escape(openFor)}"]`);
+    if (row) row.after(openDrivers);
+  }
 }
 
 // ─── Filter Logic ────────────────────────────────────────────
@@ -558,7 +602,6 @@ function selectSearchResult(ticker) {
 }
 
 async function addStock(ticker, opts = {}) {
-  // Optimistic: immediately show the card
   ticker = ticker.toUpperCase().trim();
   if (holdings.some(h => h.ticker === ticker)) {
     showToast(`${ticker} already in portfolio`, 'error');
@@ -568,29 +611,31 @@ async function addStock(ticker, opts = {}) {
   const quantity = opts.quantity ?? null;
   const costBasis = opts.costBasis ?? null;
 
-  holdings.unshift({ ticker, company_name: ticker, asset_class: assetClass, quantity, id: Date.now() });
+  // The row appears at once, marked as being added. "Added" is only said when the server
+  // has accepted it: a refused symbol or quantity must not flash a success first.
+  holdings.unshift({ ticker, company_name: ticker, asset_class: assetClass, quantity, id: Date.now(), pending: true });
   document.getElementById('holdings-count').textContent = holdings.length;
   renderHoldings();
   closeModal();
-  showToast(`${ticker} added to portfolio!`, 'success');
 
-  // Background: persist + load sentiment
   try {
     const res = await api('/api/portfolio', {
       method: 'POST',
       body: JSON.stringify({ ticker, asset_class: assetClass, quantity, cost_basis: costBasis }),
     });
-    // Update with real company name from server
-    const h = holdings.find(h => h.ticker === ticker);
-    if (h && res.holding) { h.company_name = res.holding.company_name; h.asset_class = res.holding.asset_class; }
+    // The server's row carries the real name, class, price and coverage.
+    const at = holdings.findIndex(h => h.ticker === ticker);
+    if (at >= 0 && res.holding) holdings[at] = res.holding;
     renderHoldings();
+    showToast(`${ticker} added to portfolio`, 'success');
+    if (res.warning) showToast(res.warning, 'info');
     // E4 onboarding: pop the company brief returned on add (best-effort).
     if (res.brief) showBrief(res.brief);
-    // Refresh sentiment & news in parallel (non-blocking)
+    // Every holding's share changes when one is added; scores and news follow.
+    loadPortfolio();
     loadPortfolioSentiment();
     loadNewsFeed();
   } catch (err) {
-    // Rollback optimistic add
     holdings = holdings.filter(h => h.ticker !== ticker);
     document.getElementById('holdings-count').textContent = holdings.length;
     renderHoldings();
@@ -604,10 +649,12 @@ async function removeStock(ticker) {
   holdings = holdings.filter(h => h.ticker !== ticker);
   document.getElementById('holdings-count').textContent = holdings.length;
   renderHoldings();
-  showToast(`${ticker} removed`, 'info');
 
   try {
-    await api(`/api/portfolio/${ticker}`, { method: 'DELETE' });
+    await api(`/api/portfolio/${encodeURIComponent(ticker)}`, { method: 'DELETE' });
+    showToast(`${ticker} removed`, 'info');
+    // The remaining holdings' shares change with one gone.
+    loadPortfolio();
     loadPortfolioSentiment();
   } catch (err) {
     // Rollback
@@ -1225,9 +1272,11 @@ function initAnalyzer() {
       resultEl.innerHTML = `
         ${articleTitle ? `<div class="result-article-title">${escapeHtml(articleTitle)}</div>` : ''}
         <div class="result-label ${sentiment.label}">${sentiment.label.toUpperCase()} — ${strength}%</div>
-        <div class="result-score">Confidence: ${Math.round(sentiment.confidence * 100)}% | ${sentiment.details?.positiveWords || 0} positive, ${sentiment.details?.negativeWords || 0} negative words</div>
+        <div class="result-score">${sentiment.model === 'finbert'
+          ? `Read by FinBERT, the model that scores your news · confidence ${Math.round(sentiment.confidence * 100)}%`
+          : `Read by the word list · ${sentiment.details?.positiveWords || 0} positive and ${sentiment.details?.negativeWords || 0} negative signal words found`}</div>
         ${summary ? `<div class="result-summary"><strong>Summary:</strong> ${escapeHtml(summary)}</div>` : ''}
-        <div class="result-explanation">✨ <strong>AI Analysis:</strong> ${escapeHtml(llmExplanation || sentiment.explanation || '')}</div>
+        ${llmExplanation || sentiment.explanation ? `<div class="result-explanation"><strong>${llmExplanation ? 'What it means for your portfolio:' : 'Why:'}</strong> ${escapeHtml(llmExplanation || sentiment.explanation)}</div>` : ''}
         ${visibleTickers.length > 0 ? `<div class="result-tickers">Matched: ${visibleTickers.map(t => `<span class="news-ticker">${escapeHtml(t)}</span>`).join(' ')}</div>` : ''}
       `;
       resultEl.classList.remove('hidden');
@@ -2094,9 +2143,10 @@ function ipoDay(s) {
 }
 
 function ipoPriceBand(i) {
+  const r = (v) => `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
   if (i.price_low == null && i.price_high == null) return '—';
-  if (i.price_low == null || i.price_high == null || i.price_low === i.price_high) return `₹${i.price_high ?? i.price_low}`;
-  return `₹${i.price_low} – ₹${i.price_high}`;
+  if (i.price_low == null || i.price_high == null || i.price_low === i.price_high) return r(i.price_high ?? i.price_low);
+  return `${r(i.price_low)} – ${r(i.price_high)}`;
 }
 
 // Grey market premium: ₹ over the issue price, its share of the top price, and which way it
@@ -2126,9 +2176,14 @@ async function ipoAddToPortfolio(btn) {
   btn.disabled = true;
   try {
     const res = await api('/api/portfolio', { method: 'POST', body: JSON.stringify({ ticker, asset_class: 'equity' }) });
-    if (res.holding) { holdings.push(res.holding); document.getElementById('holdings-count').textContent = holdings.length; renderHoldings(); }
-    showToast(`${ticker} added to portfolio`, 'success');
+    showToast(`${ticker} added to portfolio. It has no quantity yet, so its share is shown as an estimate (≈).`, 'success');
+    if (res.warning) showToast(res.warning, 'info');
     btn.outerHTML = '<span title="In your portfolio">held</span>';
+    // The whole list is re-read: the new holding needs its price, and every other
+    // holding's share changes with one more in the portfolio.
+    await loadPortfolio();
+    loadPortfolioSentiment();
+    loadNewsFeed();
   } catch (err) {
     showToast(err.message || `Could not add ${ticker}`, 'error');
     btn.disabled = false;
@@ -2140,7 +2195,9 @@ function ipoListingNote(i, cur = '₹') {
   if (i.listing_price == null && i.listing_gain_pct == null) return '';
   const g = i.listing_gain_pct;
   const gain = g == null ? '' : ` (${g > 0 ? '+' : g < 0 ? '−' : ''}${Math.abs(g).toFixed(1)}%)`;
-  const price = i.listing_price == null ? 'listed' : `at ${i.listing_price_derived ? `≈${cur}${i.listing_price >= 100 ? Math.round(i.listing_price) : i.listing_price.toFixed(1)}` : `${cur}${i.listing_price}`}`;
+  // A dollar price always shows its cents, like the price column beside it.
+  const exact = (v) => (cur === '$' ? `$${Number(v).toFixed(2)}` : `${cur}${v}`);
+  const price = i.listing_price == null ? 'listed' : `at ${i.listing_price_derived ? `≈${cur}${i.listing_price >= 100 ? Math.round(i.listing_price) : i.listing_price.toFixed(1)}` : exact(i.listing_price)}`;
   const tip = i.listing_price_derived ? 'Gain over the issue price as reported; the price is worked back from it' : 'Listing price and gain over the issue price';
   // Later closes, each as a return over the issue price, as they come due.
   const pct = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(1)}%`;
@@ -2159,10 +2216,36 @@ function ipoSubCell(i) {
     parts.length ? `<span class="ipo-meta">${parts.map(([k, v]) => `${k} ${x(v)}`).join(' · ')}</span>` : ''}`;
 }
 
+// Rows that open an issue's news are reachable from the keyboard as well as the mouse.
+function wireIpoRows(box) {
+  box.querySelectorAll('tr[data-ipo]').forEach(tr => {
+    tr.addEventListener('click', () => toggleIpoStories(tr));
+    tr.addEventListener('keydown', (e) => {
+      if (e.target !== tr || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      toggleIpoStories(tr);
+    });
+  });
+}
+const IPO_ROW_ATTRS = 'class="ipo-row-click" tabindex="0" role="button" aria-expanded="false" title="Show the news on this issue"';
+
+// "Calendar last refreshed 3h ago" — and a plain warning once it is more than a day old.
+function renderIpoAge(data) {
+  const el = document.getElementById('ipo-age');
+  if (!el) return;
+  el.classList.toggle('stale', !!data.stale && !!data.updatedAt);
+  el.textContent = !data.updatedAt ? ''
+    : data.stale ? `Last refreshed ${timeAgo(new Date(data.updatedAt))}. The calendar is refreshed once a day, so dates and stages below may be out of date.`
+    : `Last refreshed ${timeAgo(new Date(data.updatedAt))}.`;
+}
+
+let ipoRequest = 0; // the newest calendar request; an older answer arriving late is dropped
+
 async function loadIpoCalendar() {
   const box = document.getElementById('ipo-calendar');
   if (!box) return;
   const us = ipoMarket === 'us';
+  const request = ++ipoRequest;
   const wire = (id, key, get, set) => document.querySelectorAll(`#${id} .scope-btn`).forEach(b => {
     b.classList.toggle('active', b.dataset[key] === get());
     b.onclick = () => { set(b.dataset[key]); loadIpoCalendar(); };
@@ -2178,9 +2261,13 @@ async function loadIpoCalendar() {
   let data;
   try { data = await api(us ? `/api/ipo-watch/calendar?market=us&spacs=${ipoSpacs}` : `/api/ipo-watch/calendar?market=in&board=${ipoBoard}`); }
   catch (err) {
+    if (request !== ipoRequest) return;
     box.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message || 'Could not load the IPO calendar')}</p></div>`;
     return;
   }
+  // Switching India → US → India quickly sends three requests; only the last one is drawn.
+  if (request !== ipoRequest) return;
+  renderIpoAge(data);
   const issues = data.issues || [];
   ipoIssues = new Map(issues.map(i => [String(i.id), i]));
   const note = document.getElementById('ipo-source-note');
@@ -2196,7 +2283,7 @@ async function loadIpoCalendar() {
     const shown = ipoUsView === 'deals' ? issues.filter(i => ['upcoming', 'closed', 'listed'].includes(i.stage)) : issues;
     if (!shown.length) { box.innerHTML = '<div class="empty-state"><p>No expected or priced US deals right now.</p></div>'; return; }
     box.innerHTML = renderUsIpoTable(shown);
-    box.querySelectorAll('tr[data-ipo]').forEach(tr => tr.addEventListener('click', () => toggleIpoStories(tr)));
+    wireIpoRows(box);
     wireIpoAddButtons(box);
     return;
   }
@@ -2205,7 +2292,7 @@ async function loadIpoCalendar() {
       <table class="holdings-tbl ipo-tbl">
         <thead><tr><th>Company</th><th>Stage</th><th>Opens</th><th>Closes</th><th>Lists</th><th>Price band</th><th title="Grey market premium: unofficial, per share over the issue price">GMP</th><th title="Times the shares on offer were bid for: QIB = institutions, NII = non-institutional (HNI), Retail = individuals">Subscribed</th><th>Issue size</th></tr></thead>
         <tbody>${issues.map(i => `
-          <tr ${i.stories ? `class="ipo-row-click" data-ipo="${i.id}" title="Show the news on this issue"` : ''}>
+          <tr ${i.stories ? `${IPO_ROW_ATTRS} data-ipo="${i.id}"` : ''}>
             <td><span class="ipo-name">${escapeHtml(i.name)}</span>
                 <span class="ipo-meta">${i.board === 'sme' ? 'SME' : 'Mainboard'}${i.exchange ? ` · ${escapeHtml(i.exchange)}` : ''}${i.symbol ? ` · ${escapeHtml(i.symbol)}` : ''}${i.stories ? ` · ${i.stories} ${i.stories === 1 ? 'story' : 'stories'}` : ''}${ipoAddButton(i)}</span></td>
             <td><span class="ipo-stage ${i.stage}">${IPO_STAGE_LABEL[i.stage] || escapeHtml(i.stage)}</span></td>
@@ -2220,7 +2307,7 @@ async function loadIpoCalendar() {
         </tbody>
       </table>
     </div>`;
-  box.querySelectorAll('tr[data-ipo]').forEach(tr => tr.addEventListener('click', () => toggleIpoStories(tr)));
+  wireIpoRows(box);
   wireIpoAddButtons(box);
 }
 
@@ -2243,7 +2330,7 @@ function renderUsIpoTable(issues) {
         <tbody>${issues.map(i => {
           const day = i.first_trade_date || i.listing_date || i.status_date;
           return `
-          <tr ${i.stories ? `class="ipo-row-click" data-ipo="${i.id}" title="Show the news on this issue"` : ''}>
+          <tr ${i.stories ? `${IPO_ROW_ATTRS} data-ipo="${i.id}"` : ''}>
             <td><span class="ipo-name">${escapeHtml(i.name)}</span>
                 <span class="ipo-meta">${[i.exchange, i.symbol, i.is_spac ? 'SPAC' : '', i.stories ? `${i.stories} ${i.stories === 1 ? 'story' : 'stories'}` : ''].filter(Boolean).map(escapeHtml).join(' · ') || '—'}${ipoAddButton(i)}</span></td>
             <td><span class="ipo-stage ${i.stage}">${IPO_US_STAGE_LABEL[i.stage] || escapeHtml(i.stage)}</span></td>
@@ -2262,13 +2349,14 @@ let ipoIssues = new Map();
 
 async function toggleIpoStories(tr) {
   const open = tr.nextElementSibling;
-  if (open && open.classList.contains('ipo-detail')) { open.remove(); tr.classList.remove('row-active'); return; }
+  if (open && open.classList.contains('ipo-detail')) { open.remove(); tr.classList.remove('row-active'); tr.setAttribute('aria-expanded', 'false'); return; }
   const issue = ipoIssues.get(tr.dataset.ipo);
   const detail = document.createElement('tr');
   detail.className = 'ipo-detail';
   detail.innerHTML = `<td colspan="${tr.cells.length}"><div class="loading-skeleton"><div class="skeleton-line"></div></div></td>`;
   tr.after(detail);
   tr.classList.add('row-active');
+  tr.setAttribute('aria-expanded', 'true');
   let data;
   try { data = await api(`/api/ipo-watch/${issue.id}/stories`); }
   catch (err) { detail.firstElementChild.innerHTML = `<div class="empty-state small"><p>${escapeHtml(err.message || 'Could not load the news')}</p></div>`; return; }
@@ -2499,9 +2587,17 @@ async function runBacktest(e) {
     exchange: document.getElementById('bt-exchange').value,
     start_date: document.getElementById('bt-start').value,
     end_date: document.getElementById('bt-end').value,
-    initial_cash: document.getElementById('bt-cash').value || '100000',
+    initial_cash: document.getElementById('bt-cash').value.trim(),
   };
-  if (!body.symbol) { showToast('Enter a symbol to backtest', 'error'); return; }
+  // The form is novalidate: the browser's own bubbles do not show in every browser (an
+  // embedded one swallows them, so "Run backtest" looked dead), and they said nothing useful.
+  const problem = btCheckInputs(body);
+  if (problem) {
+    showToast(problem.message, 'error');
+    const el = document.getElementById(problem.field);
+    if (el) el.focus();
+    return;
+  }
 
   const btn = document.getElementById('bt-run');
   btn.disabled = true;
@@ -2527,6 +2623,19 @@ async function runBacktest(e) {
     btn.disabled = false;
     btn.innerHTML = '<span class="material-symbols-outlined">play_arrow</span> Run backtest';
   }
+}
+
+// What is wrong with the Backtest form, as { field, message }, or null. Pure.
+const BT_CASH_MIN = 1000, BT_CASH_MAX = 100000000;
+function btCheckInputs(body) {
+  if (!body.symbol) return { field: 'bt-symbol', message: 'Enter a symbol to backtest' };
+  if (!body.start_date || !body.end_date) return { field: body.start_date ? 'bt-end' : 'bt-start', message: 'Choose both a From and a To date' };
+  if (body.start_date >= body.end_date) return { field: 'bt-end', message: 'The To date must be after the From date' };
+  const cash = body.initial_cash === '' ? NaN : Number(body.initial_cash);
+  if (!Number.isFinite(cash) || cash < BT_CASH_MIN || cash > BT_CASH_MAX) {
+    return { field: 'bt-cash', message: `Starting capital must be between ${BT_CASH_MIN.toLocaleString()} and ${BT_CASH_MAX.toLocaleString()}` };
+  }
+  return null;
 }
 
 // "Did the SenIQ signal help?" — offered after a backtest of a Builder strategy that uses
@@ -2696,26 +2805,32 @@ async function runWalkForward() {
   try {
     const data = await api('/api/strategies/walk-forward', { method: 'POST', body: JSON.stringify({ ...btLastBody, n_splits: 4 }) });
     const wf = data.walk_forward, s = wf.summary;
+    // A window the strategy sat out (each starts with no position and needs a fresh entry)
+    // is not a losing window: the verdict and the percentage count only the windows that traded.
+    const sat = (f) => f.oos_traded === false || (f.oos_traded == null && f.oos_metrics && f.oos_metrics.n_trades === 0 && Number(f.oos_metrics.total_return_pct) === 0);
+    const traded = s.n_traded_folds != null ? s.n_traded_folds : wf.folds.filter(f => f.valid && !sat(f)).length;
     const VERDICT_TEXT = {
       robust: 'Held up on data it wasn\'t judged on.',
       moderate: 'Profitable out of sample, but not consistently.',
       fragile: 'Results did not carry over to unseen data.',
-      insufficient_data: 'Not enough data in these windows to judge — try a longer date range.',
+      insufficient_data: !s.n_valid_folds ? 'Not enough data in these windows to judge — try a longer date range.'
+        : traded === 0 ? 'The strategy made no trade in any unseen window, so there is nothing to judge. Each window starts with no position and waits for a new entry — try a longer date range.'
+        : `Only ${traded} unseen ${traded === 1 ? 'window' : 'windows'} had a trade — too few to judge. Try a longer date range.`,
     };
     const cell = (v) => v == null ? '<td>—</td>' : `<td class="${Number(v) >= 0 ? 'pos' : 'neg'}">${btPct(v)}</td>`;
     out.innerHTML = `
       <div class="bt-wf-verdict">
         <span class="bt-wf-pill ${escapeHtml(s.verdict)}">${escapeHtml(s.verdict.replace('_', ' '))}</span>
         <span>${VERDICT_TEXT[s.verdict] || ''}</span>
-        <span class="brief-muted">${s.n_valid_folds} of ${s.n_folds} folds usable${s.oos_consistency != null ? ` · profitable in ${btPct(s.oos_consistency)} of unseen windows` : ''}</span>
+        <span class="brief-muted">${s.n_valid_folds} of ${s.n_folds} folds usable · ${traded} traded${s.oos_consistency != null ? ` · profitable in ${btPct(s.oos_consistency)} of the unseen windows that traded` : ''}</span>
       </div>
       <div class="bt-trades-scroll"><table class="bt-wf-table">
         <thead><tr><th>Fold</th><th>Judged on</th><th>Return</th><th>Then tested on</th><th>Return</th><th>Max drawdown</th><th>Trades</th></tr></thead>
         <tbody>${wf.folds.map(f => `<tr>
           <td>${f.index}</td>
           <td>${f.is_start} → ${f.is_end}</td>${cell(f.is_metrics && f.is_metrics.total_return_pct)}
-          <td>${f.oos_start} → ${f.oos_end}</td>${cell(f.oos_metrics && f.oos_metrics.total_return_pct)}
-          <td>${f.oos_metrics ? btPct(f.oos_metrics.max_drawdown_pct) : '—'}</td>
+          <td>${f.oos_start} → ${f.oos_end}</td>${sat(f) ? '<td class="brief-muted">no trade</td>' : cell(f.oos_metrics && f.oos_metrics.total_return_pct)}
+          <td>${f.oos_metrics && !sat(f) ? btPct(f.oos_metrics.max_drawdown_pct) : '—'}</td>
           <td>${f.oos_metrics ? f.oos_metrics.n_trades : '—'}</td>
         </tr>`).join('')}</tbody>
       </table></div>`;
@@ -2805,7 +2920,9 @@ function sbReadUi() {
     const fn = row.querySelector('.sb-fn').value;
     const params = {};
     row.querySelectorAll('.sb-param').forEach(inp => {
-      params[inp.dataset.p] = inp.dataset.kind === 'text' ? inp.value.replace(/\s+/g, ' ').trim().slice(0, 80) : (Number(inp.value) || 1);
+      // A number is kept as typed, blank included: sbCheckUi says what is wrong with it. (A
+      // blank or 0 used to become 1 here without a word, and the strategy ran with it.)
+      params[inp.dataset.p] = inp.dataset.kind === 'text' ? inp.value.replace(/\s+/g, ' ').trim().slice(0, 80) : sbNum(inp.value);
     });
     ui.factors.push({ fn, params });
   });
@@ -2822,8 +2939,63 @@ function sbReadUi() {
   ui.stop = document.getElementById('sb-stop').value;
   ui.target = document.getElementById('sb-target').value;
   ui.sizingType = document.getElementById('sb-sizing-type').value;
-  ui.sizingValue = Number(document.getElementById('sb-sizing-value').value) || 25;
+  ui.sizingValue = sbNum(document.getElementById('sb-sizing-value').value);
   return ui;
+}
+
+// A number input's value: '' when blank or unreadable, else the number.
+function sbNum(v) {
+  const t = String(v ?? '').trim();
+  return t === '' || !Number.isFinite(Number(t)) ? '' : Number(t);
+}
+
+// What the editor's numbers get wrong, as sentences for the "Fix these" box. The engine
+// checks the same things, but in its own terms ("factors[0] (f1): param period=0 out of
+// range 1..500"); these name the row the user is looking at. Pure.
+const SB_WINDOW_MAX = { window_days: 365 };
+function sbCheckUi(ui) {
+  const problems = [];
+  ui.factors.forEach((f, i) => {
+    for (const [k, v] of Object.entries(f.params)) {
+      if (typeof SB_PARAMS[f.fn]?.[k] === 'string') continue; // optional text
+      const max = SB_WINDOW_MAX[k] || 500;
+      const label = `Indicator f${i + 1} (${sbFnLabel(f.fn)}): ${SB_PARAM_LABELS[k] || k}`;
+      if (v === '') problems.push(`${label} is empty — enter a whole number from 1 to ${max}.`);
+      else if (!Number.isInteger(v) || v < 1 || v > max) problems.push(`${label} is ${v} — it must be a whole number from 1 to ${max}.`);
+    }
+  });
+  for (const [kind, name] of [['entry', 'Entry'], ['exit', 'Exit']]) {
+    ui[kind].forEach((r, i) => {
+      if (r.right === '__num__' && sbNum(r.num) === '') problems.push(`${name} rule ${i + 1}: enter the number to compare with.`);
+    });
+  }
+  for (const [key, name] of [['stop', 'Stop-loss'], ['target', 'Take-profit']]) {
+    if (ui[key] === '' || ui[key] == null) continue;
+    const n = sbNum(ui[key]);
+    if (n === '' || n <= 0 || n >= 100) problems.push(`${name} is ${ui[key]} — it must be a percent above 0 and below 100, or left empty.`);
+  }
+  const size = ui.sizingValue;
+  if (ui.sizingType === 'fixed_cash') {
+    if (size === '' || size <= 0) problems.push(`Cash per trade is ${size === '' ? 'empty' : size} — it must be above 0.`);
+  } else if (size === '' || size <= 0 || size > 100) {
+    problems.push(`Position size is ${size === '' ? 'empty' : `${size}%`} — it must be above 0 and at most 100.`);
+  }
+  return problems;
+}
+
+function sbShowErrors(lead, items) {
+  const errEl = document.getElementById('sb-errors');
+  errEl.classList.remove('hidden');
+  errEl.innerHTML = `<strong>${escapeHtml(lead)}</strong><ul>${items.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>`;
+}
+
+// The box lists what was wrong with the strategy that WAS in the editor; once a template or
+// a reset replaces that strategy, the list is about something that is gone.
+function sbClearErrors() {
+  const errEl = document.getElementById('sb-errors');
+  if (!errEl) return;
+  errEl.classList.add('hidden');
+  errEl.innerHTML = '';
 }
 
 // Builds the engine spec from the UI model.
@@ -3026,6 +3198,7 @@ async function initBuilderPage() {
   });
   document.getElementById('sb-reset').addEventListener('click', () => {
     localStorage.removeItem(SB_UI_KEY);
+    sbClearErrors();
     sbRender();
   });
 
@@ -3034,16 +3207,12 @@ async function initBuilderPage() {
     const ui = sbReadUi();
     sbSaveUi(ui);
     const spec = sbEmitSpec(ui);
-    const errEl = document.getElementById('sb-errors');
-    errEl.classList.add('hidden');
+    sbClearErrors();
+    const problems = sbCheckUi(ui);
+    if (problems.length) return sbShowErrors('Fix these before saving:', problems);
     try {
       const check = await api('/api/strategies/validate', { method: 'POST', body: JSON.stringify(spec) });
-      if (!check.valid) {
-        errEl.classList.remove('hidden');
-        errEl.innerHTML = '<strong>Fix these before saving:</strong><ul>' +
-          check.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('') + '</ul>';
-        return;
-      }
+      if (!check.valid) return sbShowErrors('Fix these before saving:', check.errors);
     } catch (err) {
       showToast(err.status === 503 ? 'Strategy engine is offline' : (err.message || 'Validation failed'), 'error');
       return;
@@ -3082,7 +3251,7 @@ async function sbInitPresets() {
       const { spec } = await api(`/api/strategies/seniq-presets/${encodeURIComponent(p.id)}`, { method: 'POST', body: JSON.stringify(body) });
       const out = sbSpecToUi(spec);
       if (!out.ok) return showToast(`This template can't be shown here: ${out.reason}`, 'error');
-      sbSaveUi(out.ui); sbRender();
+      sbSaveUi(out.ui); sbClearErrors(); sbRender();
       showToast(`“${out.ui.name}” loaded. Review it, then backtest.`, 'success');
     } catch (err) {
       showToast(err.message || 'Could not load the template', 'error');
@@ -3094,16 +3263,12 @@ async function sbBacktest() {
   const ui = sbReadUi();
   sbSaveUi(ui);
   const spec = sbEmitSpec(ui);
-  const errEl = document.getElementById('sb-errors');
-  errEl.classList.add('hidden');
+  sbClearErrors();
+  const problems = sbCheckUi(ui);
+  if (problems.length) return sbShowErrors('Fix these before running:', problems);
   try {
     const check = await api('/api/strategies/validate', { method: 'POST', body: JSON.stringify(spec) });
-    if (!check.valid) {
-      errEl.classList.remove('hidden');
-      errEl.innerHTML = '<strong>Fix these before running:</strong><ul>' +
-        check.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('') + '</ul>';
-      return;
-    }
+    if (!check.valid) return sbShowErrors('Fix these before running:', check.errors);
   } catch (err) {
     showToast(err.status === 503 ? 'Strategy engine is offline' : (err.message || 'Validation failed'), 'error');
     return;
@@ -3143,8 +3308,10 @@ let ysInitDone = false;
 
 // "NVDA, BTC:CRYPTO, RELIANCE:NSE" → [{symbol, exchange}] (default US).
 function ysParseSymbols(text) {
+  // Every entry is sent: a sixth symbol or a misspelt market is refused by the server with
+  // the reason, where it used to be dropped here and the strategy saved without it.
   return String(text || '').split(',')
-    .map(t => t.trim()).filter(Boolean).slice(0, 5)
+    .map(t => t.trim()).filter(Boolean)
     .map(t => {
       const [symbol, exchange] = t.split(':').map(x => x.trim().toUpperCase());
       return { symbol, exchange: exchange || 'US' };
@@ -3186,6 +3353,7 @@ function initSaveModal() {
       modal.classList.add('hidden');
       showToast(`“${body.name}” saved to Your Strategies`, 'success');
       ysInitDone = false; // refresh the list on next visit
+      ptInitDone = false; // and the strategies offered on Paper Trade
     } catch (err) {
       if (err.status === 402) {
         errEl.textContent = 'Saving strategies is a Plus feature — upgrade to save.';
@@ -3198,18 +3366,28 @@ function initSaveModal() {
 }
 
 // ── The page ──
+// The list is read again on every visit (one cheap request), because a strategy can be saved
+// or removed elsewhere: by Ask, through the API, in another tab. The cards and their live
+// signals are redrawn only when the list is not the one already on screen.
+let ysShown = null;
+const ysListKey = (list) => JSON.stringify(list.map(s => [s.id, s.updated_at, s.name, s.symbols]));
+
 async function initStrategiesPage() {
-  if (ysInitDone) return;
-  ysInitDone = true;
   const statusEl = document.getElementById('ys-status');
   const listEl = document.getElementById('ys-list');
-  listEl.innerHTML = '';
-  statusEl.classList.remove('hidden');
-  statusEl.innerHTML = '<div class="empty-state small"><p>Loading your strategies…</p></div>';
+  const first = !ysInitDone;
+  ysInitDone = true;
+  if (first) {
+    ysShown = null;
+    listEl.innerHTML = '';
+    statusEl.classList.remove('hidden');
+    statusEl.innerHTML = '<div class="empty-state small"><p>Loading your strategies…</p></div>';
+  }
   let data;
   try {
     data = await api('/api/strategies/saved');
   } catch (err) {
+    if (!first) return; // a failed re-read leaves what is on screen
     ysInitDone = false;
     if (err.status === 402) {
       statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>Your Strategies is a Plus feature. <a href="#" onclick="switchToPage(\'profile\');return false;">Upgrade your plan</a> to save strategies and watch their live signals.</p></div>';
@@ -3218,9 +3396,13 @@ async function initStrategiesPage() {
     }
     return;
   }
-  statusEl.classList.add('hidden');
   const list = data.strategies || [];
+  const key = ysListKey(list);
+  if (key === ysShown) return;
+  ysShown = key;
+  statusEl.classList.add('hidden');
   if (!list.length) {
+    listEl.innerHTML = '';
     statusEl.classList.remove('hidden');
     statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">bookmarks</span><p>Nothing saved yet. Build one in the <a href="#" onclick="switchToPage(\'strategy-builder\');return false;">Strategy Builder</a>, or save a preset from the <a href="#" onclick="switchToPage(\'backtest\');return false;">Backtest page</a>.</p></div>';
     return;
@@ -3272,7 +3454,9 @@ async function ysLoadSignal(id, nSymbols) {
       if (sig.error) return `<span class="ys-sig ys-sig-err" title="${escapeHtml(sig.error)}">${escapeHtml(sig.symbol)} — no data</span>`;
       const cls = sig.state === 'long' ? 'ys-sig-long' : 'ys-sig-flat';
       const fresh = sig.fired_on_latest_bar ? ' <span class="ys-new">NEW</span>' : '';
-      const last = sig.last_signal ? ` · ${sig.last_signal.side} ${sig.last_signal.date}` : ' · no signal yet';
+      // No signal means none in the history the engine read (about two years), not none ever.
+      const last = sig.last_signal ? ` · ${sig.last_signal.side} ${sig.last_signal.date}`
+        : (sig.evaluated_from ? ` · no signal since ${sig.evaluated_from}` : ' · no signal yet');
       return `<span class="ys-sig ${cls}" title="as of ${escapeHtml(sig.as_of || '')} · close ${escapeHtml(String(Number(sig.last_close || 0).toFixed(2)))}">${escapeHtml(sig.symbol)}: ${sig.state.toUpperCase()}${fresh}<small>${escapeHtml(last)}</small></span>`;
     }).join('');
     const note = data.has_protective_exits
@@ -3343,35 +3527,51 @@ async function ysBacktest(id) {
 // computed on read; and the ledger, the fills and daily values a daily job has
 // stored from completed days (it loads without the engine).
 let ptInitDone = false;
+let ptCanDeploy = true;          // false: the account is not on Pro (it may still hold deployments)
+const ptStateFailed = new Set(); // deployments whose live state could not be replayed
+
+const PT_UPSELL = 'Paper trading is a Pro feature. <a href="#" onclick="switchToPage(\'profile\');return false;">Upgrade your plan</a> to deploy strategies on virtual money.';
 
 async function initPaperPage() {
-  if (ptInitDone) return;
+  if (ptInitDone) {
+    // Back on the page: a card that said "engine offline" asks again. It used to keep
+    // saying so until the whole app was reloaded, though the engine was back.
+    [...ptStateFailed].forEach(ptLoadState);
+    return;
+  }
   ptInitDone = true;
+  ptStateFailed.clear();
   const statusEl = document.getElementById('pt-status');
   const listEl = document.getElementById('pt-list');
+  const formEl = document.getElementById('pt-deploy-form');
   statusEl.classList.remove('hidden');
   statusEl.innerHTML = '<div class="empty-state small"><p>Loading…</p></div>';
   listEl.innerHTML = '';
 
-  let saved, deployments;
+  // The deployments first: an account that has left Pro can still see, stop and delete
+  // what it started. The saved strategies (for the deploy form) only when it can deploy.
+  let saved = { strategies: [] }, deployments;
   try {
-    [saved, deployments] = await Promise.all([
-      api('/api/strategies/saved'),
-      api('/api/paper'),
-    ]);
+    deployments = await api('/api/paper');
+    ptCanDeploy = deployments.can_deploy !== false;
+    if (ptCanDeploy) saved = await api('/api/strategies/saved');
   } catch (err) {
     ptInitDone = false;
-    if (err.status === 402) {
-      statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>Paper trading is a Pro feature. <a href="#" onclick="switchToPage(\'profile\');return false;">Upgrade your plan</a> to deploy strategies on virtual money.</p></div>';
-    } else {
-      statusEl.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message || 'Could not load paper trading')}</p></div>`;
-    }
+    statusEl.innerHTML = err.status === 402
+      ? `<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>${PT_UPSELL}</p></div>`
+      : `<div class="empty-state"><p>${escapeHtml(err.message || 'Could not load paper trading')}</p></div>`;
     return;
   }
 
   const strategies = saved.strategies || [];
   const sel = document.getElementById('pt-strategy');
-  if (!strategies.length) {
+  if (!ptCanDeploy) {
+    formEl.classList.add('hidden');
+    const held = (deployments.deployments || []).length;
+    statusEl.innerHTML = `<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>${PT_UPSELL}${held
+      ? ' The deployments below were started on Pro. They are not being replayed or recorded now; you can still read what was recorded, stop them or delete them.' : ''}</p></div>`;
+  } else if (!strategies.length) {
+    formEl.classList.add('hidden');
     statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">candlestick_chart</span><p>Save a strategy first — build one in the <a href="#" onclick="switchToPage(\'strategy-builder\');return false;">Strategy Builder</a> or save a preset from the <a href="#" onclick="switchToPage(\'backtest\');return false;">Backtest page</a>, then deploy it here.</p></div>';
   } else {
     sel.innerHTML = strategies.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
@@ -3397,18 +3597,22 @@ async function initPaperPage() {
     form.dataset.wired = '1';
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const body = {
+        strategy_id: Number(document.getElementById('pt-strategy').value),
+        symbol: document.getElementById('pt-symbol').value.trim().toUpperCase(),
+        exchange: document.getElementById('pt-exchange').value,
+        initial_cash: document.getElementById('pt-cash').value.trim(),
+      };
+      // novalidate, like the Backtest form: the page names what is wrong itself.
+      const cash = body.initial_cash === '' ? NaN : Number(body.initial_cash);
+      const problem = !body.symbol ? { field: 'pt-symbol', message: 'Enter the symbol to trade' }
+        : (!Number.isFinite(cash) || cash < BT_CASH_MIN || cash > BT_CASH_MAX)
+          ? { field: 'pt-cash', message: `Paper cash must be between ${BT_CASH_MIN.toLocaleString()} and ${BT_CASH_MAX.toLocaleString()}` } : null;
+      if (problem) { showToast(problem.message, 'error'); document.getElementById(problem.field).focus(); return; }
       const btn = document.getElementById('pt-deploy');
       btn.disabled = true;
       try {
-        await api('/api/paper', {
-          method: 'POST',
-          body: JSON.stringify({
-            strategy_id: Number(document.getElementById('pt-strategy').value),
-            symbol: document.getElementById('pt-symbol').value.trim().toUpperCase(),
-            exchange: document.getElementById('pt-exchange').value,
-            initial_cash: document.getElementById('pt-cash').value || '100000',
-          }),
-        });
+        await api('/api/paper', { method: 'POST', body: JSON.stringify(body) });
         showToast('Deployed — trading starts with the next fresh signal', 'success');
         ptInitDone = false;
         initPaperPage();
@@ -3424,7 +3628,7 @@ async function initPaperPage() {
 function ptRenderList(list) {
   const listEl = document.getElementById('pt-list');
   if (!list.length) {
-    listEl.innerHTML = '<div class="empty-state small"><p>No deployments yet — deploy a saved strategy above.</p></div>';
+    listEl.innerHTML = ptCanDeploy ? '<div class="empty-state small"><p>No deployments yet — deploy a saved strategy above.</p></div>' : '';
     return;
   }
   listEl.innerHTML = list.map(d => `
@@ -3444,7 +3648,11 @@ function ptRenderList(list) {
       <div class="pt-state" id="pt-state-${d.id}"><span class="ys-loading">replaying…</span></div>
       <details class="pt-ledger" id="pt-ledger-${d.id}"><summary class="ys-loading">loading ledger…</summary></details>
     </div>`).join('');
-  list.forEach(d => { ptLoadState(d.id); ptLoadLedger(d.id); });
+  list.forEach(d => {
+    if (ptCanDeploy) ptLoadState(d.id);
+    else document.getElementById(`pt-state-${d.id}`).innerHTML = '<span class="ys-loading">live state is a Pro feature — the recorded ledger below is what was stored</span>';
+    ptLoadLedger(d.id);
+  });
 }
 
 // Recorded equity as a small line: one point per stored day.
@@ -3499,9 +3707,11 @@ async function ptLoadLedger(id) {
 
 async function ptLoadState(id) {
   const el = document.getElementById(`pt-state-${id}`);
-  if (!el) return;
+  if (!el) { ptStateFailed.delete(id); return; }
+  el.innerHTML = '<span class="ys-loading">replaying…</span>';
   try {
     const data = await api(`/api/paper/${id}/state`, { method: 'POST' });
+    ptStateFailed.delete(id);
     const m = data.report.metrics;
     const initial = Number(data.deployment.initial_cash);
     if (!data.n_bars) {
@@ -3525,7 +3735,9 @@ async function ptLoadState(id) {
       </div>
       ${posHtml}`;
   } catch (err) {
-    el.innerHTML = `<span class="ys-sig ys-sig-err">${escapeHtml(err.status === 503 ? 'engine offline' : (err.message || 'replay failed'))}</span>`;
+    ptStateFailed.add(id);
+    el.innerHTML = `<span class="ys-sig ys-sig-err">${escapeHtml(err.status === 503 ? 'The strategy engine is offline' : (err.message || 'replay failed'))}</span>
+      <button type="button" class="ys-btn pt-retry" onclick="ptLoadState(${id})" title="Try again"><span class="material-symbols-outlined">refresh</span></button>`;
   }
 }
 
@@ -3825,7 +4037,9 @@ async function refreshDailyBrief() {
   try {
     const data = await api('/api/reports/daily/generate', { method: 'POST' });
     renderDailyBrief(data.brief);
-    showToast('Brief refreshed', 'success');
+    // `kept`: today's AI-written brief is already as fresh as the plan allows, so it stays.
+    if (data.brief && data.brief.kept) showToast("Today's brief is already up to date. The next one is written tomorrow morning.", 'info');
+    else showToast('Brief refreshed', 'success');
   } catch (err) {
     showToast(err.message, 'error');
   } finally {
@@ -3873,6 +4087,7 @@ function openDraftInBuilder(i) {
   const out = sbSpecToUi(d.spec);
   if (!out.ok) return showToast(`The Builder can't show this draft yet: ${out.reason}`, 'error');
   sbSaveUi(out.ui);
+  sbClearErrors();
   if (sbInitDone) sbRender();
   switchToPage('strategy-builder');
   showToast(`“${out.ui.name}” loaded into the Builder. Review it, then backtest.`, 'success');

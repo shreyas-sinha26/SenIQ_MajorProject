@@ -24,6 +24,8 @@
  *   - executive full names                      : whole-phrase, case-insensitive (so
  *     "Achin Gupta" does not fire on "Sachin Gupta"); executive ALIASES (surnames like
  *     "Musk") whole-word and case-sensitive. Former executives still resolve.
+ *   - an executive named beside another venture of theirs ("Musk's SpaceX") does not tag
+ *     their listed company unless the text names that company too
  *
  * `buildResolver(companies, executives)` is a pure function (no DB) so resolution is
  * unit-testable offline. The DB-backed `resolve()` lazy-loads + caches an index built
@@ -127,6 +129,33 @@ function inCompanyName(text, s, e) {
   return !!before && /^[A-Z][a-z]/.test(before[1]) && !NOT_A_NAME.has(before[1].toLowerCase())
     && /^(['’]s)?\s+[a-z]/.test(after);
 }
+
+// A commodity word that is describing something else: an object made of it or an award
+// ("gold grills", "silver medal"), a figure of speech ("silver lining", "the gold standard"),
+// or another product altogether ("palm oil", "olive oil"). Capitals give no clue here —
+// these turn up in Title Case Headlines too — so the neighbouring word decides. Kept to
+// words that never follow the metal when the story is about its price ("gold rush" and
+// "gold chains" are left out: both head stories about gold itself).
+const NOT_THE_METAL_AFTER = /^[\s-]+(grills?|grillz|medals?|medall?ists?|cards?|plated|toilet|statues?|troph(?:y|ies)|standard|lining|screen|bullets?|jubilee|spoon|tooth|teeth)\b/i;
+const NOT_CRUDE_BEFORE = /\b(olive|palm|edible|cooking|coconut|mustard|sunflower|soybean|soya|vegetable|groundnut|castor|fish|hair|essential|engine|baby|massage|snake)\s+$/i;
+function describesSomethingElse(text, s, e) {
+  const word = text.slice(s, e).toLowerCase();
+  if (word === 'gold' || word === 'silver') return NOT_THE_METAL_AFTER.test(text.slice(e));
+  if (/^oil\b/.test(word)) return NOT_CRUDE_BEFORE.test(text.slice(0, s));
+  return false;
+}
+
+// True when the commodity word at [s, e) of `text` does not mean the commodity: it is part
+// of a company's name, or it is describing something else.
+const notTheCommodity = (text, s, e) => inCompanyName(text, s, e) || describesSomethingElse(text, s, e);
+
+// An executive who also runs companies SenIQ does not track. A story that names one of those
+// ventures and not the executive's listed company is about the venture: "Musk's SpaceX files
+// to go public" and "Starlink wins an India licence, Musk says" are not Tesla news, and they
+// used to pull Tesla's score down. Keyed by the executive's full name, lower case.
+const OTHER_VENTURES = {
+  'elon musk': /\b(spacex|starlink|starship|xai|grok|neuralink|boring company|twitter|x corp)\b/i,
+};
 
 // Flatten the curated universe into the row shapes the resolver/seeder use.
 function universeRows() {
@@ -274,7 +303,7 @@ function buildResolver(companies, executives) {
   const isCommodity = (tks) => [...tks].every((t) => headlineOnly.has(t));
   // The plain commodity word in the headline, outside any company name.
   const headlineNames = (t, title) => !!COMMODITY_HEADLINE[t] && [...title.matchAll(COMMODITY_HEADLINE[t])]
-    .some((m) => !inCompanyName(title, m.index, m.index + m[0].length));
+    .some((m) => !notTheCommodity(title, m.index, m.index + m[0].length));
 
   for (const c of companies) {
     sectorByTicker.set(c.ticker, c.sector || null);
@@ -326,7 +355,7 @@ function buildResolver(companies, executives) {
     const spans = []; // { s, e, tks } for each long-alias occurrence
     for (const [alias, tks] of longAliases) {
       for (let i = lower.indexOf(alias); i !== -1; i = lower.indexOf(alias, i + 1)) {
-        if (isCommodity(tks) && inCompanyName(original, i, i + alias.length)) continue;
+        if (isCommodity(tks) && notTheCommodity(original, i, i + alias.length)) continue;
         spans.push({ s: i, e: i + alias.length, tks });
       }
     }
@@ -347,7 +376,7 @@ function buildResolver(companies, executives) {
       for (const m of lower.matchAll(re)) {
         if (shadowed(m.index, m.index + m[0].length, tks)) continue;
         if (ARM_SUFFIX.test(lower.slice(m.index + m[0].length))) continue;
-        if (isCommodity(tks) && inCompanyName(original, m.index, m.index + m[0].length)) continue;
+        if (isCommodity(tks) && notTheCommodity(original, m.index, m.index + m[0].length)) continue;
         tks.forEach((t) => tickers.add(t));
         break;
       }
@@ -405,9 +434,13 @@ function buildResolver(companies, executives) {
     if ([...tickers].some((t) => CRYPTO_NEEDS_CONTEXT.has(t)) && !CRYPTO_CONTEXT.test(context || original)) {
       for (const t of [...tickers]) if (CRYPTO_NEEDS_CONTEXT.has(t)) tickers.delete(t);
     }
-    // Executives → their company (key-person events with no ticker in the headline).
+    // Executives → their company (key-person events with no ticker in the headline) —
+    // unless the text is about another venture of theirs and never names the company.
     for (const { re, lower: ci, name, ticker } of execRe) {
-      if (re.test(ci ? lower : original)) { tickers.add(ticker); executivesHit.add(name); }
+      if (!re.test(ci ? lower : original)) continue;
+      if (OTHER_VENTURES[name] && !tickers.has(ticker) && OTHER_VENTURES[name].test(original)) continue;
+      tickers.add(ticker);
+      executivesHit.add(name);
     }
     // Extra holdings outside the curated universe (still get basic matching). Curated
     // tickers are skipped: their rules above already ran, and the loose name match here
@@ -522,4 +555,4 @@ async function seedUniverse() {
   console.log(`   🏷️  universe seeded: ${n.c} companies, ${executives.length} executives; ${n.l} more listed`);
 }
 
-module.exports = { buildResolver, namesHolding, coreName, setIpoTier, resolve, loadIndex, seedUniverse, universeRows, SECTOR_THEMES, AMBIGUOUS, AMBIGUOUS_SYMBOLS };
+module.exports = { buildResolver, namesHolding, coreName, setIpoTier, resolve, loadIndex, seedUniverse, universeRows, SECTOR_THEMES, AMBIGUOUS, AMBIGUOUS_SYMBOLS, OTHER_VENTURES };

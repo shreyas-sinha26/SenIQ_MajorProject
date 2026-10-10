@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /$
+Allow: /css/
+Allow: /js/
+Disallow: /api/
+Disallow: /app
+Disallow: /v1/
+Disallow: /mcp

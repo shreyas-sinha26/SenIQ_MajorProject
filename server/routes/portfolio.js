@@ -1,8 +1,9 @@
 const { asyncRouter } = require('../middleware/asyncRouter');
-const { query, queryOne, execute } = require('../db');
+const { query, queryOne, execute, tx } = require('../db');
 const { getCompanyName } = require('../services/tickerMatcher');
 const { resolveAsset, isLaunchAssetClass, isValidTicker } = require('../services/assetRegistry');
 const { getWeightedHoldings } = require('../services/portfolioService');
+const { getQuotes } = require('../services/priceService');
 const { onboardHolding, buildCompanyBrief } = require('../services/onboarding');
 const { authMiddleware } = require('./auth');
 const { attachTier, upsell } = require('../middleware/tier');
@@ -12,14 +13,30 @@ const router = asyncRouter();
 // All portfolio routes require auth + tier context (req.tier / req.tierCfg).
 router.use(authMiddleware, attachTier);
 
+// The largest quantity or per-unit cost a holding may carry. Far above any real position;
+// its job is to stop a slip of the keyboard (or 1e30) from becoming 100% of the portfolio
+// and pushing every other holding's weight to zero.
+const MAX_AMOUNT = 1e12;
+// How long an add waits for the new holding's price before answering without one.
+const ADD_QUOTE_WAIT_MS = 4000;
+
 // Parse an optional non-negative number; '' / null / undefined → null.
 // Returns the sentinel `INVALID` for anything that isn't a valid number.
 const INVALID = Symbol('invalid');
 function parseOptionalNumber(v) {
   if (v === undefined || v === null || v === '') return null;
+  if (typeof v !== 'number' && typeof v !== 'string') return INVALID;
   const n = Number(v);
-  if (!Number.isFinite(n) || n < 0) return INVALID;
+  if (!Number.isFinite(n) || n < 0 || n > MAX_AMOUNT) return INVALID;
   return n;
+}
+
+// The new holding's price, with a time limit: an add must not hang on a slow price source.
+// → the quote, null when no source has a price, undefined when the lookup did not finish.
+function quoteWithin(ticker, assetClass, exchange, ms = ADD_QUOTE_WAIT_MS) {
+  const lookup = getQuotes([{ ticker, assetClass, exchange }]).then((q) => q[ticker] || null).catch(() => undefined);
+  const timeout = new Promise((resolve) => setTimeout(() => resolve(undefined), ms));
+  return Promise.race([lookup, timeout]);
 }
 
 // ─── GET /api/portfolio ──────────────────────────────────────
@@ -68,6 +85,9 @@ router.post('/', async (req, res) => {
   try {
     const { ticker: rawTicker, asset_class: rawClass } = req.body || {};
     if (!rawTicker) return res.status(400).json({ error: 'Ticker is required' });
+    if (typeof rawTicker !== 'string' && typeof rawTicker !== 'number') {
+      return res.status(400).json({ error: 'That does not look like a ticker symbol — use letters and digits, e.g. AAPL or RELIANCE.' });
+    }
 
     const { ticker, assetClass, name } = resolveAsset(rawTicker, rawClass);
     if (!isValidTicker(ticker)) {
@@ -88,33 +108,33 @@ router.post('/', async (req, res) => {
 
     const quantity = parseOptionalNumber(req.body.quantity);
     const costBasis = parseOptionalNumber(req.body.cost_basis);
-    if (quantity === INVALID) return res.status(400).json({ error: 'Quantity must be a non-negative number' });
-    if (costBasis === INVALID) return res.status(400).json({ error: 'Cost basis must be a non-negative number' });
+    if (quantity === INVALID) return res.status(400).json({ error: 'Quantity must be a number from 0 to 1,000,000,000,000' });
+    if (costBasis === INVALID) return res.status(400).json({ error: 'Cost basis must be a number from 0 to 1,000,000,000,000' });
 
     const companyName = name || (ref && ref.name) || getCompanyName(ticker);
 
-    const existing = await queryOne(
-      'SELECT id FROM portfolio WHERE user_id = $1 AND ticker = $2',
-      [req.user.id, ticker]
-    );
-    if (existing) return res.status(409).json({ error: `${ticker} already in portfolio` });
-
-    // Phase 6 — tier holdings cap (Free = 7; Plus/Pro unlimited).
+    // The duplicate check, the plan's holdings limit and the insert run as one step per
+    // user. Done apart, several adds sent at once all pass the same count and a Free
+    // account ends up over its limit, or two adds of one symbol race into a database error.
     const cap = req.tierCfg?.maxHoldings ?? Infinity;
-    if (Number.isFinite(cap)) {
-      const { n } = await queryOne('SELECT count(*)::int AS n FROM portfolio WHERE user_id = $1', [req.user.id]);
-      if (n >= cap) {
-        return res.status(402).json(upsell('plus',
-          `Free plan is limited to ${cap} holdings. Upgrade to add more.`));
+    const added = await tx(async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`portfolio:${req.user.id}`]);
+      const held = await client.query('SELECT ticker FROM portfolio WHERE user_id = $1', [req.user.id]);
+      if (held.rows.some((r) => r.ticker === ticker)) return { status: 409, body: { error: `${ticker} already in portfolio` } };
+      // Phase 6 — tier holdings cap (Free = 7; Plus/Pro unlimited).
+      if (Number.isFinite(cap) && held.rows.length >= cap) {
+        return { status: 402, body: upsell('plus', `Free plan is limited to ${cap} holdings. Upgrade to add more.`) };
       }
-    }
-
-    const created = await queryOne(
-      `INSERT INTO portfolio (user_id, ticker, company_name, asset_class, exchange, quantity, cost_basis)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, monitoring_since`,
-      [req.user.id, ticker, companyName, assetClass, exchange, quantity, costBasis]
-    );
+      const row = await client.query(
+        `INSERT INTO portfolio (user_id, ticker, company_name, asset_class, exchange, quantity, cost_basis)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, monitoring_since`,
+        [req.user.id, ticker, companyName, assetClass, exchange, quantity, costBasis]
+      );
+      return { created: row.rows[0] };
+    });
+    if (!added.created) return res.status(added.status).json(added.body);
+    const { created } = added;
 
     const holding = {
       id: created.id,
@@ -136,8 +156,26 @@ router.post('/', async (req, res) => {
       console.error('Onboarding error:', err.message);
     }
 
-    res.status(201).json({ holding, brief });
+    // The page draws the new row from this answer, so it carries the price and coverage
+    // the portfolio list would show for it.
+    const quote = await quoteWithin(ticker, assetClass, exchange);
+    if (quote) {
+      holding.price = quote.price;
+      holding.currency = quote.currency;
+      holding.change_pct = quote.changePct != null ? Math.round(quote.changePct * 100) / 100 : null;
+    }
+    const curated = await queryOne("SELECT 1 AS yes FROM companies WHERE ticker = $1 AND is_active AND tier = 'curated'", [ticker]);
+    holding.coverage = curated ? 'full' : 'basic';
+
+    // A symbol in no company list with no price anywhere is most likely a typo. It is still
+    // added — a real but obscure listing must not be refused — and the page says so.
+    const warning = assetClass === 'equity' && !ref && quote === null
+      ? `${ticker} is not in our company list and no price was found for it. If it is a typo, remove it and add the right symbol.`
+      : null;
+    res.status(201).json({ holding, brief, ...(warning ? { warning } : {}) });
   } catch (err) {
+    // Two adds of one symbol that slipped past the check above: the table's own rule caught it.
+    if (err && err.code === '23505') return res.status(409).json({ error: 'That holding is already in your portfolio' });
     console.error('Add asset error:', err);
     res.status(500).json({ error: 'Failed to add asset' });
   }

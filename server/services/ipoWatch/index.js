@@ -344,5 +344,13 @@ async function listCalendar({ market = 'IN', board = 'mainboard', spacs = false,
   return stage ? out.filter((r) => r.stage === stage) : out;
 }
 
-module.exports = { STAGES, BOARDS, MARKETS, marketDate, nameKey, normalizeIssue, mergeIssues, stageOf, upsertIssues, cleanSubscription, cleanHistory, gmpReadings, recordGmp, recordGmpHistory, recordSubscriptions,
+// When a market's calendar was last refreshed from its source, and whether that is long
+// enough ago that the page should say so. null before the first poll.
+async function calendarAge(market = 'IN', { now = new Date(), run = query } = {}) {
+  const row = (await run('SELECT max(fetched_at) AS at FROM ipos WHERE market = $1', [market]))[0];
+  const at = row && row.at ? new Date(row.at) : null;
+  return { updatedAt: at, stale: !at || now - at > IPO_WATCH.STALE_AFTER_HOURS * 3600e3 };
+}
+
+module.exports = { STAGES, BOARDS, MARKETS, marketDate, nameKey, calendarAge, normalizeIssue, mergeIssues, stageOf, upsertIssues, cleanSubscription, cleanHistory, gmpReadings, recordGmp, recordGmpHistory, recordSubscriptions,
   outcomesOf, listingGain, priceFromGain, recordOutcomes, gmpView, pollCalendar, listCalendar };

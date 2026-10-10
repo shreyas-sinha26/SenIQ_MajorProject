@@ -12,11 +12,13 @@ const { authMiddleware } = require('./auth');
 const { requireRecentAuth } = require('../services/sessions');
 const { attachTier, requireTier } = require('../middleware/tier');
 const { generateKey } = require('../services/apiKeys');
+const { idParam } = require('../middleware/idParam');
 
 const MAX_ACTIVE_KEYS = 5;
 
 const router = asyncRouter();
 router.use(authMiddleware, attachTier);
+router.param('id', idParam('active key not found'));
 
 function rowToJson(r) {
   return {

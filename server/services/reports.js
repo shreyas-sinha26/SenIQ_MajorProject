@@ -9,7 +9,9 @@
  * The guardrails (the user is firm: never let the Claude key run a bill):
  *   - server-scheduled only — generateDailyBriefs() runs from cron; the manual route hits
  *     the SAME per-user quota, so there is no loopable on-demand "generate" path.
- *   - per-user daily quota — checked BEFORE any Claude call (count of today's daily_brief calls).
+ *   - per-user daily quota, by plan (TIERS[tier].claudeReportsPerDay: Free 0, Plus 1, Pro 2) —
+ *     checked BEFORE any Claude call (count of today's daily_brief calls). Free accounts
+ *     cannot open the brief, so theirs is always the code-written one.
  *   - global daily spend kill-switch — stop calling Claude past the day's USD ceiling.
  *   - hard output-token cap per call (in briefWriter) + a trimmed/clamped packet.
  *   - every Claude call logged with tokens + estimated cost.
@@ -17,7 +19,7 @@
  * deterministic writer — only the Claude upgrade is withheld.
  */
 
-const { REPORTS, FEATURES } = require('../config');
+const { REPORTS, FEATURES, TIERS } = require('../config');
 const { buildGroundingPacket } = require('./grounding');
 const { writeBrief } = require('./briefWriter');
 
@@ -26,6 +28,12 @@ const { writeBrief } = require('./briefWriter');
 function estimateCost(usage) {
   if (usage.cost_usd > 0) return usage.cost_usd;
   return (usage.input / 1e6) * REPORTS.PRICE_PER_MTOK.input + (usage.output / 1e6) * REPORTS.PRICE_PER_MTOK.output;
+}
+
+// Pure: how many Claude-written briefs a plan allows a day. An unknown plan gets Free's.
+function briefQuota(tier) {
+  const plan = Object.hasOwn(TIERS, tier) ? TIERS[tier] : TIERS.free;
+  return Number.isFinite(plan.claudeReportsPerDay) ? plan.claudeReportsPerDay : 0;
 }
 
 /**
@@ -88,14 +96,23 @@ async function generateBriefForUser(userId, { force = false, now = new Date() } 
     'SELECT COALESCE(sum(cost_usd),0) s FROM claude_calls WHERE created_at >= $1',
     [utcDay]
   );
+  const account = await queryOne('SELECT subscription_tier FROM users WHERE id = $1', [userId]);
   const guard = guardCheck({
     flagOn: FEATURES.CLAUDE_REPORTS,
     hasKey: require('./llmClient').llmConfigured(),
     userCallsToday: Number(callRow.c),
-    quota: REPORTS.PER_USER_DAILY_QUOTA,
+    quota: briefQuota(account && account.subscription_tier),
     globalSpendToday: Number(spendRow.s),
     ceiling: REPORTS.GLOBAL_DAILY_USD_CEILING,
   });
+
+  // A refresh that may not use Claude (today's allowance is spent, or the spend ceiling is
+  // reached) keeps a Claude-written brief as it is. Writing over it with the code-written
+  // text would leave the user with a worse brief for pressing Refresh.
+  if (force && !guard.allow) {
+    const existing = await queryOne(`SELECT ${BRIEF_COLS} FROM daily_briefs WHERE user_id = $1 AND brief_date = $2`, [userId, date]);
+    if (existing && existing.writer === 'claude') return { ...existing, guard: guard.reason, cached: true, kept: true };
+  }
 
   const brief = await writeBrief(packet, { allowClaude: guard.allow });
 
@@ -159,4 +176,4 @@ async function getLatestBrief(userId) {
   return queryOne(`SELECT ${BRIEF_COLS} FROM daily_briefs WHERE user_id = $1 ORDER BY daily_briefs.brief_date DESC LIMIT 1`, [userId]);
 }
 
-module.exports = { generateBriefForUser, generateDailyBriefs, briefDue, getLatestBrief, guardCheck, estimateCost };
+module.exports = { generateBriefForUser, generateDailyBriefs, briefDue, briefQuota, getLatestBrief, guardCheck, estimateCost };
