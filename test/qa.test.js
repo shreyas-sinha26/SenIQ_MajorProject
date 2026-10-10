@@ -149,7 +149,22 @@ check('deterministic "down" answer leads with attribution when priced', () => {
     attribution: computeAttribution(holdings),
   };
   const a = deterministicAnswer('why is my portfolio down?', ctx);
-  assert.ok(/moved -0.8%/.test(a) && /AAPL \(-2% × 60% weight = -1.2 pts\)/.test(a));
+  assert.ok(/moved -0.8%/.test(a) && /AAPL \(-2% × 60% of priced holdings = -1.2 pts\)/.test(a));
+});
+check('a holding\'s size is its exposure figure; the priced-only weight is named as the multiplier', () => {
+  // AAPL is 52.3% of the two priced holdings but 41.8% of the portfolio once the holding
+  // with no quantity is counted — the Portfolio page shows 41.8.
+  const a = computeAttribution([
+    { ticker: 'AAPL', weight_pct: 52.3, exposure_pct: 41.8, change_pct: -1 },
+    { ticker: 'NVDA', weight_pct: 47.7, exposure_pct: 38.2, change_pct: 2 },
+    { ticker: 'TCS', weight_pct: null, exposure_pct: 20, change_pct: 0.4 },
+  ]);
+  const aapl = a.contributions.find((c) => c.ticker === 'AAPL');
+  assert.strictEqual(aapl.exposure_pct, 41.8);
+  assert.strictEqual(aapl.priced_weight_pct, 52.3);
+  assert.strictEqual(aapl.contribution_pct, -0.523);
+  assert.ok(!('weight_pct' in aapl), 'no bare "weight" for the model to quote as the size');
+  assert.ok(/exposure_pct/.test(a.note) && /priced_weight_pct/.test(a.note));
 });
 
 section('\nsanitizeHistory:');
