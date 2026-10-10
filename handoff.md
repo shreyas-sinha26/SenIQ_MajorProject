@@ -1,6 +1,6 @@
 # SenIQ — Handoff
 
-Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). Late on 2026-10-10 two pieces of uncommitted work on the branch `ipo-ask` (Ask reads IPO Watch; news retention) and a six-step plan were added (§3, §5, §7, §8, §10). On 2026-10-11 the first three steps of that plan were done: P1 committed, P2 run, P3 built and committed on the branch `listed-news` with its switch still off (§3, §8, §10). This file describes the project **as it stands now**. The previous
+Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). Late on 2026-10-10 two pieces of uncommitted work on the branch `ipo-ask` (Ask reads IPO Watch; news retention) and a six-step plan were added (§3, §5, §7, §8, §10). On 2026-10-11 the first three steps of that plan were done: P1 committed, P2 run, P3 built and committed on the branch `listed-news` with its switch still off, and the first slice of P4 (the snapshot) built and committed on the branch `ask-tools` (§3, §8, §10). This file describes the project **as it stands now**. The previous
 handoff was a session-by-session log (1,658 lines); it is still in git history
 (`git show 6ee98d9:handoff.md`) if a detail of how something was built is needed.
 
@@ -61,8 +61,9 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ## 3. Current state
 
-- **Git** *(checked 2026-10-11)*: the working tree is on the local branch `listed-news`
-  (below); `main` is level with `origin/main`, no open pull
+- **Git** *(checked 2026-10-11)*: the working tree is on the local branch `ask-tools`
+  (below), the last of three local branches stacked on `main`: `ipo-ask`, then
+  `listed-news`, then `ask-tools`. None is pushed; `main` is level with `origin/main`, no open pull
   request. Latest tags **`v1.14`** and **`v2.15`**, both on `d0aa0ca`, the merge of pull
   request #16 (IPO Watch's "Show all" button, §5). Before it: `v1.13` / `v2.14` on `71230ec`
   (pull request #15, the QA pass, §8). The two numbers differ because `v2.13` was
@@ -99,6 +100,15 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   did before, except that 18 listed names are now matched more strictly for anyone who
   holds one (nobody does). The branch holds `ipo-ask`'s two commits too, so one pull
   request from it would carry all three pieces of work.
+- **A third local branch, `ask-tools`, not pushed** *(2026-10-11)*, branched from
+  `listed-news` at `f7bc04d`: the first slice of plan step P4, the snapshot of a stock the
+  user does not hold, as commit `ee7b582`, then a commit of the documents. New:
+  `server/services/stockSnapshot.js`, `test/stockSnapshot.test.js`. Changed:
+  `services/qaTools.js` (the tool `get_stock_snapshot`), `services/qa.js` (the pre-check and
+  one line of the prompt), `services/dataTools.js` (`ASK_ONLY`), `config.js` (two `QA.SNAPSHOT_*`
+  limits), `eval/ask/cases.json` (36 cases), `eval/ask/lib.js`, `test/mcp.test.js`,
+  `package.json`. With it `npm test` passes: 30 files, 734 checks. **No real model has
+  called the new tool, and the page has not been opened with the change.**
 - **The local engine changed with the QA pass** *(2026-10-10)*: three files in `strategy-service/`
   (gitignored, so not in any commit): `service/signal_runner.py`, `engine/data/base.py`,
   `engine/analytics/walk_forward.py`, plus `tests/test_qa_fixes.py`. The files as they were
@@ -172,7 +182,10 @@ The whole eval (P5) still needs his word, and so do a push, a pull request and a
   so coverage has not started; and the names that are another company's (§10) have no fix.
 - **P4. Ask features on the data that exists:** the price-and-sentiment snapshot for a stock
   the user does not hold; price history; then the fund, politician, Indian investor, alerts
-  and brief tools.
+  and brief tools. **Slice 1, the snapshot, is built** (2026-10-11, commit `ee7b582` on
+  `ask-tools`; §10). Annas asked to check in after each slice, said each slice may be
+  committed locally once its tests pass, and said no paid run before P5. **Not started:**
+  price history and the page tools.
 - **P5. The whole Ask eval on Haiku 4.5.** It shows whether the extra tools confuse the
   model, and settles whether to move Ask to Sonnet 5.5.
 - **P6. US coverage,** last: the largest change in volume, and by then P3 will have shown
@@ -695,6 +708,12 @@ All the write scripts are dry runs without their flag.
   dated the premium each time it quoted one; it did not stay within the length, and it
   did not always say the calendar was stale. One run each is not a rate. The page has not
   been opened with the change: the new "Upcoming IPOs" chip is unseen in a browser.
+- **The snapshot with a real model, and on the page.** The code-written answer was run
+  through `answerQuestion` for the eval account on three questions (2026-10-11: no row
+  added to `claude_calls`, the day's question count unchanged), and the tool was called
+  directly for six names against live prices. No model has chosen `get_stock_snapshot`,
+  and the Ask page has not been opened with the change. Three eval cases wait for P5:
+  `scope-05` (rewritten), `scope-06`, `scope-07`.
 - **`INDIA_LISTED_NEWS` in a running pipeline.** The switch has been measured on the
   stored stories and tested offline (§10); it has never been on while the pipeline ran.
 - The Ollama fallbacks against a real local model.
@@ -1127,8 +1146,17 @@ machine before the date fix that day had lookahead; do not reuse older figures.
   BSE shares to subscribe to NSE?", which is about the company. Of 30 other matches picked at random, 27 were right; the three
   misses were `ROG` on "John Rogers", `CME` on "CME feeder cattle", and `VEDL` on "Vedanta
   Iron Steel", which is another company.
-- **Ask refuses a stock the user does not hold**, with a fixed line and no model call, even
-  where the app has its price and its sentiment (plan step P4 changes this).
+- **Ask used to refuse a stock the user does not hold**, with a fixed line and no model call,
+  even where the app has its price and its sentiment. On the branch `ask-tools` (2026-10-11)
+  it answers with that price and sentiment reading instead; news detail, smart money and
+  impact are still for holdings only.
+- **The snapshot answer does not decline advice in words.** "Should I buy Hero MotoCorp?"
+  gets the price and the reading and nothing about not advising; it gives no advice either.
+- **A typed name is looked up as the Add Asset search does**, by ticker prefix or a piece of
+  the name, plus an exact alias. "Tata" fits many and the tool hands back five to choose
+  from; a company outside the reference (Shopify) is "not found". A commodity question
+  ("what is driving gold?") is still a market question and does not get a snapshot from
+  the pre-check.
 
 ### News retention
 - **Deleting does not shrink the table file.** Postgres reuses the freed space for new
@@ -1286,7 +1314,21 @@ hand-labelled sheets of (story, company) pairs (§8).
   and `INFY`; an Acutaas and Mankind story loses `DRREDDY` and `CIPLA`). Those 368 are the
   stories that would move to the 180-day class. Not done: the switch has never been on in
   a running pipeline, and stored stories are not re-tagged by it (new stories only).
-- **P4, snapshot** (decided: both parts). *Part 1:* for a question only about a curated
+- **P4, snapshot: built 2026-10-11** (commit `ee7b582` on `ask-tools`;
+  `services/stockSnapshot.js`). Both parts as decided below. The tool is
+  `get_stock_snapshot`, takes a name or a ticker, and is Ask only (`ASK_ONLY` in
+  `dataTools.js`; a test fails if an Ask tool is neither in the public catalog nor named
+  there). It already covers every name in the reference, not only the 218: a listed name
+  gets its price, and for sentiment "not tracked yet" unless it has stories. The
+  code-written answer covers up to three names and names the rest as not shown. If the
+  price or the reading cannot be fetched the answer says so; if the snapshot itself fails
+  the old fixed line is the answer. The eval's "no data for a stock outside the portfolio"
+  check now lets a snapshot result through and nothing else. Seen on the dev database:
+  Hero MotoCorp ₹4,895.50, up 0.80%, neutral at 0.50 from 2 stories; Tesla and Microsoft
+  each with a z-score; AMD with a price and "no reading" (no stories in 72 hours); Suzlon
+  with a price and "not tracked yet"; "Google" resolved to `GOOGL` by its alias.
+  The plan as decided:
+  (decided: both parts). *Part 1:* for a question only about a curated
   name the user does not hold, the fixed refusal becomes a snapshot written by code: price,
   day change, sentiment label and score, and the number of stories behind it. No model
   call, no question used. *Part 2:* the same snapshot as a tool for the model, for a
