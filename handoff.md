@@ -100,9 +100,7 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 00. **Review `v1-qa-fixes`, push it and open the pull request** (Annas merges; both sides
    changed, so the tags would be `v1.13` / `v2.14`). Every finding of the QA pass is closed
-   on this branch (§8); what is left is listed in §10 as known limits. When a Claude call is
-   next allowed, **one more daily brief** would show the last change to its prompt, made
-   after the one brief that was run (§8, "Third round").
+   on this branch (§8); what is left is listed in §10 as known limits.
 0. **IPO Watch: let it run.** `IPO_WATCH=1` is in the local `.env` since 2026-10-09. The 09:15
    IST poll has not yet fired on its own, and the GMP trend, the 1-week and later returns and
    graduation have only been seen on their first day. The "+ Portfolio" button has not been
@@ -499,6 +497,16 @@ All the write scripts are dry runs without their flag.
   - In the browser: that account's Paper Trade page; a card that said "The strategy engine
     is offline" filled in on the next visit once the engine was back, with no reload; the
     deploy form's own messages; Your Strategies showing a strategy saved through the API.
+- **2026-10-10, before the release** (a second throwaway copy, since dropped):
+  - **One more Claude call, $0.0035, with Annas's go-ahead**: a daily brief for the demo
+    account's holdings, after the fixes of the third round. Claude again put HEADLINE on a
+    line of its own and it was read as the marker ("TCS hit by H-1B crackdown and earnings
+    risks, broader FII selloff spreads", 12 words). No engine score, no money amount, and
+    every percentage given as a share of the portfolio.
+  - **v1 mode** (strategies off, Claude and email off): every strategies route answered 404
+    and its pages were absent from the menu; Dashboard, Portfolio, Intelligence, Analytics
+    and AI Workspace loaded with no console error; a holding was added; the code-written
+    brief and Ask's code-written answer came back for a Pro account.
 
 **Never run for real:**
 - Any hosting. Scheduled reports and the India poll only run while the app happens to be up.
@@ -749,8 +757,8 @@ calls and the clean-up. What changed in behaviour:
   the reply put the word HEADLINE on its own line, which the parser took for the first
   sentence, and it turned "25.9% of your portfolio" into "your $25.9B Apple and Bitcoin
   stakes". The prompt now says a share is never money and asks for no figures in the
-  headline. The parser and the guard are tested against that reply; **the prompt change has
-  not been seen in a new reply.**
+  headline. The parser and the guard are tested against that reply, and a second brief, run
+  before the release, came back with the headline read correctly and no money figure (§7).
 
 **The "engine's clock" finding does not reproduce.** The first round recorded that a paper
 deployment's last fill would be stored twice if the engine ran on a host in another time
@@ -993,8 +1001,10 @@ that remain, none of them a defect waiting for a fix:
   database has none.
 - The code-written brief and Ask's code-written answer still say "(impact 0.17)".
 - The body of a Claude-written brief is not checked against the packet the way an Ask
-  answer is; the one brief run on 2026-10-10 tied a market-wide figure from a story's title
-  to the reader's own position. The prompt now says not to; only the headline has a guard.
+  answer is. Of the two briefs run on 2026-10-10, the first tied a market-wide figure from a
+  story's title to the reader's own position (the prompt now says not to; the second did
+  not), and the second closed on a mild forecast ("suggests near-term volatility"). Only the
+  headline has a guard.
 
 **Build queue, roughly by value**
 1. Ask precision: measure the tool changes; try another answer model for the eval only; stop
