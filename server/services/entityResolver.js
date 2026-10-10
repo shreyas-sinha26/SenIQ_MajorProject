@@ -209,8 +209,70 @@ function setIpoTier(rows) {
   }));
 }
 const edge = (s) => `(?<![A-Za-z0-9])${escapeRegex(s)}(?![A-Za-z0-9])`;
+// A name of several words, as a headline writes it: "and" may be "&", and the feeds often
+// drop the "&" altogether ("Vedanta Iron and Steel", "Vedanta Iron & Steel", "Vedanta Iron Steel").
+// An initial is written with its full stop and space or without either ("D. R. Horton",
+// "D.R. Horton", "DR Horton"; "J.K. Cement", "JK Cement").
+const edgeWords = (s) => `(?<![A-Za-z0-9])${escapeRegex(s).replace(/\s+(?:and|&)\s+/gi, '(?:\\s+(?:and|&))?\\s+').replace(/(?<![A-Za-z])([A-Z])\\\.\s*/g, '$1\\.?\\s*')}(?![A-Za-z0-9])`;
+
+// ─── A listed name that is also someone else's ───────────────
+// Found by reading every listed-name match on the stored stories (2026-10-11).
+// A second listed share class of a company the curated universe already has: it is the same
+// company, so it is tagged whenever that company is.
+const SAME_COMPANY = { GOOG: 'GOOGL' };
+// A listed company whose name a curated company already answers to is a different company
+// with the same name: "Reliance shares" in the news is Reliance Industries, not Reliance, Inc.
+// (the US steel company). It is matched by its symbol only.
+let curatedNames = null;
+function isCuratedName(core) {
+  if (!curatedNames) curatedNames = new Set(UNIVERSE.flatMap((x) => [x.name, ...(x.aliases || [])]).map((n) => String(n).toLowerCase()));
+  return curatedNames.has(String(core).toLowerCase());
+}
+// A US company's name followed by "India" is its Indian arm or an unrelated Indian company,
+// listed on its own: "Colgate-Palmolive (India) Ltd", "PTC India", "Cummins India".
+const INDIAN_NAMESAKE = /^\s*(?:\(\s*)?(?:of\s+)?India\b/;
+// A listed company named for the part it plays in someone else's story is not the story's
+// subject. Three parts, each found on the stored stories (2026-10-11):
+//   the source of a view   "A Bank of Baroda analysis finds no single dominant driver"
+//   a speaker's employer   "Harish Krishnan, CIO – Equity, Aditya Birla Sun Life AMC, discusses…"
+//   an issue's registrar   "Kfin Technologies is the CSM Technologies IPO registrar", a line
+//                          that comes back with every Indian IPO
+const SOURCE_BEFORE = /\b(?:according to|as per)\s+(?:an?\s+|the\s+)?$/i;
+const SOURCE_AFTER = /^(?:\s+(?:Ltd|Limited)\b\.?)?(?:['’]s)?\s+(?:analysis|research|study|note|survey|report(?![a-z])(?!\s+card)|economists?|analysts?(?!\s+(?:meet|day|call))|strategists?)\b/i;
+// The people who speak about the market, not about their own company: a chief executive
+// quoted on his company is that company's story.
+const ROLE = '(?:CIO|chief\\s+(?:investment\\s+officer|economist|strategist)|(?:fund|portfolio)\\s+manager|head(?:\\s+of)?\\s+(?:research|equit(?:y|ies)|investments?|fixed\\s+income|strategy|products)|analyst|strategist|economist|researcher)';
+const EMPLOYER_BEFORE = new RegExp(`\\b${ROLE}(?:\\s*[–—-]\\s*[A-Za-z& ]{1,30}?)?\\s*(?:,|\\bat\\b|\\bof\\b|\\bwith\\b)\\s+$`, 'i');
+const EMPLOYER_AFTER = /^(?:\s+(?:Ltd|Limited)\b\.?)?,?\s+(?:discuss(?:es|ed)|says?|said|tells?|told|talks?|shares?|shared|explain(?:s|ed)|believes?|expects?|feels?|sees|speaks?|spoke|decodes?|weighs)\b/i;
+const REGISTRAR = "(?:registrars?|(?:book[- ]running\\s+)?lead\\s+managers?|merchant\\s+bankers?)";
+// "X is the … registrar", "X as registrar", "X, the registrar to the issue".
+const REGISTRAR_AFTER = new RegExp(`^(?:\\s+(?:Ltd|Limited)\\b\\.?)?(?:,\\s+(?:the|an?)|\\s+(?:is|are|was|will be|as)(?:\\s+(?:the|an?))?)\\s+(?:[A-Za-z0-9&.'’-]+\\s+){0,6}?${REGISTRAR}\\b`, 'i');
+const REGISTRAR_BEFORE = new RegExp(`\\b${REGISTRAR}(?:\\s+(?:of|to|for)\\s+(?:the\\s+)?(?:[A-Za-z0-9&.'’-]+\\s+){0,4}?(?:issue|ipo|offer))?\\s*(?:,|:|[–—-]|\\bis\\b|\\bare\\b)\\s*$`, 'i');
+// Whether the name at [s, e) of `text` is there in one of those parts. Pure.
+function playsAPart(text, s, e) {
+  const before = text.slice(Math.max(0, s - 120), s);
+  const after = text.slice(e, e + 120);
+  return SOURCE_AFTER.test(after) || (SOURCE_BEFORE.test(before) && !/^['’]s/.test(after))
+    || (EMPLOYER_BEFORE.test(before) && EMPLOYER_AFTER.test(after))
+    || REGISTRAR_AFTER.test(after) || REGISTRAR_BEFORE.test(before);
+}
 // Words that show a capitalised word is being used as a company's name.
 const COMPANY_CUE = "(?:['’]s\\b|\\s+(?:Inc|Corp|Corporation|Co|Ltd|Limited|Holdings|Group|shares?|stock|stocks)\\b)";
+// Listed names that a headline mostly uses for something else. Each counts only beside a word
+// that makes it the company ("BSE shares", "CME Group", "JM Financial Ltd", "shares of
+// Jefferies"), and a possessive is not one: the other uses take it too ("BSE's Sensex",
+// "MSCI's broadest index", "GIFT City's", "People's Bank of China"). Found by running this
+// matcher for every listed name over the stored stories and reading the matches (2026-10-10
+// and -11). The cost: a story about one of them that names it bare ("JM Financial among top
+// losers") is not tagged.
+const LISTED_NEEDS_CUE = new Set([
+  // a quarter, an exchange or its index, a word, a place, a person, a fund's name
+  'QTWO', 'BSE', 'NDAQ', 'CME', 'MSCI', 'STT', 'ROG', 'ATUL', 'CHCO', 'PPLI', 'XYZ',
+  // a broker or a rating agency, named for its view of another company
+  'JEF', 'MCO', 'EVR', 'JMFINANCIL', 'CRISIL', 'NUVAMA', 'ANGELONE',
+]);
+// "stock" is not a cue in front of what a market has ("Nasdaq stock futures", "BSE stock exchange").
+const STRICT_CUE = '\\s+(?:Inc|Corp|Corporation|Co|Ltd|Limited|Holdings?|Group|[Ss]hares?|[Ss]tock(?!\\s+(?:[Mm]arkets?|[Ee]xchanges?|[Ff]utures|[Ii]nd(?:ex|ices)|[Pp]icks?|[Ii]deas?)\\b))\\b';
 
 /**
  * Whether a text names a held company that is not in the curated universe. Pure.
@@ -221,28 +283,55 @@ const COMPANY_CUE = "(?:['’]s\\b|\\s+(?:Inc|Corp|Corporation|Co|Ltd|Limited|Ho
  *   name   — the name without its corporate tail ("Thor Industries"), as whole words and
  *            with its capitals. A one-word name that is also an ordinary word ("Gap",
  *            "Block") counts only beside a company cue ("Gap Inc", "Gap shares").
+ *            A name in LISTED_NEEDS_CUE needs a cue however it is written (name or bare
+ *            symbol, one word or several), and the possessive is not one.
  * `holding` = { ticker, name? }: for a listed ticker the name comes from listed.json.
  */
-function namesHolding(holding, text) {
+function namesHolding(holding, text, title = null) {
   const sym = String(holding.ticker).toUpperCase();
   const listed = LISTED_BY_TICKER.get(sym) || IPO_TIER.get(sym);
+  const strict = !!listed && LISTED_NEEDS_CUE.has(sym);
   if (new RegExp(`(?:\\b(?:NYSE|NASDAQ|Nasdaq|NSE|BSE|AMEX)\\s*:\\s*|\\$)${escapeRegex(sym)}(?![A-Za-z0-9])`).test(text)) return true;
-  const bareFrom = !listed ? 1 : listed.country === 'IN' ? 4 : 5;
+  const bare = sym.length >= (!listed ? 1 : listed.country === 'IN' ? 4 : 5);
   // `brand`: an Indian symbol that is the name headlines use, in any capitals ("Paytm").
-  if (sym.length >= bareFrom && new RegExp(edge(sym), listed && listed.brand ? 'i' : '').test(text)) return true;
+  const part = (m) => playsAPart(text, m.index, m.index + m[0].length);
+  if (bare && !strict && [...text.matchAll(new RegExp(edge(sym), listed && listed.brand ? 'gi' : 'g'))].some((m) => !part(m))) return true;
   const core = listed ? listed.core : String(holding.name || '').trim();
   if (core.length < (listed ? 2 : 4)) return false;
+  if (listed && isCuratedName(core)) return false;
+  const open = '(?<![A-Za-z0-9])';
+  const close = '(?![A-Za-z0-9])';
+  const cued = (forms, cue) => new RegExp(`${open}(${forms})${cue}|\\b(?:[Ss]hares|[Ss]tock) of (${forms})${close}`, 'g');
   let re;
+  // Every way the name is written: the name and, where a bare symbol counts, the symbol (a
+  // brand also as headlines write it, "Nuvama", "Crisil").
+  if (strict) re = cued([...new Set([core, ...(bare ? [sym, ...(listed.brand ? [sym[0] + sym.slice(1).toLowerCase()] : [])] : [])])].map(escapeRegex).join('|'), STRICT_CUE);
   // Several words: as written, capitals included — "Preferred Bank" is the company, "the
   // preferred bank for exporters" is not. A holding we know only by a typed name is looser.
-  if (/\s/.test(core)) re = new RegExp(edge(core), listed ? 'g' : 'gi');
-  else if (listed && listed.plain) re = new RegExp(`${edge(core).slice(0, -'(?![A-Za-z0-9])'.length)}${COMPANY_CUE}|\\b(?:shares|stock) of ${escapeRegex(core)}(?![A-Za-z0-9])`, 'g');
+  else if (/\s/.test(core)) re = new RegExp(edgeWords(core), listed ? 'g' : 'gi');
+  else if (listed && listed.plain) re = cued(escapeRegex(core), COMPANY_CUE);
   else re = new RegExp(edge(core), 'g');
   // The name inside a longer company's name is that other company: "Bank of India" in
   // "Union Bank of India", "Tata Motors" in "Tata Motors Passenger Vehicles".
   const longer = longerNames(core);
   const lower = text.toLowerCase();
+  // A headline about a company with a longer name is about that company: "Vedanta Aluminium up
+  // 4%" is not Vedanta, though the summary goes on to say what it was demerged from.
+  if (title && longer.length) {
+    const head = String(title).toLowerCase();
+    const c = core.toLowerCase();
+    const inLonger = (i) => longer.some((name) => {
+      for (let k = head.indexOf(name); k !== -1; k = head.indexOf(name, k + 1)) if (k <= i && i + c.length <= k + name.length) return true;
+      return false;
+    });
+    const spots = [];
+    for (let i = head.indexOf(c); i !== -1; i = head.indexOf(c, i + 1)) spots.push(i);
+    if (spots.length && spots.every(inLonger)) return false;
+  }
+  const us = !!listed && listed.country === 'US';
   for (const m of text.matchAll(re)) {
+    if (us && INDIAN_NAMESAKE.test(text.slice(m.index + m[0].length))) continue;
+    if (part(m)) continue;
     const inside = longer.some((name) => {
       for (let i = lower.indexOf(name); i !== -1; i = lower.indexOf(name, i + 1)) {
         if (i <= m.index && m.index + m[0].length <= i + name.length + 2) return true;
@@ -254,8 +343,24 @@ function namesHolding(holding, text) {
   return false;
 }
 
+// A US share outside the curated universe: the listed tier, or a graduated US issue. It is
+// tagged only on a story fetched from its own ticker's company news, when the caller says
+// which feeds a story came from: a general feed that writes "Colgate-Palmolive shares" or
+// "Cummins" is as likely writing about the Indian company, or naming the US one in passing.
+function isUsListed(ticker) {
+  const sym = String(ticker).toUpperCase();
+  const listed = LISTED_BY_TICKER.get(sym) || IPO_TIER.get(sym);
+  return !!listed && listed.country === 'US';
+}
+
+// The Indian listed names, as the `extra` list the resolver takes: with INDIA_LISTED_NEWS on
+// the pipeline matches them in the news whether anyone holds them or not.
+const indianListed = () => LISTED.filter((c) => c.country === 'IN').map((c) => ({ ticker: c.ticker, name: c.name }));
+
 // Names that are not companies we hold a row for, but contain one's name.
-const OTHER_NAMES = ['reserve bank of india', 'export-import bank of india', 'securities and exchange board of india', 'south indian bank'];
+const OTHER_NAMES = ['reserve bank of india', 'export-import bank of india', 'securities and exchange board of india', 'south indian bank',
+  // Vedanta's demerged companies, as headlines shorten them ("Vedanta Iron Steel", "Vedanta Aluminium", "Vedanta Oil Gas").
+  'vedanta aluminium', 'vedanta iron', 'vedanta oil'];
 let knownNames = null;
 const longerCache = new Map();
 // Every known name (lower-case) that strictly contains this one.
@@ -401,9 +506,11 @@ function buildResolver(companies, executives) {
   // those are the subject, and a name that appears only later in the summary is a passing
   // mention (feed boilerplate such as "...and the latest from Apple") — it is left out. A
   // headline that names no one falls back to the whole summary.
-  function resolve(title = '', summary = '', extra = []) {
-    const full = matchAll(title, summary, extra);
-    const head = matchAll(title, '', extra, `${title} ${summary}`);
+  // `feeds`: the tickers whose company news the story was fetched from, or null when that is
+  // not known. Given, a US listed name in `extra` counts only if its own ticker is among them.
+  function resolve(title = '', summary = '', extra = [], feeds = null) {
+    const full = matchAll(title, summary, extra, null, feeds);
+    const head = matchAll(title, '', extra, `${title} ${summary}`, feeds);
     if (!head.tickers.length) return full;
     // The summary's opening sentence usually restates the subject in full ("Strategy Inc.
     // added 334 bitcoin…"), so a company named there still counts; later sentences do not.
@@ -415,7 +522,8 @@ function buildResolver(companies, executives) {
 
   // `context`: the text searched for crypto talk — the whole story, even when only the
   // headline is being matched.
-  function matchAll(title = '', summary = '', extra = [], context = null) {
+  function matchAll(title = '', summary = '', extra = [], context = null, feeds = null) {
+    const fromFeed = feeds && new Set(feeds);
     const original = `${title} ${summary}`;
     const lower = original.toLowerCase();
     const tickers = companiesIn(original);
@@ -448,7 +556,8 @@ function buildResolver(companies, executives) {
     for (const e of extra) {
       const t = typeof e === 'string' ? { ticker: e } : e;
       if (!t.ticker || tickers.has(t.ticker) || symbolByTicker.has(t.ticker)) continue;
-      if (namesHolding(t, original)) tickers.add(t.ticker);
+      if (fromFeed && !SAME_COMPANY[t.ticker] && isUsListed(t.ticker) && !fromFeed.has(t.ticker)) continue;
+      if (SAME_COMPANY[t.ticker] ? tickers.has(SAME_COMPANY[t.ticker]) : namesHolding(t, original, title)) tickers.add(t.ticker);
     }
     // Explicit sector themes.
     for (const { re, sector } of sectorThemeRe) {
@@ -490,9 +599,9 @@ async function loadIndex(force = false) {
   return _resolver;
 }
 
-async function resolve(title, summary, extra = []) {
+async function resolve(title, summary, extra = [], feeds = null) {
   const r = await loadIndex();
-  return r.resolve(title, summary, extra);
+  return r.resolve(title, summary, extra, feeds);
 }
 
 // Idempotent seed of the curated universe (called on boot, after migrations).
@@ -555,4 +664,4 @@ async function seedUniverse() {
   console.log(`   🏷️  universe seeded: ${n.c} companies, ${executives.length} executives; ${n.l} more listed`);
 }
 
-module.exports = { buildResolver, namesHolding, coreName, setIpoTier, resolve, loadIndex, seedUniverse, universeRows, SECTOR_THEMES, AMBIGUOUS, AMBIGUOUS_SYMBOLS, OTHER_VENTURES };
+module.exports = { buildResolver, namesHolding, indianListed, isUsListed, LISTED_NEEDS_CUE, SAME_COMPANY, coreName, setIpoTier, resolve, loadIndex, seedUniverse, universeRows, SECTOR_THEMES, AMBIGUOUS, AMBIGUOUS_SYMBOLS, OTHER_VENTURES };

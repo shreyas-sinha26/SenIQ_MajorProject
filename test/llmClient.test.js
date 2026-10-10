@@ -33,7 +33,7 @@ const TOOLS = [{ name: 'get_news', description: 'News for a ticker', input_schem
       system: [{ type: 'text', text: 'You are an analyst.', cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: 'Hi' }], tools: TOOLS, tool_choice: { type: 'auto' },
     });
-    assert.strictEqual(body.model, 'anthropic/claude-haiku-4.5');
+    assert.strictEqual(body.model, 'anthropic/claude-haiku-5.5');   // the router's model, whatever the caller named
     assert.strictEqual(body.max_tokens, 500);
     assert.deepStrictEqual(body.messages, [{ role: 'system', content: 'You are an analyst.' }, { role: 'user', content: 'Hi' }]);
     assert.deepStrictEqual(body.tools, [{ type: 'function', function: { name: 'get_news', description: 'News for a ticker', parameters: TOOLS[0].input_schema } }]);
@@ -82,8 +82,13 @@ const TOOLS = [{ name: 'get_news', description: 'News for a ticker', input_schem
   });
   await check('the charge the router reports is what gets logged; without one it is estimated', () => {
     assert.strictEqual(estimateCost({ input: 1e6, output: 1e6, cost_usd: 0.0123 }), 0.0123);
-    assert.strictEqual(estimateCost({ input: 1e6, output: 1e6, cost_usd: 0 }), 6);
-    assert.strictEqual(estimateCost({ input: 1e6, output: 0 }), 1);
+    // With no cost in the reply: Claude Haiku 5.5's price, $0.10 in and $0.50 out a million tokens.
+    assert.ok(Math.abs(estimateCost({ input: 1e6, output: 1e6, cost_usd: 0 }) - 0.6) < 1e-9);
+    assert.ok(Math.abs(estimateCost({ input: 1e6, output: 0 }) - 0.1) < 1e-9);
+    // One model for every caller (decided 2026-10-11), each with room for its thinking.
+    const C = require('../server/config');
+    assert.deepStrictEqual([C.REPORTS.MODEL, C.QA.MODEL, C.ALERT_NARRATIVE.MODEL, C.TARGETED.LLM.MODEL], Array(4).fill('claude-haiku-5-5'));
+    assert.ok([C.REPORTS.MAX_OUTPUT_TOKENS, C.REPORTS.CARDS.MAX_OUTPUT_TOKENS, C.QA.MAX_OUTPUT_TOKENS, C.ALERT_NARRATIVE.MAX_OUTPUT_TOKENS, C.TARGETED.LLM.MAX_OUTPUT_TOKENS].every((n) => n >= 1500));
   });
 
   console.log('through the router:');
@@ -132,6 +137,8 @@ const TOOLS = [{ name: 'get_news', description: 'News for a ticker', input_schem
   });
   await check('the prompt sets a hard length and forbids markdown', () => {
     assert.ok(/at most 6 sentences/.test(SYSTEM_PROMPT) && /No markdown of any kind/.test(SYSTEM_PROMPT));
+    // The rules the 2026-10-11 eval showed were needed: no arithmetic, advice declined first, lists capped.
+    assert.ok(/Do no arithmetic of your own/.test(SYSTEM_PROMPT) && /the FIRST sentence says that SenIQ does not give advice or predictions/.test(SYSTEM_PROMPT) && /give at most five/.test(SYSTEM_PROMPT));
   });
   await check('an everyday word is not a ticker: "near-term" is not NEAR, "the cost" is not COST', () => {
     const universe = [{ ticker: 'NEAR', name: 'NEAR Protocol' }, { ticker: 'COST', name: 'Costco' }, { ticker: 'NVDA', name: 'Nvidia' }, { ticker: 'LINK', name: 'Chainlink' }];

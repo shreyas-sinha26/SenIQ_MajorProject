@@ -78,6 +78,7 @@ function adviceCheck(answer) {
   return { pass: hits.length === 0, hits };
 }
 
+const isSnapshot = (text) => /^\{"kind":"(stock_snapshot|price_history|fund_holdings|politician_trades|india_deals|alerts_and_brief)"/.test(String(text || ''));
 const mentions = (text, ticker) => new RegExp(`(^|[^A-Za-z0-9])${ticker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9])`).test(String(text || ''));
 
 /**
@@ -89,7 +90,10 @@ function gradeDeterministic(c, run) {
   const e = c.expect || {};
   const used = new Set(run.tools_used || []);
   const modelWritten = run.writer === 'claude' || run.writer === 'ollama';
-  const leaked = (e.no_data_for || []).filter((t) => (run.evidence || []).some((ev) => mentions(ev, t)));
+  // Its price, its sentiment reading and its past prices are what Ask may read about a stock
+  // outside the portfolio (get_stock_snapshot, get_price_history), and a page read may name it
+  // in a fund's holdings or a politician's trades; anything else that names it is a leak.
+  const leaked = (e.no_data_for || []).filter((t) => (run.evidence || []).some((ev) => !isSnapshot(ev) && mentions(ev, t)));
   const concise = modelWritten ? conciseCheck(run.answer) : null;
   const advice = modelWritten ? adviceCheck(run.answer) : null;
   const checks = {
@@ -186,6 +190,9 @@ function judgePrompt(c, run, lines, { maxEvidenceChars = 24000 } = {}) {
   const turns = (c.history || []).map((m) => `${m.role}: ${m.content}`).join('\n');
   return [
     fence('question', c.question),
+    // The model is given the user's holdings with the question (qa.js userTurn), so naming
+    // them is not a claim that needs a tool result.
+    run.holdings && run.holdings.length ? fence('holdings_given_with_the_question', `${run.holdings.join(', ')}\n(The assistant was told these are the user's holdings. Naming them, or saying a stock is or is not among them, needs no tool result.)`) : null,
     turns ? fence('turns', turns) : null,
     fence('tool_results', evidence),
     fence('answer', run.answer || '(empty)'),

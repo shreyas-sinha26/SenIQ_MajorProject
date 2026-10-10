@@ -24,7 +24,7 @@ return 404 and the v2 pages are hidden.
 | **v2** | v1 + Strategy Builder, Your Strategies, Backtest, Paper Trade, MCP server, public REST API (`/v1`), API keys |
 
 Releases are tagged in pairs on the same commit: `v1.N` is that commit run with strategies
-off, `v2.N` with them on. The latest is `v1.14` / `v2.15`: IPO Watch opens an issue's news on its latest five stories, with a button to show them all. Before it, `v1.13` / `v2.14` was a round of fixes to both sides with no new feature. The numbers differ because `v2.13` (the paper ledger) was strategies-only work and took no v1 tag.
+off, `v2.N` with them on. The latest is `v1.15` / `v2.16`: Ask reads IPO Watch, answers on a stock you do not hold and reads the app's other pages; news for the listed names nobody holds in India and the US, and news retention, each behind a switch that is off; and one model for every Claude call, Claude Haiku 5.5. Before it, `v1.14` / `v2.15` opened an issue's news in IPO Watch on its latest five stories, and `v1.13` / `v2.14` was a round of fixes to both sides with no new feature. The numbers differ because `v2.13` (the paper ledger) was strategies-only work and took no v1 tag.
 
 ---
 
@@ -62,6 +62,11 @@ off, `v2.N` with them on. The latest is `v1.14` / `v2.15`: IPO Watch opens an is
 - **Sentiment per ticker** — computed on read: an acute score over 24–72 hours with a 7-day
   half-life, momentum (this week against last), and a z-score against the ticker's own
   90-day normal. Sources are weighted by credibility.
+- **Retention** (optional, `RETENTION=1`) — old stories are archived to a compressed file and
+  then removed: irrelevant ones after 30 days, the rest after 180. What a strategy's
+  sentiment factors need from a removed story stays, per ticker per day, so backtests read
+  the same history before and after. `node scripts/retention.js` shows what a run would
+  remove without removing it.
 
 ### Impact, alerts and outcomes
 - **Portfolio impact** — for each holding,
@@ -86,7 +91,12 @@ off, `v2.N` with them on. The latest is `v1.14` / `v2.15`: IPO Watch opens an is
   grounded only in the user's own holdings.
 - **Ask** — a tool-calling agent with saved conversations. It answers about the user's
   holdings, market news and general finance education, and each answer is checked against
-  its evidence.
+  its evidence. For a stock outside the portfolio it gives the price, the sentiment
+  reading and what the price did over the past year, and nothing more. It also reads what
+  the Institutions and Congress pages show (a fund's holdings, a politician's trades,
+  Indian deals) and the user's own alerts and daily brief. With IPO Watch on it also answers about the issues on that calendar: it
+  compares them on recorded figures (subscription, grey market premium, news tone) and never
+  names one as the better buy.
 - Both use Claude Haiku and fall back to code-written text when the model is off or fails.
   Nothing calls a paid model unless `CLAUDE_REPORTS=1`; there are per-user daily quotas, a
   global daily spend ceiling, and a log of every call with its cost.
@@ -171,6 +181,8 @@ gracefully; `.env.example` documents every variable. The main ones:
 | `COMPANY_SENTIMENT_LLM` | `ollama` or `1`: a language model reads multi-company clauses | FinBERT's per-company reading |
 | `CLAUDE_REPORTS=1` + `ANTHROPIC_API_KEY` or `AIROUTER_API_KEY` | Claude writes the brief, Ask answers and alert explanations | Code-written text |
 | `INDIA_SMART_MONEY=1` + `NSE_USER_AGENT` | India deals and insider trades | US smart money only |
+| `INDIA_LISTED_NEWS=1` | News is matched for the Indian listed names nobody holds (nothing more is fetched) | Listed names are matched only while someone holds them |
+| `US_LISTED_NEWS=1` + `FINNHUB_API_KEY` | Company news is fetched for the US shares nobody holds, 30 names a run in rotation | Only held tickers get a company-news fetch |
 | `CONGRESS_TRADES_URL` | Live congressional trades | Bundled sample data |
 | `SEC_USER_AGENT` | Contact address for SEC EDGAR requests | Default user agent |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | "Sign in with Google" (callback `<APP_URL>/api/auth/oauth/google/callback`) | Button hidden |

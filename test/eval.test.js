@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const lib = require('../eval/ask/lib');
 const { TOOLS } = require('../server/services/qaTools');
+const { IPO_TOOLS } = require('../server/services/ipoTools');
 
 let passed = 0;
 function check(name, fn) {
@@ -15,7 +16,7 @@ function check(name, fn) {
 }
 
 const doc = JSON.parse(fs.readFileSync(path.join(__dirname, '../eval/ask/cases.json'), 'utf8'));
-const toolNames = TOOLS.map((t) => t.name);
+const toolNames = [...TOOLS, ...IPO_TOOLS].map((t) => t.name);
 const CASE = { id: 'x-01', tags: ['t'], question: 'Why is my portfolio down?', rubric: ['states the move'], expect: { writer: 'claude', tools_any: ['get_attribution'], no_data_for: ['TSLA'] } };
 const GOOD = { writer: 'claude', answer: 'Your holdings moved -0.8% today. AAPL was the largest drag.', tools_used: ['get_attribution'], grounding: { grounded: true, unsupported: [] }, evidence: ['{"ticker":"AAPL"}'] };
 
@@ -91,6 +92,10 @@ check('prompt fences every untrusted part and clamps huge evidence', () => {
   for (const tag of ['<question>', '<turns>', '<tool_results>', '<answer>', '<rubric>']) assert.ok(p.includes(tag), tag);
   assert.ok(p.includes('[truncated for the grader]') && p.length < 30000);
   assert.ok(lib.judgePrompt(CASE, { answer: '', evidence: [] }, lines).includes('(empty)'));
+  // The judge is told the holdings the model is told, so naming them is not marked ungrounded.
+  const withHoldings = lib.judgePrompt(CASE, { ...GOOD, holdings: ['AAPL', 'NVDA'] }, lines);
+  assert.ok(/<holdings_given_with_the_question>\nAAPL, NVDA\n/.test(withHoldings) && /needs no tool result/.test(withHoldings));
+  assert.ok(!lib.judgePrompt(CASE, GOOD, lines).includes('holdings_given_with_the_question'));
 });
 check('schema pins the ids and verdict values', () => {
   const s = lib.judgeSchema(['g1', 'c1']);

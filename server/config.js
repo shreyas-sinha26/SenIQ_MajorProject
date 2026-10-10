@@ -92,9 +92,19 @@ const FEATURES = {
   // India side of those tabs: NSE bulk/block deals + insider trades. Opt-in
   // (INDIA_SMART_MONEY=1): the NSE routes are unofficial and their terms are unchecked.
   INDIA_SMART_MONEY: process.env.INDIA_SMART_MONEY === '1',
+  // News matching for the Indian listed names nobody holds (the Nifty 500 names outside the
+  // curated universe). Nothing more is fetched: their stories already arrive from the Indian
+  // outlets, and with this on the pipeline tags them. Off unless INDIA_LISTED_NEWS=1.
+  INDIA_LISTED_NEWS: process.env.INDIA_LISTED_NEWS === '1',
+  // Company news for the US shares nobody holds, a few names each run through Finnhub's
+  // company news (US_NEWS below). Off unless US_LISTED_NEWS=1; needs FINNHUB_API_KEY.
+  US_LISTED_NEWS: process.env.US_LISTED_NEWS === '1',
   // IPO Watch: the calendar of Indian public issues, its own tab. Opt-in (IPO_WATCH=1) while
   // the section is being built.
   IPO_WATCH: process.env.IPO_WATCH === '1',
+  // News retention: a daily job that archives and then REMOVES old stories (RETENTION below).
+  // Off unless RETENTION=1. `node scripts/retention.js` shows what a run would remove without it.
+  RETENTION: process.env.RETENTION === '1',
   // Claude writes the daily brief, Ask answers and the Pro alert narrative. Off unless
   // CLAUDE_REPORTS=1 — a key alone never starts spending.
   CLAUDE_REPORTS: process.env.CLAUDE_REPORTS === '1',
@@ -154,12 +164,12 @@ const TARGETED = {
     // from the company altogether, and the local model's answer is right about two times in
     // three — so its answer is stored as a neutral reading at the lowest confidence instead.
     REMOVE_NOT_ABOUT: { claude: true, ollama: false },
-    MODEL: 'claude-haiku-4-5',   // same model as the brief and alert narrative
+    MODEL: 'claude-haiku-5-5',   // same model as the brief and alert narrative
     // The local model for COMPANY_SENTIMENT_LLM=ollama. Not OLLAMA_MODEL: that one writes
     // prose for other features and defaults to a 3B model.
     OLLAMA_MODEL: process.env.COMPANY_SENTIMENT_OLLAMA_MODEL || 'qwen2.5:7b-instruct-q4_0',
     OLLAMA_TIMEOUT_MS: 120000,   // the first call also loads the model into memory
-    MAX_OUTPUT_TOKENS: 300,      // one short JSON object
+    MAX_OUTPUT_TOKENS: 1500,     // one short JSON object, and the thinking Claude Haiku 5.5 does before it
     MAX_TEXT_CHARS: 600,         // clamp the untrusted headline/summary before prompting
     MAX_CALLS_PER_DAY: 300,      // paid calls only: one per hard story; REPORTS.GLOBAL_DAILY_USD_CEILING also applies
     // A label → a score on FinBERT's scale (0.5 = neutral), so the history stays on one scale.
@@ -399,26 +409,31 @@ const ONBOARDING = {
 // local Ollama writer, then to a deterministic template — both free, so a brief still
 // ships every day; Claude is the upgrade.
 const REPORTS = {
-  MODEL: 'claude-haiku-4-5',     // cheapest-viable; Sonnet/Opus reserved for major events later
+  // Claude Haiku 5.5 everywhere (decided 2026-10-11, after the Ask eval): about a sixth of
+  // Haiku 4.5's cost an answer, and better on the eval. It thinks before it writes, and the
+  // thinking counts toward each MAX_OUTPUT_TOKENS below, so every limit leaves room for it.
+  MODEL: 'claude-haiku-5-5',     // cheapest-viable; Sonnet/Opus reserved for major events later
   // Server-scheduled, never user-triggered on demand. The job runs every few minutes and
   // writes a user's brief once their own clock passes LOCAL_TIME (services/userTime.js).
   CRON: '*/15 * * * *',
   LOCAL_TIME: { HOUR: 5, MINUTE: 30 },
   LOCAL_WINDOW_MINUTES: 180,     // a late start still writes it; the morning email writes it if this never ran
-  MAX_OUTPUT_TOKENS: 1800,       // hard per-call output cap
+  MAX_OUTPUT_TOKENS: 4000,       // hard per-call output cap: the brief (about 600 tokens) and the thinking before it
   TOP_HOLDINGS: 12,              // trim the packet to the top-N holdings by exposure
   TOP_EVENTS: 6,                 // and the top-N impact events
   MAX_NEWS_CHARS: 280,           // clamp each untrusted headline/summary before prompting
   // Claude-written briefs a day are set per plan (TIERS[tier].claudeReportsPerDay: Free 0,
   // Plus 1, Pro 2) and checked before any call — see reports.briefQuota.
   GLOBAL_DAILY_USD_CEILING: 5,   // global kill-switch: stop calling Claude past this day's spend
-  // Haiku 4.5 pricing ($/1M tokens) for the cost estimate logged per call.
-  PRICE_PER_MTOK: { input: 1.0, output: 5.0 },
+  // Claude Haiku 5.5 pricing ($/1M tokens) for the cost estimate logged per call, at its rate
+  // for a prompt of up to 100,000 tokens (above that it is $0.50 and $2.50; no call here is
+  // near that). Used only when the reply carries no cost of its own: the router's does.
+  PRICE_PER_MTOK: { input: 0.10, output: 0.50 },
   // The written layer on a report's headline cards (services/cardWriter.js): one call
   // rewrites all of a report's cards; a rewrite that fails its check keeps the template.
   CARDS: {
     TIERS: ['plus', 'pro'],
-    MAX_OUTPUT_TOKENS: 1800,     // up to six cards × three short lines, as JSON
+    MAX_OUTPUT_TOKENS: 4000,     // up to six cards × three short lines, as JSON, and the thinking before them
     PER_USER_DAILY_QUOTA: 2,     // one report a day, plus one retry if the send fails
     SUMMARIES_PER_CARD: 2,       // article summaries shown to the model for each card
     MAX_SUMMARY_CHARS: 600,      // each one clamped to this (untrusted feed text)
@@ -434,15 +449,21 @@ const REPORTS = {
 // Same FEATURES.CLAUDE_REPORTS flag gates it; with no key / flag off / over cap it degrades
 // to a deterministic grounded data summary (no NL reasoning, but it cites the numbers).
 const QA = {
-  MODEL: 'claude-haiku-4-5',
-  MAX_OUTPUT_TOKENS: 1000,
+  MODEL: 'claude-haiku-5-5',
+  // A model that thinks (Claude Haiku 5.5 and later) spends this limit on its thinking too:
+  // at 1,000 two of six answers were cut off before or in the middle of the text.
+  MAX_OUTPUT_TOKENS: 3000,
   PER_USER_DAILY_QUESTIONS: 10,  // fallback only — the real cap is TIERS[tier].qaPerDay (Plus 10 / Pro 30)
   MAX_QUESTION_CHARS: 500,       // clamp the (untrusted) question before prompting
   TOP_EVENTS: 10,                // extended grounding: fuller impact feed than the daily brief
   MAX_HOLDINGS: 30,              // all holdings up to this cap (not just top-N)
   // Agent (E6 v2): Claude pulls data through tools instead of one stuffed context.
   MAX_TOOL_ROUNDS: 4,            // tool-call rounds per question; then it must answer
-  MAX_INPUT_TOKENS_PER_QUESTION: 25000, // stop calling tools past this summed input (worst question ≈ $0.04)
+  // Stop calling tools past this summed input. 25,000 on Haiku 4.5; the same text is about
+  // 30% more tokens on Haiku 5.5, where three rounds of one question reach 21,000 to 26,000.
+  // The check falls between rounds, so a question can end past it (the worst seen: 43,663
+  // tokens, $0.006).
+  MAX_INPUT_TOKENS_PER_QUESTION: 35000,
   MAX_TOOL_RESULT_CHARS: 4000,   // clamp each tool result before it re-enters the prompt
   HISTORY_TURNS: 3,              // follow-ups: last N question/answer pairs sent back
   MAX_HISTORY_CHARS: 1200,       // clamp each (client-supplied, untrusted) history message
@@ -467,6 +488,30 @@ const QA = {
   STRATEGY_EVIDENCE_SYMBOLS: 2,      // held symbols that get SenIQ evidence in explain_strategy_signal
   STRATEGY_PRESETS_MAX: 15,
   STRATEGY_VALIDATE_TIMEOUT_MS: 5000, // engine check of a drafted spec; on timeout the app's own check stands
+  // A stock the user does not hold (services/stockSnapshot.js): price and sentiment only.
+  SNAPSHOT_MAX_NAMES: 3,             // names snapshotted in one code-written answer; the rest are named as not shown
+  SNAPSHOT_MATCHES: 5,               // companies offered back when a typed name fits several
+  // What the other pages show, read by Ask (services/pageTools.js). Each result must fit MAX_TOOL_RESULT_CHARS.
+  PAGE_MATCHES: 5,                   // funds, politicians or investors offered back when a name fits several
+  PAGE_ROWS: 10,                     // trades or deals in one result
+  PAGE_FUND_TOP: 10,                 // a fund's largest positions
+  PAGE_FUND_CHANGES: 3,              // its largest new, added and reduced positions
+  PAGE_ALERTS: 10,                   // newest alerts, asked for on their own
+  PAGE_ALERTS_WITH_BRIEF: 6,         // and when the brief shares the result
+  PAGE_ALERT_CHARS: 140,             // one alert's text
+  PAGE_BRIEF_CHARS: 1100,            // the daily brief's text
+  // Price history (services/priceHistory.js): daily bars fetched when asked, never stored.
+  PRICE_HISTORY_PERIODS: [['1_week', 7], ['1_month', 30], ['3_months', 91], ['6_months', 182], ['1_year', 365]],
+  PRICE_HISTORY_SLACK_DAYS: 5,       // a year of bars can start a weekend short of a year back
+  PRICE_HISTORY_RECENT: 10,          // latest daily closes in the result
+  PRICE_HISTORY_VOLUME_SESSIONS: 20, // the recent average volume, about a month of sessions
+  PRICE_HISTORY_TTL_MS: 15 * 60 * 1000,
+  PRICE_HISTORY_TIMEOUT_MS: 8000,
+  // IPO Watch tools (services/ipoTools.js, only with FEATURES.IPO_WATCH) — the calendar, read-only.
+  IPO_MAX_ISSUES: 10,                // issue cards in one get_ipo_calendar result; fewer when they would not fit MAX_TOOL_RESULT_CHARS
+  IPO_RANK_TOP: 5,                   // names in an ordering (most subscribed, highest premium)
+  IPO_DETAIL_STORIES: 5,             // latest stories in get_ipo_detail
+  IPO_DETAIL_DAYS: 7,                // days of news tone, and of grey market premium readings, in get_ipo_detail
   // Saved threads: the server stores conversations and supplies follow-up history itself.
   THREAD_RETENTION_DAYS: 30,     // threads untouched this long are purged by the daily job
   THREAD_PURGE_CRON: '15 4 * * *',
@@ -521,8 +566,8 @@ const ALERT_EMAIL = {
   REALTIME_ONLY: true,          // only 'realtime' alerts email; 'digest' stays in-app
 };
 const ALERT_NARRATIVE = {
-  MODEL: 'claude-haiku-4-5',    // cheapest-viable; matches the brief/Q&A default
-  MAX_OUTPUT_TOKENS: 400,       // 150–250 words ≈ ~350 tokens; hard per-call cap
+  MODEL: 'claude-haiku-5-5',    // cheapest-viable; matches the brief/Q&A default
+  MAX_OUTPUT_TOKENS: 2000,      // 150–250 words ≈ ~350 tokens, and the thinking before them; hard per-call cap
   PER_USER_DAILY_QUOTA: 5,      // Pro narratives/user/day — aligns with ALERT_BUDGET realtime cap
   MIN_WORDS: 150,
   MAX_WORDS: 250,
@@ -531,12 +576,13 @@ const ALERT_NARRATIVE = {
 // ─── Model access for the analyst voice (services/llmClient.js) ──
 // Claude is reached either directly (ANTHROPIC_API_KEY) or through an OpenAI-compatible
 // router (AIROUTER_API_KEY — AIRouter by default, credits topped up in INR). The router
-// names models "provider/model"; its Haiku 4.5 is priced the same as REPORTS.PRICE_PER_MTOK.
+// names models "provider/model"; its Haiku 5.5 is priced the same as REPORTS.PRICE_PER_MTOK.
+// One model for every caller: the router's name replaces whatever model a caller asks for.
 const LLM = {
   ROUTER: {
     API_KEY: process.env.AIROUTER_API_KEY || '',
     BASE_URL: (process.env.AIROUTER_BASE_URL || 'https://api.airouter.in/v1').replace(/\/$/, ''),
-    MODEL: process.env.AIROUTER_MODEL || 'anthropic/claude-haiku-4.5',
+    MODEL: process.env.AIROUTER_MODEL || 'anthropic/claude-haiku-5.5',
     TIMEOUT_MS: 60000,
   },
 };
@@ -680,6 +726,40 @@ const INDIA_SMART_MONEY = {
   // Indian holdings, and insider trades that pass the alert rule (promoter, director or key
   // manager; open market; INSIDER_ALERT_MIN_INR or more). Everything else stays on the tabs.
   REPORT: { ROWS: 3, DEAL_DAYS: 7, INSIDER_DAYS: 90 },
+};
+
+// ─── US coverage (services/usNews.js) ────────────────────────
+// The US shares nobody holds are taken through Finnhub's company news in turn. About 1,500
+// names at 30 a run and a run every 10 minutes: each is visited about every 8 hours, and a
+// visit asks for 7 days, so nothing is missed between two.
+const US_NEWS = {
+  PER_RUN: 30,
+  // Finnhub's free plan allows 60 calls a minute, and US quotes use the same key. A run's
+  // news calls (held tickers, IPO Watch's, the rotation) stay within this many, so the
+  // rotation shrinks as holdings grow and stops when they alone reach it.
+  CALLS_PER_RUN: 50,
+  CALL_GAP_MS: 1000,       // between two rotation calls
+  STORIES_PER_NAME: 10,    // the newest of a ticker's 7 days, for a held name and a rotated one
+};
+
+// ─── News retention (services/retention.js) ──────────────────
+// How long a stored story is kept, counted from the later of the day it was published and
+// the day it was fetched. Before a story goes it is written to an archive file, and what the
+// strategy factors need from it is added to its ticker's day in sentiment_daily.
+const RETENTION = {
+  // A story the pipeline judged irrelevant, with no sentiment reading and no IPO link: it is
+  // kept only so the fetchers do not store it twice. Not below IPO_WATCH.LINK_BACKFILL_DAYS —
+  // a newly seen issue is still matched against stories that old.
+  UNUSED_DAYS: 30,
+  // Every other story. The app reads 90 days (SENTIMENT.BASELINE_DAYS, NEWS_SEARCH.WINDOW_DAYS,
+  // QA.NEWS_DAYS_MAX), which is also about as long as a run of news is found to move a share;
+  // one more quarter is kept so recent history can be read again by a better sentiment model.
+  USED_DAYS: 180,
+  CRON: '45 4 * * *',            // daily, after the Ask thread purge; only when FEATURES.RETENTION
+  // Where the archive files go (gzip, one JSON story per line). On a host without a lasting
+  // disk this must point at storage that survives a deploy.
+  ARCHIVE_DIR: process.env.RETENTION_ARCHIVE_DIR || 'data/archive',   // relative to the project root
+  ARCHIVE_BATCH: 500,            // stories read per query while the archive is written
 };
 
 // ─── IPO Watch (services/ipoWatch) ───────────────────────────
@@ -827,4 +907,4 @@ const SESSION = {
   REAUTH_MINUTES: 10,    // how long a password confirmation covers sensitive actions
 };
 
-module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, STRATEGY_SERVICE, PAPER, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
+module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, US_NEWS, RETENTION, STRATEGY_SERVICE, PAPER, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
