@@ -38,7 +38,8 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 1. **A session makes no Claude API call of its own until Annas says so**; he approves those
    one at a time. The app's own calls are a separate switch, `CLAUDE_REPORTS` in `.env`. It
-   is **`0`** *(checked 2026-10-09)*; Annas had it at `1` late on 2026-10-08. At `1` a running
+   is **`1`** *(checked 2026-10-10, evening; the file was last changed at 14:17 that day)*.
+   It was `0` on 2026-10-09 and `1` late on 2026-10-08. At `1` a running
    server calls Claude for Ask, the daily brief, Pro alert explanations and report cards,
    inside the quotas and the $5/day ceiling.
 2. **Ask before any run that costs money or takes long**: paid model call, embedding run,
@@ -86,9 +87,11 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   next start applies it, with strategies on or off. 2,280 articles, 524 events. No paper
   deployments, so the paper ledger has nothing to record there yet. On 2026-10-10 two stored
   Tesla tags were removed from it (§9). The QA copy `seniq_qa` was dropped the same day.
-- **Nothing is running** *(checked 2026-10-09, evening)*: no dev server, no strategy engine, no
-  `ollama serve`. Nothing is hosted. `.env` has `CLAUDE_REPORTS=0`, so the next `npm start`
-  makes no Claude calls.
+- **Nothing is running** *(checked 2026-10-10, evening)*: no dev server, no strategy engine, no
+  `ollama serve`. Nothing is hosted. **`.env` has `CLAUDE_REPORTS=1`** (it read `0` here
+  until 2026-10-10), so the next plain `npm start` **can make the app's own Claude calls**:
+  briefs at each Pro account's 05:30, Ask, alert explanations and report cards, inside the
+  quotas and the $5/day ceiling. Set it to `0` first if that is not wanted.
 - **Local `.env` switches that differ from the defaults** *(checked 2026-10-09)*: `IPO_WATCH=1`, `INDIA_SMART_MONEY=1`, `FINBERT_CLASSIFY=1`, `COMPANY_SENTIMENT_LLM=ollama` (the local
   model reads multi-company stories, §8; it needs `ollama serve`, which is **not** running),
   plus Annas's own `NSE_USER_AGENT`.
@@ -398,7 +401,7 @@ All the write scripts are dry runs without their flag.
 | `FINNHUB_API_KEY` | set | US prices and company news |
 | `FMP_API_KEY` | set | Commodity fallback, executives refresh |
 | `AIROUTER_API_KEY` | set | Claude through AIRouter (`ANTHROPIC_API_KEY` is the alternative) |
-| `CLAUDE_REPORTS` | `0` (checked 2026-10-09; it was `1` late on 2026-10-08) | `1` lets the app call Claude: brief, Ask, alert narrative, report cards |
+| `CLAUDE_REPORTS` | **`1`** (checked 2026-10-10; `0` on 2026-10-09, `1` late on 2026-10-08) | `1` lets the app call Claude: brief, Ask, alert narrative, report cards |
 | `COMPANY_SENTIMENT_LLM` | **`ollama`** | A language model reads multi-company clauses: `ollama` (local, free) or `1` (Haiku). Default is off |
 | `FINBERT_CLASSIFY` | **`1`** | Local FinBERT scores new stories. Default is off. `FINBERT_MODE=hosted` uses the Hugging Face API instead |
 | `INDIA_SMART_MONEY`, `NSE_USER_AGENT` | **`1`**, set | India deals and insider trades. Default is off |
