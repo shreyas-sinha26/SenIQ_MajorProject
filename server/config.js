@@ -96,6 +96,9 @@ const FEATURES = {
   // curated universe). Nothing more is fetched: their stories already arrive from the Indian
   // outlets, and with this on the pipeline tags them. Off unless INDIA_LISTED_NEWS=1.
   INDIA_LISTED_NEWS: process.env.INDIA_LISTED_NEWS === '1',
+  // Company news for the US shares nobody holds, a few names each run through Finnhub's
+  // company news (US_NEWS below). Off unless US_LISTED_NEWS=1; needs FINNHUB_API_KEY.
+  US_LISTED_NEWS: process.env.US_LISTED_NEWS === '1',
   // IPO Watch: the calendar of Indian public issues, its own tab. Opt-in (IPO_WATCH=1) while
   // the section is being built.
   IPO_WATCH: process.env.IPO_WATCH === '1',
@@ -715,6 +718,20 @@ const INDIA_SMART_MONEY = {
   REPORT: { ROWS: 3, DEAL_DAYS: 7, INSIDER_DAYS: 90 },
 };
 
+// ─── US coverage (services/usNews.js) ────────────────────────
+// The US shares nobody holds are taken through Finnhub's company news in turn. About 1,500
+// names at 30 a run and a run every 10 minutes: each is visited about every 8 hours, and a
+// visit asks for 7 days, so nothing is missed between two.
+const US_NEWS = {
+  PER_RUN: 30,
+  // Finnhub's free plan allows 60 calls a minute, and US quotes use the same key. A run's
+  // news calls (held tickers, IPO Watch's, the rotation) stay within this many, so the
+  // rotation shrinks as holdings grow and stops when they alone reach it.
+  CALLS_PER_RUN: 50,
+  CALL_GAP_MS: 1000,       // between two rotation calls
+  STORIES_PER_NAME: 10,    // the newest of a ticker's 7 days, for a held name and a rotated one
+};
+
 // ─── News retention (services/retention.js) ──────────────────
 // How long a stored story is kept, counted from the later of the day it was published and
 // the day it was fetched. Before a story goes it is written to an archive file, and what the
@@ -880,4 +897,4 @@ const SESSION = {
   REAUTH_MINUTES: 10,    // how long a password confirmation covers sensitive actions
 };
 
-module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, RETENTION, STRATEGY_SERVICE, PAPER, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
+module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, US_NEWS, RETENTION, STRATEGY_SERVICE, PAPER, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };

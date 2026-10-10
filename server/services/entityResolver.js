@@ -211,7 +211,9 @@ function setIpoTier(rows) {
 const edge = (s) => `(?<![A-Za-z0-9])${escapeRegex(s)}(?![A-Za-z0-9])`;
 // A name of several words, as a headline writes it: "and" may be "&", and the feeds often
 // drop the "&" altogether ("Vedanta Iron and Steel", "Vedanta Iron & Steel", "Vedanta Iron Steel").
-const edgeWords = (s) => `(?<![A-Za-z0-9])${escapeRegex(s).replace(/\s+(?:and|&)\s+/gi, '(?:\\s+(?:and|&))?\\s+')}(?![A-Za-z0-9])`;
+// An initial is written with its full stop and space or without either ("D. R. Horton",
+// "D.R. Horton", "DR Horton"; "J.K. Cement", "JK Cement").
+const edgeWords = (s) => `(?<![A-Za-z0-9])${escapeRegex(s).replace(/\s+(?:and|&)\s+/gi, '(?:\\s+(?:and|&))?\\s+').replace(/(?<![A-Za-z])([A-Z])\\\.\s*/g, '$1\\.?\\s*')}(?![A-Za-z0-9])`;
 
 // ─── A listed name that is also someone else's ───────────────
 // Found by reading every listed-name match on the stored stories (2026-10-11).
@@ -339,6 +341,16 @@ function namesHolding(holding, text, title = null) {
     if (!inside) return true;
   }
   return false;
+}
+
+// A US share outside the curated universe: the listed tier, or a graduated US issue. It is
+// tagged only on a story fetched from its own ticker's company news, when the caller says
+// which feeds a story came from: a general feed that writes "Colgate-Palmolive shares" or
+// "Cummins" is as likely writing about the Indian company, or naming the US one in passing.
+function isUsListed(ticker) {
+  const sym = String(ticker).toUpperCase();
+  const listed = LISTED_BY_TICKER.get(sym) || IPO_TIER.get(sym);
+  return !!listed && listed.country === 'US';
 }
 
 // The Indian listed names, as the `extra` list the resolver takes: with INDIA_LISTED_NEWS on
@@ -494,9 +506,11 @@ function buildResolver(companies, executives) {
   // those are the subject, and a name that appears only later in the summary is a passing
   // mention (feed boilerplate such as "...and the latest from Apple") — it is left out. A
   // headline that names no one falls back to the whole summary.
-  function resolve(title = '', summary = '', extra = []) {
-    const full = matchAll(title, summary, extra);
-    const head = matchAll(title, '', extra, `${title} ${summary}`);
+  // `feeds`: the tickers whose company news the story was fetched from, or null when that is
+  // not known. Given, a US listed name in `extra` counts only if its own ticker is among them.
+  function resolve(title = '', summary = '', extra = [], feeds = null) {
+    const full = matchAll(title, summary, extra, null, feeds);
+    const head = matchAll(title, '', extra, `${title} ${summary}`, feeds);
     if (!head.tickers.length) return full;
     // The summary's opening sentence usually restates the subject in full ("Strategy Inc.
     // added 334 bitcoin…"), so a company named there still counts; later sentences do not.
@@ -508,7 +522,8 @@ function buildResolver(companies, executives) {
 
   // `context`: the text searched for crypto talk — the whole story, even when only the
   // headline is being matched.
-  function matchAll(title = '', summary = '', extra = [], context = null) {
+  function matchAll(title = '', summary = '', extra = [], context = null, feeds = null) {
+    const fromFeed = feeds && new Set(feeds);
     const original = `${title} ${summary}`;
     const lower = original.toLowerCase();
     const tickers = companiesIn(original);
@@ -541,6 +556,7 @@ function buildResolver(companies, executives) {
     for (const e of extra) {
       const t = typeof e === 'string' ? { ticker: e } : e;
       if (!t.ticker || tickers.has(t.ticker) || symbolByTicker.has(t.ticker)) continue;
+      if (fromFeed && !SAME_COMPANY[t.ticker] && isUsListed(t.ticker) && !fromFeed.has(t.ticker)) continue;
       if (SAME_COMPANY[t.ticker] ? tickers.has(SAME_COMPANY[t.ticker]) : namesHolding(t, original, title)) tickers.add(t.ticker);
     }
     // Explicit sector themes.
@@ -583,9 +599,9 @@ async function loadIndex(force = false) {
   return _resolver;
 }
 
-async function resolve(title, summary, extra = []) {
+async function resolve(title, summary, extra = [], feeds = null) {
   const r = await loadIndex();
-  return r.resolve(title, summary, extra);
+  return r.resolve(title, summary, extra, feeds);
 }
 
 // Idempotent seed of the curated universe (called on boot, after migrations).
@@ -648,4 +664,4 @@ async function seedUniverse() {
   console.log(`   🏷️  universe seeded: ${n.c} companies, ${executives.length} executives; ${n.l} more listed`);
 }
 
-module.exports = { buildResolver, namesHolding, indianListed, LISTED_NEEDS_CUE, SAME_COMPANY, coreName, setIpoTier, resolve, loadIndex, seedUniverse, universeRows, SECTOR_THEMES, AMBIGUOUS, AMBIGUOUS_SYMBOLS, OTHER_VENTURES };
+module.exports = { buildResolver, namesHolding, indianListed, isUsListed, LISTED_NEEDS_CUE, SAME_COMPANY, coreName, setIpoTier, resolve, loadIndex, seedUniverse, universeRows, SECTOR_THEMES, AMBIGUOUS, AMBIGUOUS_SYMBOLS, OTHER_VENTURES };

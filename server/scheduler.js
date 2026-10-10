@@ -13,7 +13,8 @@ const cron = require('node-cron');
 const { query, queryOne, execute } = require('./db');
 const { FEATURES, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, PAPER } = require('./config');
 const { gatherArticles } = require('./services/ingest');
-const { loadIndex, indianListed } = require('./services/entityResolver');
+const { loadIndex, indianListed, isUsListed } = require('./services/entityResolver');
+const usNews = require('./services/usNews');
 const { analyzeSentiment } = require('./services/sentiment');
 const { classifyBatch, classifyTargets, targetEnabled, isEnabled: finbertEnabled } = require('./services/finbertClassifier');
 const { classifyArticle, isRoundup, assignClusters } = require('./services/newsRelevance');
@@ -43,21 +44,42 @@ let isRunning = false;
 // Choose FinBERT (batch) when available, else the lexicon, for every article.
 // `held` = [{ticker, name}] portfolio holdings, so news about a user's holding outside
 // the curated universe still resolves (basic symbol/name match).
-async function classifyArticles(articles, held = [], known = new Set()) {
+// `ownFeed`: the stories say which ticker's company news they came from, so a US listed name
+// counts only on a story from its own feed. `gained`: stored stories that have now turned up
+// in such a name's feed (usNews.gainedFeeds); they are read again.
+// Returns { articles, dropped } — `dropped` counts the stories the rotation alone brought in
+// that are about no company.
+async function classifyArticles(fetched, held = [], known = new Set(), { ownFeed = false, gained = new Map() } = {}) {
+  const resolver = await loadIndex(); // curated-universe entity resolver (cached)
+  const heldTickers = new Set(held.map((h) => h.ticker));
+  // A US listed name nobody holds is looked for only in the stories from its own feed.
+  const feedNames = (feeds) => [...new Set(feeds)].filter((t) => !heldTickers.has(t) && isUsListed(t)).map((ticker) => ({ ticker }));
+  const namedFor = (a) => [...held, ...feedNames(a.feeds || [])];
+  const feedsOf = (a) => (ownFeed ? a.feeds || [] : null);
+  // A piece of a story on its own (one sentence): every name the batch could tag.
+  const anyNamed = [...held, ...feedNames(fetched.flatMap((a) => a.feeds || []))];
+  const companiesIn = (text) => resolver.resolve(text, '', anyNamed).tickers;
+
+  const resolvedAll = fetched.map((a) => resolver.resolve(a.title, a.summary || '', namedFor(a), feedsOf(a)));
+  const inHeadlineAll = fetched.map((a) => resolver.resolve(a.title, '', namedFor(a), feedsOf(a)).tickers);
+  // Before any tone is read: a story the rotation alone brought in that is about no company goes.
+  const kept = fetched.map((a, i) => i).filter((i) => usNews.worthReading(fetched[i], resolvedAll[i].tickers, inHeadlineAll[i]));
+  const articles = kept.map((i) => fetched[i]);
+  const resolved = kept.map((i) => resolvedAll[i]);
+  const inHeadline = kept.map((i) => inHeadlineAll[i]);
+
   const texts = articles.map((a) => `${a.title} ${a.summary || ''}`.trim());
   // FinBERT reads only stories that are not stored yet: a stored story keeps the reading it
-  // has, and the copy fetched again this run is dropped at insert anyway.
+  // has, and the copy fetched again this run is dropped at insert anyway. The exception is a
+  // stored story about to gain a name from that name's own feed.
+  const gains = (a, i) => (gained.get(a.external_id) || []).some((t) => resolved[i].tickers.includes(t));
   const finbert = new Array(articles.length).fill(null);
   if (finbertEnabled()) {
-    const fresh = articles.map((a, i) => i).filter((i) => !known.has(articles[i].external_id));
+    const fresh = articles.map((a, i) => i).filter((i) => !known.has(articles[i].external_id) || gains(articles[i], i));
     const read = fresh.length ? await classifyBatch(fresh.map((i) => texts[i])) : [];
     if (read) fresh.forEach((i, k) => { finbert[i] = read[k]; });
   }
-  const resolver = await loadIndex(); // curated-universe entity resolver (cached)
-  const companiesIn = (text) => resolver.resolve(text, '', held).tickers;
 
-  const resolved = articles.map((a) => resolver.resolve(a.title, a.summary || '', held));
-  const inHeadline = articles.map((a) => companiesIn(a.title));
   // One reading is one tone for the whole text. A story naming several companies is read
   // again per company (targetedSentiment); a roundup is about none of them and is left out.
   const perCompany = await readCompanies(articles.map((a, i) => ({
@@ -79,6 +101,8 @@ async function classifyArticles(articles, held = [], known = new Set()) {
 
     // The companies the story is stored against, each with its own reading where it has one.
     const { tickers: matched, readings } = settle(a.title, resolved[i].tickers, inHeadline[i], perCompany[i]);
+    // Read per company, every name in it turned out a passing mention: the same as above.
+    if (a.rotationOnly && matched.length === 0) return null;
 
     // Phase 3.5: grade relevance (holding / market / world / none).
     const rel = classifyArticle(a, matched, { aboutMarket: resolved[i].tickers.length > 0 && matched.length === 0 });
@@ -88,13 +112,82 @@ async function classifyArticles(articles, held = [], known = new Set()) {
       matched.push('__MARKET__');
     }
     return { ...a, matchedTickers: matched, sentiment, readings, relevance: rel, sectors: resolved[i].sectors };
-  });
+  }).filter(Boolean);
 
   // Cluster duplicates across the whole batch (stemmed-headline similarity) so the
   // same story from GDELT + multiple RSS feeds shares one cluster_key → one feed
   // card, one alert.
   const keys = assignClusters(enriched);
-  return enriched.map((a, i) => ({ ...a, cluster_key: keys[i] }));
+  return { articles: enriched.map((a, i) => ({ ...a, cluster_key: keys[i] })), dropped: fetched.length - enriched.length };
+}
+
+// A stored story that has turned up in the feed of a US listed name: the feed is recorded,
+// and the name, if the story is about it, is stored against the story with its reading. A
+// reading the story already has is left as it is. Returns how many names were added.
+async function addFeedTags(a, tickers) {
+  const row = await queryOne(
+    `UPDATE articles SET feeds = ARRAY(SELECT DISTINCT unnest(feeds || $2::text[]))
+      WHERE external_id = $1 RETURNING id, relevance_tier`,
+    [a.external_id, tickers]
+  );
+  if (!row) return 0;
+  let added = 0;
+  for (const ticker of tickers.filter((t) => a.matchedTickers.includes(t))) {
+    const r = a.readings[ticker] || a.sentiment;
+    const res = await execute(
+      `INSERT INTO article_sentiments (article_id, ticker, sentiment_label, sentiment_score, confidence, model)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (article_id, ticker) DO NOTHING`,
+      [row.id, ticker, r.label, r.score, r.confidence || 0, r.model || 'lexicon']
+    );
+    added += res.rowCount;
+  }
+  // Stored as about nothing, it is now about a company.
+  if (added && row.relevance_tier === 'none' && a.relevance.tier === 'holding') {
+    await execute("UPDATE articles SET relevance_tier = 'holding', importance = $2, is_relevant = true WHERE id = $1", [row.id, a.relevance.importance]);
+  }
+  return added;
+}
+
+// Store the classified stories that are new, each with its per-ticker readings. A story
+// already stored is left as it is, unless it has gained a US listed name's feed (`gained`).
+async function storeArticles(articles, gained = new Map()) {
+  let newArticles = 0;
+  let newByFinbert = 0;
+  let relevantCount = 0;
+  let feedTags = 0;
+  for (const a of articles) {
+    const inserted = await queryOne(
+      `INSERT INTO articles (external_id, title, summary, source, url, image_url, published_at, platform,
+                             cluster_key, relevance_tier, importance, is_relevant, sectors, feeds)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       ON CONFLICT (external_id) DO NOTHING
+       RETURNING id`,
+      [a.external_id, a.title, a.summary || '', a.source, a.url, a.image_url, a.published_at, a.platform || 'news',
+       a.cluster_key, a.relevance.tier, a.relevance.importance, a.relevance.isRelevant, a.sectors || [], a.feeds || []]
+    );
+    if (!inserted) {
+      if (gained.has(a.external_id)) feedTags += await addFeedTags(a, gained.get(a.external_id));
+      continue;
+    }
+    newArticles++;
+    if (a.sentiment.model === 'finbert') newByFinbert++;
+    if (a.relevance.isRelevant) relevantCount++;
+    for (const ticker of a.matchedTickers) {
+      const r = a.readings[ticker] || a.sentiment; // the company's own reading, else the story's
+      await execute(
+        `INSERT INTO article_sentiments (article_id, ticker, sentiment_label, sentiment_score, confidence, model)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (article_id, ticker)
+         DO UPDATE SET sentiment_label = EXCLUDED.sentiment_label,
+                       sentiment_score = EXCLUDED.sentiment_score,
+                       confidence      = EXCLUDED.confidence,
+                       model           = EXCLUDED.model`,
+        [inserted.id, ticker, r.label, r.score, r.confidence || 0, r.model || 'lexicon']
+      );
+    }
+  }
+  return { newArticles, newByFinbert, relevantCount, feedTags };
 }
 
 async function runNewsPipeline() {
@@ -117,8 +210,15 @@ async function runNewsPipeline() {
     // news is asked for alongside. A failure here must not stop the pipeline.
     let ipoTickers = [];
     if (FEATURES.IPO_WATCH) ipoTickers = await monitoredTickers().catch(() => []);
-    const { articles: fetched, counts } = await gatherArticles(tickers, ipoTickers);
+    // US coverage: this run's few of the US shares nobody holds. A failure to pick them, or
+    // to record the visit, must not stop the pipeline.
+    const rotation = await usNews.nextBatch([...tickers, ...ipoTickers]).catch((err) => { console.warn('   ⚠️  US rotation not picked:', err.message); return []; });
+    const { articles: fetched, counts, rotation: rotated } = await gatherArticles(tickers, ipoTickers, rotation);
     console.log(`   📰 Fetched ${fetched.length} articles ${JSON.stringify(counts)}`);
+    if (rotation.length) {
+      await usNews.markChecked(rotated.checked).catch((err) => console.warn('   ⚠️  US rotation not recorded:', err.message));
+      console.log(`   🇺🇸 US rotation: ${rotated.checked.length} of ${rotation.length} name(s) checked${rotated.stopped ? ` (stopped: ${rotated.stopped})` : ''}`);
+    }
     // Retention: once old stories have been pruned, one from before the pruning horizon is
     // not stored again. A failure to check must not stop the pipeline.
     const raw = retention.dropTooOld(fetched, await retention.ingestCutoff().catch(() => null));
@@ -126,49 +226,24 @@ async function runNewsPipeline() {
 
     // 2. Classify + entity-resolve (curated universe + held-holding fallback).
     const ids = raw.map((a) => a.external_id).filter(Boolean);
-    const known = new Set(ids.length
-      ? (await query('SELECT external_id FROM articles WHERE external_id = ANY($1)', [ids])).map((r) => r.external_id)
-      : []);
+    const stored = ids.length ? await query('SELECT external_id, feeds FROM articles WHERE external_id = ANY($1)', [ids]) : [];
+    const known = new Set(stored.map((r) => r.external_id));
+    // With a Finnhub key each company story says whose feed it came from, and a US listed
+    // name is tagged from its own feed only. Without one there is no such feed to wait for.
+    const ownFeed = !!process.env.FINNHUB_API_KEY;
+    const gained = ownFeed ? usNews.gainedFeeds(raw, stored) : new Map();
     // INDIA_LISTED_NEWS: the Indian listed names are matched too, held or not. They go to the
     // resolver only; the per-company fetches above still run for held tickers alone.
     const heldTickers = new Set(tickers);
     const named = FEATURES.INDIA_LISTED_NEWS ? [...held, ...indianListed().filter((c) => !heldTickers.has(c.ticker))] : held;
-    const articles = await classifyArticles(raw, named, known);
+    const { articles, dropped } = await classifyArticles(raw, named, known, { ownFeed, gained });
+    if (dropped) console.log(`   🇺🇸 ${dropped} left out: brought in by the US rotation and about no company`);
 
     // 3. Persist new articles (+ relevance/cluster grade) + their per-ticker sentiment.
-    let newArticles = 0;
-    let newByFinbert = 0;
-    let relevantCount = 0;
-    for (const a of articles) {
-      const inserted = await queryOne(
-        `INSERT INTO articles (external_id, title, summary, source, url, image_url, published_at, platform,
-                               cluster_key, relevance_tier, importance, is_relevant, sectors)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-         ON CONFLICT (external_id) DO NOTHING
-         RETURNING id`,
-        [a.external_id, a.title, a.summary || '', a.source, a.url, a.image_url, a.published_at, a.platform || 'news',
-         a.cluster_key, a.relevance.tier, a.relevance.importance, a.relevance.isRelevant, a.sectors || []]
-      );
-      if (!inserted) continue;
-      newArticles++;
-      if (a.sentiment.model === 'finbert') newByFinbert++;
-      if (a.relevance.isRelevant) relevantCount++;
-      for (const ticker of a.matchedTickers) {
-        const r = a.readings[ticker] || a.sentiment; // the company's own reading, else the story's
-        await execute(
-          `INSERT INTO article_sentiments (article_id, ticker, sentiment_label, sentiment_score, confidence, model)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (article_id, ticker)
-           DO UPDATE SET sentiment_label = EXCLUDED.sentiment_label,
-                         sentiment_score = EXCLUDED.sentiment_score,
-                         confidence      = EXCLUDED.confidence,
-                         model           = EXCLUDED.model`,
-          [inserted.id, ticker, r.label, r.score, r.confidence || 0, r.model || 'lexicon']
-        );
-      }
-    }
+    const { newArticles, newByFinbert, relevantCount, feedTags } = await storeArticles(articles, gained);
     // Which scorer read the new stories: FinBERT when it is on and working, else the word list.
     console.log(`   💾 ${newArticles} new articles stored, ${relevantCount} relevant (read by ${newByFinbert ? `FinBERT: ${newByFinbert}, word list: ${newArticles - newByFinbert}` : 'the word list'})`);
+    if (feedTags) console.log(`   🇺🇸 ${feedTags} stored stor${feedTags === 1 ? 'y' : 'ies'} now tagged from a US name's own feed`);
 
     // 4. Roll articles up into durable events (E1b) — the unit impact/alerts key off.
     await upsertEvents();
@@ -383,4 +458,4 @@ function startScheduler() {
   return tasks;
 }
 
-module.exports = { startScheduler, runNewsPipeline, runSmartMoneyPoll, runDailyBriefs };
+module.exports = { startScheduler, runNewsPipeline, runSmartMoneyPoll, runDailyBriefs, classifyArticles, storeArticles };
