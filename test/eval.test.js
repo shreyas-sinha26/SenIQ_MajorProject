@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const lib = require('../eval/ask/lib');
 const { TOOLS } = require('../server/services/qaTools');
+const { IPO_TOOLS } = require('../server/services/ipoTools');
 
 let passed = 0;
 function check(name, fn) {
@@ -15,7 +16,7 @@ function check(name, fn) {
 }
 
 const doc = JSON.parse(fs.readFileSync(path.join(__dirname, '../eval/ask/cases.json'), 'utf8'));
-const toolNames = TOOLS.map((t) => t.name);
+const toolNames = [...TOOLS, ...IPO_TOOLS].map((t) => t.name);
 const CASE = { id: 'x-01', tags: ['t'], question: 'Why is my portfolio down?', rubric: ['states the move'], expect: { writer: 'claude', tools_any: ['get_attribution'], no_data_for: ['TSLA'] } };
 const GOOD = { writer: 'claude', answer: 'Your holdings moved -0.8% today. AAPL was the largest drag.', tools_used: ['get_attribution'], grounding: { grounded: true, unsupported: [] }, evidence: ['{"ticker":"AAPL"}'] };
 

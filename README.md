@@ -86,7 +86,9 @@ off, `v2.N` with them on. The latest is `v1.14` / `v2.15`: IPO Watch opens an is
   grounded only in the user's own holdings.
 - **Ask** — a tool-calling agent with saved conversations. It answers about the user's
   holdings, market news and general finance education, and each answer is checked against
-  its evidence.
+  its evidence. With IPO Watch on it also answers about the issues on that calendar: it
+  compares them on recorded figures (subscription, grey market premium, news tone) and never
+  names one as the better buy.
 - Both use Claude Haiku and fall back to code-written text when the model is off or fails.
   Nothing calls a paid model unless `CLAUDE_REPORTS=1`; there are per-user daily quotas, a
   global daily spend ceiling, and a log of every call with its cost.

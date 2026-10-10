@@ -2,16 +2,18 @@
  * Ask it anything (Engine Phase E6, v2 agent) — natural-language portfolio Q&A.
  *
  * In v2 mode (FEATURES.STRATEGIES) the agent also gets read-only strategy tools — see
- * strategyTools.js. agentSetup() picks the prompt and tools for the mode.
+ * strategyTools.js. With IPO Watch on (FEATURES.IPO_WATCH) it gets the calendar tools — see
+ * ipoTools.js. agentSetup() picks the prompt and tools for the mode.
  *
  * A user asks in plain English ("why is my portfolio down?", "news on NVDA?", "what did the
  * reports say about Apple's margins?") and Claude (Haiku) answers by CALLING TOOLS over that
  * user's engine data (qaTools.js) — exact queries for facts, news search for what was reported —
  * then citing what came back. Short follow-ups work: the client sends the last few turns back.
  *
- * Scope: the user's holdings + market-wide news + general finance education. A question only
- * about stocks they don't hold gets a fixed refusal before any Claude call (no quota spent),
- * and every tool re-checks the holdings allowlist server-side.
+ * Scope: the user's holdings + market-wide news + general finance education, and with IPO
+ * Watch on, the public issues on its calendar. A question only about stocks they don't hold
+ * gets a fixed refusal before any Claude call (no quota spent) — unless it is about an IPO —
+ * and every tool that takes a ticker re-checks the holdings allowlist server-side.
  *
  * Cost guardrails (Q&A is the on-demand "loopable button" risk the user is firm about):
  *   - hard per-user DAILY question cap by tier (Plus 10 / Pro 30), RESERVED before any Claude call: the count of
@@ -39,6 +41,7 @@ const { buildQAContext } = require('./grounding');
 const { guardCheck, estimateCost } = require('./reports');
 const { TOOLS, EXECUTORS, runTool, scopeCheck, outOfScopeAnswer, findMentionedTickers } = require('./qaTools');
 const { STRATEGY_TOOLS, STRATEGY_EXECUTORS, STRATEGY_PROMPT } = require('./strategyTools');
+const { IPO_TOOLS, IPO_EXECUTORS, IPO_PROMPT, isIpoQuestion, ipoFallbackAnswer } = require('./ipoTools');
 const { checkGrounding } = require('./answerCheck');
 const { threadDigest } = require('./askThreads');
 
@@ -161,17 +164,33 @@ Rules:
 
 /**
  * The prompt, tools and executors for a mode. v1 = portfolio tools only; v2 (strategy
- * features on) adds the read-only strategy tools and their rules. Each mode's set is a fixed
- * list, so the cached prompt prefix stays stable within a mode. Pure.
+ * features on) adds the read-only strategy tools and their rules; IPO Watch on adds the
+ * calendar tools and theirs, last. Each mode's set is a fixed list, so the cached prompt
+ * prefix stays stable within a mode. Pure.
  */
-function agentSetup(strategies = FEATURES.STRATEGIES) {
-  return strategies
-    ? { system: SYSTEM_PROMPT + STRATEGY_PROMPT, tools: [...TOOLS, ...STRATEGY_TOOLS], executors: { ...EXECUTORS, ...STRATEGY_EXECUTORS } }
-    : { system: SYSTEM_PROMPT, tools: TOOLS, executors: EXECUTORS };
+function agentSetup(strategies = FEATURES.STRATEGIES, ipoWatch = FEATURES.IPO_WATCH) {
+  const parts = [
+    { system: SYSTEM_PROMPT, tools: TOOLS, executors: EXECUTORS },
+    strategies && { system: STRATEGY_PROMPT, tools: STRATEGY_TOOLS, executors: STRATEGY_EXECUTORS },
+    ipoWatch && { system: IPO_PROMPT, tools: IPO_TOOLS, executors: IPO_EXECUTORS },
+  ].filter(Boolean);
+  if (parts.length === 1) return parts[0];
+  return {
+    system: parts.map((p) => p.system).join(''),
+    tools: parts.flatMap((p) => p.tools),
+    executors: Object.assign({}, ...parts.map((p) => p.executors)),
+  };
 }
 
+/**
+ * Whether a question has anything for the model to work from. A portfolio question needs a
+ * portfolio; an IPO question does not — the calendar is the same for an account with
+ * nothing in it. Pure.
+ */
+const modelCanAnswer = (holdings, ipoQuestion) => holdings.length > 0 || Boolean(ipoQuestion);
+
 function userTurn(question, ctx, digest = '') {
-  const held = ctx.holdings.map((h) => h.ticker).join(', ');
+  const held = ctx.holdings.map((h) => h.ticker).join(', ') || 'none';
   const earlier = digest ? `\n${digest}` : '';
   return `Today (UTC): ${new Date().toISOString().slice(0, 10)}\nMy holdings: ${held}${earlier}\n\nQuestion: ${question}`;
 }
@@ -359,11 +378,14 @@ async function answerQuestion(userId, rawQuestion, rawHistory = [], { client, da
   const setup = agentSetup();
 
   // ── Scope pre-check: only-outside-the-portfolio questions never reach Claude ──
+  // An IPO question is let through with IPO Watch on: "the Jio IPO" names Reliance without
+  // being about its shares. The ticker tools still refuse anything not held.
+  const ipoQuestion = FEATURES.IPO_WATCH && isIpoQuestion(question);
   let universe = [];
   if (holdings.length) {
     universe = await loadUniverse(holdings);
     const scope = scopeCheck(question, universe, ctx.heldSet);
-    if (scope.refuse) {
+    if (scope.refuse && !ipoQuestion) {
       return { question, answer: outOfScopeAnswer(scope.outside), writer: 'scope', guard: 'out_of_scope', tools_used: [], grounding: null, draft: null, quota: quota(used) };
     }
   }
@@ -386,8 +408,9 @@ async function answerQuestion(userId, rawQuestion, rawHistory = [], { client, da
   let answer, writer, toolsUsed = [], evidence = [];
   const traced = { usage: null, cost_usd: 0, model: null, stop_reason: null, rounds: 0, error: null };
   // The guard above read the count without a lock; the reservation is the check that holds.
-  const reservedId = guard.allow && holdings.length ? await reserveQuestion(userId, userDay, dailyLimit) : null;
-  if (guard.allow && holdings.length && reservedId == null) {
+  const askable = modelCanAnswer(holdings, ipoQuestion);
+  const reservedId = guard.allow && askable ? await reserveQuestion(userId, userDay, dailyLimit) : null;
+  if (guard.allow && askable && reservedId == null) {
     guard.allow = false;
     guard.reason = 'user_quota_exceeded';
   }
@@ -424,7 +447,10 @@ async function answerQuestion(userId, rawQuestion, rawHistory = [], { client, da
   } else {
     writer = 'deterministic';
   }
-  if (writer === 'deterministic') {
+  // An IPO question with no model to answer it gets the calendar as a digest: the user's
+  // own data packet below says nothing about public issues.
+  if (writer === 'deterministic' && ipoQuestion) answer = await ipoFallbackAnswer();
+  if (writer === 'deterministic' && !answer) {
     const qaCtx = await buildQAContext(userId, holdings);
     if (FEATURES.ASK_OLLAMA && holdings.length) {
       try {
@@ -460,4 +486,4 @@ async function answerQuestion(userId, rawQuestion, rawHistory = [], { client, da
   };
 }
 
-module.exports = { answerQuestion, runAgent, agentSetup, sanitizeQuestion, sanitizeHistory, deterministicAnswer, buildOllamaPrompt, ollamaAnswer, toPlainText, SYSTEM_PROMPT };
+module.exports = { answerQuestion, runAgent, agentSetup, modelCanAnswer, sanitizeQuestion, sanitizeHistory, deterministicAnswer, buildOllamaPrompt, ollamaAnswer, toPlainText, SYSTEM_PROMPT };

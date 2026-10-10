@@ -467,6 +467,11 @@ const QA = {
   STRATEGY_EVIDENCE_SYMBOLS: 2,      // held symbols that get SenIQ evidence in explain_strategy_signal
   STRATEGY_PRESETS_MAX: 15,
   STRATEGY_VALIDATE_TIMEOUT_MS: 5000, // engine check of a drafted spec; on timeout the app's own check stands
+  // IPO Watch tools (services/ipoTools.js, only with FEATURES.IPO_WATCH) — the calendar, read-only.
+  IPO_MAX_ISSUES: 10,                // issue cards in one get_ipo_calendar result; fewer when they would not fit MAX_TOOL_RESULT_CHARS
+  IPO_RANK_TOP: 5,                   // names in an ordering (most subscribed, highest premium)
+  IPO_DETAIL_STORIES: 5,             // latest stories in get_ipo_detail
+  IPO_DETAIL_DAYS: 7,                // days of news tone, and of grey market premium readings, in get_ipo_detail
   // Saved threads: the server stores conversations and supplies follow-up history itself.
   THREAD_RETENTION_DAYS: 30,     // threads untouched this long are purged by the daily job
   THREAD_PURGE_CRON: '15 4 * * *',
