@@ -1,6 +1,6 @@
 # SenIQ — Handoff
 
-Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). Late on 2026-10-10 two pieces of uncommitted work on the branch `ipo-ask` (Ask reads IPO Watch; news retention) and a six-step plan were added (§3, §5, §7, §8, §10). On 2026-10-11 the first three steps of that plan were done: P1 committed, P2 run, P3 built and committed on the branch `listed-news` with its switch still off, and the first two slices of P4 (the snapshot, then price history) built and committed on the branch `ask-tools` (§3, §8, §10). This file describes the project **as it stands now**. The previous
+Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). Late on 2026-10-10 two pieces of uncommitted work on the branch `ipo-ask` (Ask reads IPO Watch; news retention) and a six-step plan were added (§3, §5, §7, §8, §10). On 2026-10-11 the first three steps of that plan were done: P1 committed, P2 run, P3 built and committed on the branch `listed-news` with its switch still off, and all three slices of P4 (the snapshot, price history, the page tools) built and committed on the branch `ask-tools` (§3, §8, §10). This file describes the project **as it stands now**. The previous
 handoff was a session-by-session log (1,658 lines); it is still in git history
 (`git show 6ee98d9:handoff.md`) if a detail of how something was built is needed.
 
@@ -101,8 +101,11 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   holds one (nobody does). The branch holds `ipo-ask`'s two commits too, so one pull
   request from it would carry all three pieces of work.
 - **A third local branch, `ask-tools`, not pushed** *(2026-10-11)*, branched from
-  `listed-news` at `f7bc04d`: the first two slices of plan step P4, each a commit followed
-  by a commit of the documents. `ee7b582`: the snapshot of a stock the user does not hold
+  `listed-news` at `f7bc04d`: the three slices of plan step P4, each a commit followed
+  by a commit of the documents. `5d7097f`: the page tools (`server/services/pageTools.js`;
+  `get_fund_holdings`, `get_politician_trades`, `get_india_deals`, `get_alerts_and_brief`),
+  with `test/pageTools.test.js`; after it `npm test` passes: 32 files, 776 checks, and the
+  eval has 44 cases. The two slices before it: `ee7b582`: the snapshot of a stock the user does not hold
   (`server/services/stockSnapshot.js`, the tool `get_stock_snapshot`). `2587de8`: price
   history (`server/services/priceHistory.js`, the tool `get_price_history`), and two
   additions to the snapshot answer. Also changed: `services/qa.js` (the pre-check and two
@@ -110,8 +113,9 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   `QA.SNAPSHOT_*` and `QA.PRICE_HISTORY_*` limits), `eval/ask/cases.json` (39 cases),
   `eval/ask/lib.js`, `test/mcp.test.js`, `package.json`; new tests
   `test/stockSnapshot.test.js` and `test/priceHistory.test.js`. With it `npm test` passes:
-  31 files, 756 checks. **No real model has called either new tool, and the page has not
-  been opened with the change.**
+  31 files, 756 checks at that commit. **No real model has called any of the six new tools,
+  and the page has not been opened with the change.** Ask now sends 17 tool definitions
+  with every question (9,771 characters; the six new ones are 4,226 of them).
 - **The local engine changed with the QA pass** *(2026-10-10)*: three files in `strategy-service/`
   (gitignored, so not in any commit): `service/signal_runner.py`, `engine/data/base.py`,
   `engine/analytics/walk_forward.py`, plus `tests/test_qa_fixes.py`. The files as they were
@@ -186,11 +190,10 @@ The whole eval (P5) still needs his word, and so do a push, a pull request and a
 - **P4. Ask features on the data that exists:** the price-and-sentiment snapshot for a stock
   the user does not hold; price history; then the fund, politician, Indian investor, alerts
   and brief tools. **Slice 1, the snapshot, is built** (2026-10-11, commit `ee7b582` on
-  `ask-tools`; §10), **and so is slice 2, price history** (2026-10-11, commit `2587de8`).
-  Annas asked to check in after each slice, said each slice may be
-  committed locally once its tests pass, and said no paid run before P5. **Not started:**
-  slice 3, the page tools (a fund's holdings, a politician's trades, Indian investors and
-  deals, the alerts list, the daily brief).
+  `ask-tools`; §10), **so is slice 2, price history** (commit `2587de8`), **and so is
+  slice 3, the page tools** (commit `5d7097f`). Annas asked to check in after each slice, said
+  each slice may be committed locally once its tests pass, and said no paid run before P5.
+  **P4 is built; nothing in it has been run with a real model.**
 - **P5. The whole Ask eval on Haiku 4.5.** It shows whether the extra tools confuse the
   model, and settles whether to move Ask to Sonnet 5.5.
 - **P6. US coverage,** last: the largest change in volume, and by then P3 will have shown
@@ -719,6 +722,14 @@ All the write scripts are dry runs without their flag.
   directly for six names against live prices. No model has chosen `get_stock_snapshot`,
   and the Ask page has not been opened with the change. Three eval cases wait for P5:
   `scope-05` (rewritten), `scope-06`, `scope-07`.
+- **The page tools with a real model.** Each was called directly against the dev database
+  for two accounts (2026-10-11): the tracked funds and three funds' holdings, the
+  politicians' trades by name, by holdings and across Congress, Indian deals and insider
+  trades, the alerts and a stored brief. Every result was under 3,000 characters. Whether a
+  model picks the right one of 17 tools, and keeps to the user's own rows unless the
+  question widens, is unmeasured: `pages-01` to `pages-05` wait for P5. Not seen at all:
+  the teaser limit (Ask is a Plus and Pro feature, so no Ask user is on a teaser plan), and
+  an Indian investor with deals (the dev database has one attributed deal).
 - **Price history with a real model.** `get_price_history` was called directly for a US
   share, an Indian share, a coin and a commodity (held and not), and the code-written
   answer with the history line was run through `answerQuestion` (2026-10-11, no row added
@@ -1176,6 +1187,29 @@ machine before the date fix that day had lookahead; do not reuse older figures.
   year to date. Six months and the year to date were added to the four in the plan so the
   model has no reason to work out a figure itself; any other period ("since March") is
   answered from the month-end closes or not at all.
+- **The page tools take no ticker.** `get_fund_holdings`, `get_politician_trades` and
+  `get_india_deals` widen by a fund, a politician, an investor or the whole market, never
+  by a stock: "which senators bought Tesla" reaches the model, which can read the newest
+  disclosures across Congress but cannot filter them to a stock the user does not hold.
+  The Congress page itself can show that row (`scope=all`); the plan keeps smart money on
+  one stock with holdings, and the two were squared this way.
+- **A fund or investor question is recognised by a word list** (`isPageQuestion` in
+  `pageTools.js`): a tracked fund, its manager or a curated Indian investor named beside a
+  word for what it did, or the Congress and deal pages named outright. Such a question
+  reaches the model even when it names a company the user does not hold ("What does
+  Berkshire Hathaway hold?"), and uses a question; anything else about that company still
+  gets the code-written snapshot. The ten tracked funds are listed in that file as well as
+  in migration `0004`; a test fails if a migration seeds one the list lacks.
+- **Sample rows are kept out of Ask's congressional trades** whenever real disclosures
+  exist (the dev database has 12 sample rows beside 225 real ones). The Congress page's
+  route does not filter them; whether the page marks them was not checked.
+- **A 13F shows no exits.** A position sold out completely is not in the latest filing, so
+  the fund tool says what is new, added to and reduced, and says that exits are not
+  shown. A fund's first stored quarter has nothing to compare with. Some issuers have no
+  ticker (the CUSIP map did not resolve them) and are shown by name. Scion's latest filing
+  is for the quarter to 2025-09-30.
+- **The brief is read, never written, by Ask.** With no stored brief the tool says so; it
+  does not generate one (the AI Workspace page does, and that can call Claude).
 - **A year of history is fetched each time it is asked for** and kept in memory for 15
   minutes; nothing is stored.
 - **A typed name is looked up as the Add Asset search does**, by ticker prefix or a piece of
@@ -1384,7 +1418,18 @@ hand-labelled sheets of (story, company) pairs (§8).
   high and the low with their dates, average volume) and a short run of closes: a year of
   daily bars does not fit a 4,000-character tool result. It describes what the price did;
   no trend calls.
-- **P4, the pages' other data.** The rule: **Ask can read whatever the app's pages show the
+- **P4, the pages' other data: built 2026-10-11** (commit `5d7097f` on `ask-tools`;
+  `services/pageTools.js`). Four tools, as planned: `get_fund_holdings` (the tracked
+  funds, or one fund's ten largest positions with its share of the fund, the counts of new,
+  added, reduced and unchanged positions, and the three largest of each),
+  `get_politician_trades` (the user's, one politician's, or all of Congress),
+  `get_india_deals` (the user's, one curated investor's, or the whole market; deals and
+  insider trades; says so when `INDIA_SMART_MONEY` is off), `get_alerts_and_brief` (the
+  newest alerts not dismissed with the unread count, and the latest stored brief). Each
+  marks a row in a stock the user holds, hands back the matches when a name fits several,
+  and refuses a name it does not have with the list of those it does. All four are Ask
+  only. The plan as decided:
+  The rule: **Ask can read whatever the app's pages show the
   user, and nothing more, with what he holds or follows first.** The pages already work
   that way (`scope=mine` by default: held tickers and followed funds, politicians and
   investors; `scope=all` on request), so Ask widens only when the question names a fund or
