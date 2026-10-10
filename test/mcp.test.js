@@ -132,15 +132,16 @@ check('one bucket serves both transports for the same key', () => {
 
 console.log('data tools (shared /mcp + /v1 catalog):');
 {
-  const { DATA_TOOLS } = require('../server/services/dataTools');
+  const { DATA_TOOLS, ASK_ONLY } = require('../server/services/dataTools');
   const { EXECUTORS, TOOLS } = require('../server/services/qaTools');
 
   check('every data tool is backed by an Ask executor', () => {
     assert.deepStrictEqual(DATA_TOOLS.filter((t) => typeof EXECUTORS[t.name] !== 'function').map((t) => t.name), []);
   });
-  check('every Ask tool is exposed (nothing silently left out)', () => {
+  check('every Ask tool is exposed, or named as Ask only (nothing silently left out)', () => {
     const exposed = new Set(DATA_TOOLS.map((t) => t.name));
-    assert.deepStrictEqual(TOOLS.map((t) => t.name).filter((n) => !exposed.has(n)), []);
+    assert.deepStrictEqual(TOOLS.map((t) => t.name).filter((n) => !exposed.has(n)), ASK_ONLY);
+    assert.deepStrictEqual(ASK_ONLY.filter((n) => exposed.has(n)), []);
   });
   check('REST paths are unique and under /v1', () => {
     const paths = DATA_TOOLS.map((t) => t.rest);

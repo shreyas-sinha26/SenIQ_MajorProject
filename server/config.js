@@ -474,6 +474,9 @@ const QA = {
   STRATEGY_EVIDENCE_SYMBOLS: 2,      // held symbols that get SenIQ evidence in explain_strategy_signal
   STRATEGY_PRESETS_MAX: 15,
   STRATEGY_VALIDATE_TIMEOUT_MS: 5000, // engine check of a drafted spec; on timeout the app's own check stands
+  // A stock the user does not hold (services/stockSnapshot.js): price and sentiment only.
+  SNAPSHOT_MAX_NAMES: 3,             // names snapshotted in one code-written answer; the rest are named as not shown
+  SNAPSHOT_MATCHES: 5,               // companies offered back when a typed name fits several
   // IPO Watch tools (services/ipoTools.js, only with FEATURES.IPO_WATCH) — the calendar, read-only.
   IPO_MAX_ISSUES: 10,                // issue cards in one get_ipo_calendar result; fewer when they would not fit MAX_TOOL_RESULT_CHARS
   IPO_RANK_TOP: 5,                   // names in an ordering (most subscribed, highest premium)

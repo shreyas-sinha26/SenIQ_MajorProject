@@ -12,8 +12,10 @@
  *
  * Scope: the user's holdings + market-wide news + general finance education, and with IPO
  * Watch on, the public issues on its calendar. A question only about stocks they don't hold
- * gets a fixed refusal before any Claude call (no quota spent) — unless it is about an IPO —
- * and every tool that takes a ticker re-checks the holdings allowlist server-side.
+ * is answered before any Claude call (no quota spent) with those stocks' price and sentiment
+ * reading (stockSnapshot.js) — unless it is about an IPO — and every tool that takes a
+ * ticker re-checks the holdings allowlist server-side; get_stock_snapshot alone reads a
+ * stock outside it, and only its price and sentiment.
  *
  * Cost guardrails (Q&A is the on-demand "loopable button" risk the user is firm about):
  *   - hard per-user DAILY question cap by tier (Plus 10 / Pro 30), RESERVED before any Claude call: the count of
@@ -40,6 +42,7 @@ const { QA, REPORTS, FEATURES } = require('../config');
 const { buildQAContext } = require('./grounding');
 const { guardCheck, estimateCost } = require('./reports');
 const { TOOLS, EXECUTORS, runTool, scopeCheck, outOfScopeAnswer, findMentionedTickers } = require('./qaTools');
+const { outsideAnswer } = require('./stockSnapshot');
 const { STRATEGY_TOOLS, STRATEGY_EXECUTORS, STRATEGY_PROMPT } = require('./strategyTools');
 const { IPO_TOOLS, IPO_EXECUTORS, IPO_PROMPT, isIpoQuestion, ipoFallbackAnswer } = require('./ipoTools');
 const { checkGrounding } = require('./answerCheck');
@@ -149,7 +152,7 @@ What you can answer:
 
 Rules:
 - Every fact about their portfolio, a stock, or the news must come from a tool result in this conversation. Never use outside knowledge for prices, events, figures or dates — if the tools don't have it, say plainly what you can't see (e.g. no live price for that holding, no fundamentals data, nothing older than 90 days).
-- Only the user's holdings are in scope. If they ask about a stock they don't hold, say SenIQ doesn't track it for them and that they can add it to their portfolio. Do not describe that stock from memory.
+- News, events, smart money and impact are for the user's holdings only. For a stock they don't hold, get_stock_snapshot gives its price and SenIQ's sentiment reading, and that is all you may say about it: give those figures with the number of stories behind the reading, say it isn't in their portfolio, and that adding it brings its news, smart money and impact. When the snapshot has no reading, say there is no reading; never call that neutral. Do not describe that stock from memory.
 - You cannot change the portfolio. To add or remove a holding, the user opens the Portfolio page and uses "Add Asset" there; do not suggest any other place.
 - State only what a tool result states. Do not assert a cause, a market-wide move, or a link between a story and a holding unless a tool result says it. If nothing in the results explains a move, say the data does not show a cause — you may offer one possible reading, clearly labelled as your reading and not as fact. Keep the wording of headlines; do not strengthen it.
 - A holding's size is its exposure_pct, the figure the app's pages show; say "about" when it is marked exposure_estimated. priced_weight_pct in get_attribution is only the multiplier behind a contribution — never give it as how much of the portfolio a holding is.
@@ -348,7 +351,8 @@ async function loadUniverse(holdings) {
  * (TIERS[tier].qaPerDay). Returns
  * { question, answer, writer, guard, tools_used, grounding, draft, quota:{used,limit,remaining} }.
  * draft: a validated strategy draft when the agent wrote one (v2), else null.
- * writer: 'claude' | 'ollama' | 'deterministic' | 'scope' (out-of-scope refusal, no quota spent).
+ * writer: 'claude' | 'ollama' | 'deterministic' | 'scope' (a question only about stocks they
+ *   don't hold: the code-written price-and-sentiment snapshot, no model call, no quota spent).
  * grounding: the answerCheck audit for model-written answers, else null.
  * `older` = the thread's turns before `rawHistory` (askThreads.olderTurns), used for the digest.
  * `tier` = the user's plan; the strategy tools check it (saved strategies Plus, paper Pro).
@@ -386,7 +390,10 @@ async function answerQuestion(userId, rawQuestion, rawHistory = [], { client, da
     universe = await loadUniverse(holdings);
     const scope = scopeCheck(question, universe, ctx.heldSet);
     if (scope.refuse && !ipoQuestion) {
-      return { question, answer: outOfScopeAnswer(scope.outside), writer: 'scope', guard: 'out_of_scope', tools_used: [], grounding: null, draft: null, quota: quota(used) };
+      // What SenIQ does have for a name outside the portfolio is its price and its sentiment
+      // reading; the fixed line stays as the answer when even that cannot be read.
+      const snapshotText = await outsideAnswer(scope.outside).catch((err) => { console.error('Ask snapshot failed:', err.message); return null; });
+      return { question, answer: snapshotText || outOfScopeAnswer(scope.outside), writer: 'scope', guard: 'out_of_scope', tools_used: [], grounding: null, draft: null, quota: quota(used) };
     }
   }
 
