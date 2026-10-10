@@ -62,6 +62,11 @@ off, `v2.N` with them on. The latest is `v1.14` / `v2.15`: IPO Watch opens an is
 - **Sentiment per ticker** — computed on read: an acute score over 24–72 hours with a 7-day
   half-life, momentum (this week against last), and a z-score against the ticker's own
   90-day normal. Sources are weighted by credibility.
+- **Retention** (optional, `RETENTION=1`) — old stories are archived to a compressed file and
+  then removed: irrelevant ones after 30 days, the rest after 180. What a strategy's
+  sentiment factors need from a removed story stays, per ticker per day, so backtests read
+  the same history before and after. `node scripts/retention.js` shows what a run would
+  remove without removing it.
 
 ### Impact, alerts and outcomes
 - **Portfolio impact** — for each holding,

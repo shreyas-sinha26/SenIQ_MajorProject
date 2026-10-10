@@ -32,10 +32,11 @@ const { syncDisclosures } = require('./services/disclosures');
 const { generateDailyBriefs } = require('./services/reports');
 const { embedPendingArticles } = require('./services/newsSearch');
 const { purgeOldThreads } = require('./services/askThreads');
+const retention = require('./services/retention');
 const { runReportEmails } = require('./services/reportEmails');
 const { runPaperMarks } = require('./services/paperLedger');
 const { captureException } = require('./observability');
-const { REPORTS, QA, REPORT_EMAIL } = require('./config');
+const { REPORTS, QA, REPORT_EMAIL, RETENTION } = require('./config');
 
 let isRunning = false;
 
@@ -116,8 +117,12 @@ async function runNewsPipeline() {
     // news is asked for alongside. A failure here must not stop the pipeline.
     let ipoTickers = [];
     if (FEATURES.IPO_WATCH) ipoTickers = await monitoredTickers().catch(() => []);
-    const { articles: raw, counts } = await gatherArticles(tickers, ipoTickers);
-    console.log(`   📰 Fetched ${raw.length} articles ${JSON.stringify(counts)}`);
+    const { articles: fetched, counts } = await gatherArticles(tickers, ipoTickers);
+    console.log(`   📰 Fetched ${fetched.length} articles ${JSON.stringify(counts)}`);
+    // Retention: once old stories have been pruned, one from before the pruning horizon is
+    // not stored again. A failure to check must not stop the pipeline.
+    const raw = retention.dropTooOld(fetched, await retention.ingestCutoff().catch(() => null));
+    if (raw.length < fetched.length) console.log(`   🗄️  ${fetched.length - raw.length} left out: published before the retention horizon`);
 
     // 2. Classify + entity-resolve (curated universe + held-holding fallback).
     const ids = raw.map((a) => a.external_id).filter(Boolean);
@@ -290,6 +295,18 @@ async function runThreadPurge() {
   }
 }
 
+// News retention — archive, roll up and remove old stories (services/retention.js). Runs
+// only when FEATURES.RETENTION is on.
+async function runRetention() {
+  try {
+    const r = await retention.prune({ write: true, log: console.log });
+    if (r.written) console.log(`🗄️  Retention: ${r.deleted} stories removed (${r.unused} unused, ${r.used} used), ${r.readingsRolled} readings added to ${r.tickerDays} ticker-days, archive ${r.archive.file}`);
+  } catch (err) {
+    console.error('Retention error:', err);
+    captureException(err);
+  }
+}
+
 // Report emails — whoever is inside their morning (or Sunday-evening) window and has not had
 // that day's report. The service never throws; this only logs what went out.
 async function runReportEmailJob() {
@@ -350,6 +367,11 @@ function startScheduler() {
   console.log(`⏰ Daily-brief generator started — ${REPORTS.CRON}, each user at ${String(REPORTS.LOCAL_TIME.HOUR).padStart(2, '0')}:${String(REPORTS.LOCAL_TIME.MINUTE).padStart(2, '0')} their time`);
 
   tasks.push(cron.schedule(QA.THREAD_PURGE_CRON, runThreadPurge));
+
+  if (FEATURES.RETENTION) {
+    tasks.push(cron.schedule(RETENTION.CRON, runRetention));
+    console.log(`⏰ News retention started — ${RETENTION.CRON}: unused stories ${RETENTION.UNUSED_DAYS} days, the rest ${RETENTION.USED_DAYS}`);
+  }
 
   tasks.push(cron.schedule(REPORT_EMAIL.CRON, runReportEmailJob));
   console.log(`⏰ Report emails started — ${REPORT_EMAIL.CRON}`);
