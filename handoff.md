@@ -209,7 +209,10 @@ The whole eval (P5) still needs his word, and so do a push, a pull request and a
   **Built 2026-10-11, commit `9937b1b` on `listed-news`:** the rule for the four names of
   §8 and for 14 more the sweep found and Annas chose (§10), and the switch
   `INDIA_LISTED_NEWS` (off unless `1`). **Not done:** the switch has not been set in `.env`,
-  so coverage has not started; and the names that are another company's (§10) have no fix.
+  so coverage has not started. The names that are another company's (§10) were fixed
+  later the same day, and so were the three one-story mentions (a bank as the source of
+  an analysis, a fund house as a speaker's employer, an IPO's registrar): commit `dd7a32c`
+  on `ask-tools`.
 - **P4. Ask features on the data that exists:** the price-and-sentiment snapshot for a stock
   the user does not hold; price history; then the fund, politician, Indian investor, alerts
   and brief tools. **Slice 1, the snapshot, is built** (2026-10-11, commit `ee7b582` on
@@ -1460,16 +1463,52 @@ hand-labelled sheets of (story, company) pairs (§8).
     stories about Reliance Industries; `CL` on "Colgate-Palmolive (India) Ltd", which is
     `COLPAL`; `PTC` (the US software company) on "PTC India"; `VEDL` on "Vedanta Iron
     Steel" and "Vedanta Aluminium", its demerged siblings, 3 of 10. `GOOG` matches
-    "Alphabet's", the right company, whose curated row is `GOOGL`. **Not fixed.** A cue
-    does not help ("Reliance shares" is Reliance Industries); the fix proposed is that a
-    listed name a curated company already answers to is not matched by name.
+    "Alphabet's", the right company, whose curated row is `GOOGL`. **Fixed 2026-10-11, at
+    Annas's word (commit `dd7a32c` on `ask-tools`),**
+    by five rules in `entityResolver.js`, each with its cases in
+    `test/listedUniverse.test.js`:
+    - A listed name a curated company already answers to is matched by its symbol only
+      (`RS`: 3 matches to 0). Two listed names are in that position, `RS` and `GOOG`.
+    - `GOOG` is the same company as the curated `GOOGL` (`SAME_COMPANY`), so it is tagged
+      whenever `GOOGL` is: 1 match to 16, the stories `GOOGL` already has.
+    - A US name followed by "India", "(India)" or "of India" is the Indian company of that
+      name (`CL`: 1 to 0; `PTC`: 2 to 1, and the one kept is about PTC Inc).
+    - A headline about a company with a longer name is not about the shorter one, whatever
+      the summary says (`VEDL`: 10 to 7; the three dropped were about Vedanta Iron and
+      Steel and Vedanta Aluminium, whose summaries say what they were demerged from).
+      "Vedanta Aluminium", "Vedanta Iron" and "Vedanta Oil" are listed as such names.
+    - "and" in a name of several words may be "&" or missing, as the feeds drop it
+      (`VISL` gained "Vedanta Iron Steel shares…", `VOGL` "Vedanta Oil & Gas…").
+    With the switch on, the stored stories would now gain 418 tags across 199 names.
+    **Still not handled:** a US name written exactly as its Indian namesake is ("Colgate-
+    Palmolive shares" in an Indian outlet, with no "India" after it). Plan step P6's rule,
+    that a US name is tagged only on a story from its own ticker's feed, is what covers
+    that.
   - *A broker or rating agency giving its view of another company* (what `JEF` was): of the
     Indian names `JMFINANCIL` 5 of 7, `CRISIL` 5 of 6 ("Crisil Ratings affirms…"),
     `NUVAMA` 3 of 3, `ANGELONE` 2 of 4; of the US names `MCO` (Moody's) 2 of 2 and `EVR`
     (Evercore) 1 of 1. One story each: `BANKBARODA` ("a Bank of Baroda analysis"),
     `ABSLAMC` (an interview with its CIO), `KFINTECH` ("… is the IPO registrar", a line that
-    returns with every Indian IPO). **The six named first are fixed; the three with one
-    story each are not.**
+    returns with every Indian IPO). **The six named first are fixed by the cue rule. The
+    three with one story each are fixed by a rule of their own** *(2026-10-11, commit
+    `dd7a32c` on `ask-tools`; `npm test` passes: 32 files, 787 checks)*: the cue rule
+    would have cost Bank of Baroda its four right stories. `playsAPart` in
+    `entityResolver.js` leaves out a mention of a listed name when the words around it
+    give it one of three parts in someone else's story:
+    - the source of a view: the name before "analysis", "research", "study", "note",
+      "survey", "report", "economists", "analysts" or "strategists", or after "according
+      to" or "as per";
+    - a speaker's employer: after a market voice's role (CIO, chief economist, fund
+      manager, head of research or equity, analyst, strategist) and before a word for
+      speaking ("discusses", "says"). A chief executive, a chairman or a founder is not
+      on the list: quoted on his own company, the story is that company's;
+    - an issue's registrar or lead manager: "X is the … IPO registrar", "X, the
+      registrar to the issue", "the registrar of the issue is X", "the IPO registrar - X".
+    The other mentions in the story are still read, so a company named again on its own
+    is tagged. On the stored stories the rule removes those three matches and no other
+    (504 listed-name matches to 501, every listed name, US and Indian, passed at once).
+    **Not covered:** a registrar in the middle of a list ("the lead managers are A, B
+    and C" drops only A), and the curated names, which are read as before.
   - *A passing mention in the summary under a headline that names no one:* `DLB` (Dolby
     Atmos in a cinema opening), `CMI` (Cummins as a competitor), and the US names in market
     wraps. The curated names are read the same way. **Not fixed.**
