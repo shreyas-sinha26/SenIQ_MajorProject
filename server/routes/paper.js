@@ -15,23 +15,34 @@
 const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne, execute } = require('../db');
 const { authMiddleware } = require('./auth');
-const { attachTier, requireTier } = require('../middleware/tier');
+const { attachTier, requireTier, tierConfig } = require('../middleware/tier');
+const { idParam } = require('../middleware/idParam');
 const { deployPaper, stopPaper, deploymentToJson, MAX_ACTIVE_DEPLOYMENTS } = require('../services/strategyStore');
-const { replayPaper } = require('../services/strategyClient');
+const { replayPaper, engineFailure } = require('../services/strategyClient');
 const { readLedger } = require('../services/paperLedger');
 
 const router = asyncRouter();
-router.use(authMiddleware, attachTier, requireTier('pro'));
+router.use(authMiddleware, attachTier);
+router.param('id', idParam('deployment not found'));
 
-// GET /api/paper — list deployments.
+// Deploying and the live replay are Pro. Seeing what one has, reading its recorded ledger,
+// stopping it and deleting it stay open to any signed-in user, so an account that moves
+// off Pro can still find and close what it started (the API keys routes do the same).
+const pro = requireTier('pro');
+
+// GET /api/paper — list deployments. `can_deploy` tells the page which of the two it is showing.
 router.get('/', async (req, res) => {
   const rows = await query(
     'SELECT * FROM paper_deployments WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
-  res.json({ deployments: rows.map(deploymentToJson), max_active: MAX_ACTIVE_DEPLOYMENTS });
+  res.json({
+    deployments: rows.map(deploymentToJson),
+    max_active: MAX_ACTIVE_DEPLOYMENTS,
+    can_deploy: (tierConfig(req.tier).rank ?? 0) >= (tierConfig('pro').rank ?? 0),
+  });
 });
 
 // POST /api/paper — deploy a SAVED strategy on one symbol with paper cash.
-router.post('/', async (req, res) => {
+router.post('/', pro, async (req, res) => {
   const out = await deployPaper(req.user.id, req.body || {});
   if (!out.ok) return res.status(out.status).json({ error: out.error });
   res.status(201).json(out.data);
@@ -39,17 +50,15 @@ router.post('/', async (req, res) => {
 
 // POST /api/paper/:id/state — replay deploy→now (or →stopped_at) and return
 // current equity, open position, and the trade log.
-router.post('/:id/state', async (req, res) => {
+router.post('/:id/state', pro, async (req, res) => {
   const row = await queryOne(
     'SELECT * FROM paper_deployments WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
   if (!row) return res.status(404).json({ error: 'deployment not found' });
 
   const out = await replayPaper(row);
   if (out.status !== 200) {
-    const msg = out.status === 400 || out.status === 404
-      ? (out.data.detail || 'replay failed')
-      : 'Strategy engine is offline — try again later.';
-    return res.status(out.status === 503 ? 503 : 400).json({ error: msg });
+    const f = engineFailure(out, 'replay failed');
+    return res.status(f.status === 404 ? 400 : f.status).json({ error: f.error });
   }
   res.json({
     deployment: deploymentToJson(row),

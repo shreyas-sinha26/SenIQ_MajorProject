@@ -28,7 +28,8 @@ const { DISCLAIMER, STRATEGY_SERVICE } = require('../config');
 // Auth + rate limits shared with the public REST API (/v1): one budget per key
 // across both transports.
 const { resolveApiKey, heavyLimiter, lightLimiter } = require('../services/apiKeyGate');
-const { callService, flattenDetail, cleanSymbols, parseCapital, replayPaper, MAX_WATCH_SYMBOLS } = require('../services/strategyClient');
+const { callService, engineFailure, cleanSymbols, parseCapital, replayPaper, MAX_WATCH_SYMBOLS } = require('../services/strategyClient');
+const { isId } = require('../middleware/idParam');
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
 const { DATA_TOOLS, runDataTool } = require('../services/dataTools');
 const { saveStrategy, deployPaper, stopPaper, strategyToJson, deploymentToJson } = require('../services/strategyStore');
@@ -39,10 +40,7 @@ const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../serv
 // errors (array detail) → flattened; transport failure → friendly offline text.
 function serviceResult(out) {
   if (out.status === 200) return ok(out.data);
-  if (out.status === 400 || out.status === 404 || out.status === 422) {
-    return fail(flattenDetail(out.data) || 'invalid request');
-  }
-  return fail('Strategy engine is offline — try again later.');
+  return fail(engineFailure(out).error);
 }
 
 // ─── Tool result helpers ─────────────────────────────────────
@@ -245,6 +243,9 @@ function buildMcpServer(ctx) {
   }, async ({ deployment_id }) => {
     const limited = rateLimited(heavyLimiter, ctx.keyId);
     if (limited) return limited;
+    // An id no deployment can have (0, a negative, one too long for the column) is "not
+    // found", said here: handed to the database it came back as the database's own error text.
+    if (!isId(deployment_id)) return fail('deployment not found');
     const row = await queryOne(
       'SELECT * FROM paper_deployments WHERE id = $1 AND user_id = $2', [deployment_id, ctx.userId]);
     if (!row) return fail('deployment not found');
@@ -258,6 +259,7 @@ function buildMcpServer(ctx) {
   }, async ({ deployment_id }) => {
     const limited = rateLimited(lightLimiter, ctx.keyId);
     if (limited) return limited;
+    if (!isId(deployment_id)) return fail('deployment not found');
     const row = await queryOne(
       'SELECT * FROM paper_deployments WHERE id = $1 AND user_id = $2', [deployment_id, ctx.userId]);
     if (!row) return fail('deployment not found');
