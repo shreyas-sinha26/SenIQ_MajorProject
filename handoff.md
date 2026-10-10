@@ -1,6 +1,6 @@
 # SenIQ — Handoff
 
-Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), and a second round the same day that closed eight of its open findings and re-checked `v2.13` (§8, §10). This file describes the project **as it stands now**. The previous
+Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10). This file describes the project **as it stands now**. The previous
 handoff was a session-by-session log (1,658 lines); it is still in git history
 (`git show 6ee98d9:handoff.md`) if a detail of how something was built is needed.
 
@@ -69,22 +69,23 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   worktree `.claude/worktrees/crypto-kb`; nothing on it is missing from `main`. Untracked and
   never pushed: `samples/` and `.github/` (see §11).
 - **Branch `v1-qa-fixes`** *(2026-10-10)*: local commits on top of `main`, **not pushed, no
-  pull request yet**. It holds the fixes from a QA pass of `v1.12` (§8, "QA pass") and, since
-  the second round, fixes on the strategies side too (§8, "Second round"). On `main` itself
-  the figures below still describe `v2.13`.
+  pull request yet**. It holds the fixes from a QA pass of `v1.12` (§8, "QA pass") and, from
+  the second and third rounds, the fixes on the strategies side (§8). On `main` itself the
+  figures below still describe `v2.13`.
 - **The local engine changed with it** *(2026-10-10)*: three files in `strategy-service/`
   (gitignored, so not in any commit): `service/signal_runner.py`, `engine/data/base.py`,
   `engine/analytics/walk_forward.py`, plus `tests/test_qa_fixes.py`. The files as they were
-  are kept in `strategy-service/.pre_qa_2026-10-10/`. The pages on this branch expect this
-  engine: with the old one the signal and crypto fixes are absent and the robustness verdict
-  is the old one.
-- **Tests** *(checked 2026-10-10 on `v1-qa-fixes`, after the second round)*: `npm test` passes — 26 files, 643 checks, offline
+  are in the macOS Trash as `seniq-engine-pre_qa_2026-10-10` (gone once the Trash is
+  emptied). The pages on this branch expect this engine: with the old one the signal and
+  crypto fixes are absent and the robustness verdict is the old one.
+- **Tests** *(checked 2026-10-10 on `v1-qa-fixes`, after the third round)*: `npm test` passes — 27 files, 668 checks, offline
   (no database or API calls). On `main`: 25 files, 619 checks. The local engine's own tests: 60 pass
   (`cd strategy-service && ./venv/bin/python -m pytest -q`).
 - **Dev database** *(checked 2026-10-09, evening)*: Postgres `seniq`, 42 of the 43 migration
   files applied (latest `0041_ipo_graduation`). **`0042_paper_ledger` is not applied yet**; the
   next start applies it, with strategies on or off. 2,280 articles, 524 events. No paper
-  deployments, so the paper ledger has nothing to record there yet.
+  deployments, so the paper ledger has nothing to record there yet. On 2026-10-10 two stored
+  Tesla tags were removed from it (§9). The QA copy `seniq_qa` was dropped the same day.
 - **Nothing is running** *(checked 2026-10-09, evening)*: no dev server, no strategy engine, no
   `ollama serve`. Nothing is hosted. `.env` has `CLAUDE_REPORTS=0`, so the next `npm start`
   makes no Claude calls.
@@ -95,11 +96,10 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 ### Next, in order
 
 00. **Review `v1-qa-fixes`, push it and open the pull request** (Annas merges; both sides
-   changed, so the tags would be `v1.13` / `v2.14`). Five of the `v2.13` findings were fixed
-   in the second round; the rest are listed in §10 and are **not fixed yet**: that work waits
-   for Annas's go-ahead. When Claude calls are allowed, one Ask question on an account with a
-   holding that has no quantity, and one brief, would show the two prompt changes in real
-   output (§8).
+   changed, so the tags would be `v1.13` / `v2.14`). Every finding of the QA pass is closed
+   on this branch (§8); what is left is listed in §10 as known limits. When a Claude call is
+   next allowed, **one more daily brief** would show the last change to its prompt, made
+   after the one brief that was run (§8, "Third round").
 0. **IPO Watch: let it run.** `IPO_WATCH=1` is in the local `.env` since 2026-10-09. The 09:15
    IST poll has not yet fired on its own, and the GMP trend, the 1-week and later returns and
    graduation have only been seen on their first day. The "+ Portfolio" button has not been
@@ -374,6 +374,7 @@ Two migrations share the number `0016`. This is harmless; do not rename an appli
 | `node scripts/rescore_sentiment.js [--write]` | Re-score stored word-list readings with FinBERT |
 | `node scripts/build_listed_universe.js [--check]` | Rebuild `server/data/listed.json` from the constituent lists in `server/data/sources/` |
 | `node scripts/retag_commodities.js [--write --backup <file>]` | Remove stored commodity tags the resolver would no longer give |
+| `node scripts/retag_executives.js [--write --backup <file>]` | Remove stored company tags that came only from an executive's other venture (SpaceX stories on Tesla) |
 | `node scripts/retag_roundups.js [--write --backup <file>]` | Remove stored company tags from roundup stories and re-grade them |
 | `node scripts/reread_companies.js [--tuning] [--write --backup <file>]` | Re-read stored multi-company stories per company (needs `FINBERT_CLASSIFY=1`) |
 | `node scripts/sentiment_label_sheet.js <file> [--exclude <earlier.csv>] [--whole-store]` | Write a sheet of (story, company) pairs to hand-label |
@@ -476,6 +477,25 @@ All the write scripts are dry runs without their flag.
   - **The paper ledger on real deployments**: AAPL and BTC deployed from the page's route,
     backdated to 2026-04-01 in the copy, `paper_mark.js --write --no-email` recorded 4 fills
     and 325 days, a second run recorded nothing, and the Paper Trade page showed both ledgers.
+
+- **2026-10-10, third round** (same branch; the QA copy, since dropped):
+  - **Two Claude calls, $0.012, with Annas's go-ahead.** One Ask question through AIRouter on
+    an account with two unquantified holdings: the answer gave Apple as 25.9% of the
+    portfolio, the page's figure, where the priced-only weight is 34.5%; grounded, 2 tool
+    calls. One daily brief: no engine score in the text. It also showed two faults, both
+    fixed afterwards and **not yet seen fixed in a Claude reply** (§8).
+  - Through the API with the real engine: an id that no record can have is a 404 on every
+    paper, saved-strategy, key and `/v1` route (six kinds of id on ten routes) and "deployment
+    not found" from the MCP tools; a preset that does not exist, a setting out of bounds, a
+    misspelt market and a sixth symbol are refused on save; an unknown market, a symbol with
+    no price data and a commodity the engine does not price are refused on deploy, each with
+    the reason, and nothing was stored.
+  - An account moved off Pro in the copy: its deployments listed, the ledger read, stop and
+    delete worked, deploy and the live state answered 402, and the daily job no longer
+    listed its deployment.
+  - In the browser: that account's Paper Trade page; a card that said "The strategy engine
+    is offline" filled in on the next visit once the engine was back, with no reload; the
+    deploy form's own messages; Your Strategies showing a strategy saved through the API.
 
 **Never run for real:**
 - Any hosting. Scheduled reports and the India poll only run while the app happens to be up.
@@ -654,20 +674,22 @@ once more (§7). What changed in behaviour:
   no longer hand the model a bare `weight_pct`: the overview carries `exposure_pct` (with
   `exposure_estimated` when the holding has no price or no quantity) and the attribution rows
   carry `exposure_pct` beside `priced_weight_pct`, named as the multiplier behind a
-  contribution. The prompt says which is which. Checked on the tools' output for a QA account
-  with two unquantified holdings; **not yet seen in a Claude-written answer** (no call made).
+  contribution. The prompt says which is which. Seen in a Claude-written answer in the third
+  round (§7): 25.9%, the page's figure, for a position whose priced-only weight is 34.5%.
 - **An executive's other venture is not their listed company.** A story that names SpaceX,
   Starlink, Starship, xAI, Grok, Neuralink, the Boring Company, Twitter or X Corp beside Musk
   and does not name Tesla is no longer tagged to Tesla (`OTHER_VENTURES` in
-  `entityResolver.js`; one executive so far). Stored tags are unchanged: in the QA copy 3 of
-  Tesla's 21 stored readings are such stories.
+  `entityResolver.js`; one executive so far). The stored tags made the old way were removed
+  from the dev database in the third round (2 of Tesla's 11, §9) with
+  `scripts/retag_executives.js`.
 - **The Claude brief cannot quote the engine's scores, and its headline is a headline.**
   Claude is shown the packet through `packetForWriter()` (`briefWriter.js`): events in rank
   order with their share of the portfolio, sentiment as a label and as "above / near / below
   its usual level"; impact score, sentiment score and z-score are left out. The prompt asks
   for a headline of 12 words at most, and `tidyHeadline()` cuts a longer one to its first
-  clause or to 14 words. **Not yet seen in a Claude-written brief** (no call made). The
-  code-written brief and Ask's code-written answer still say "(impact 0.17)".
+  clause or to 14 words. One Claude-written brief was run in the third round: no score in
+  it, and two more faults found and fixed (below). The code-written brief and Ask's
+  code-written answer still say "(impact 0.17)".
 - **A live signal reads two years back** after the indicator warm-up (it read about 130 bars,
   so an entry older than that was invisible and the strategy read "FLAT, no signal yet").
   With no signal in that history the chip says "no signal since" and the date. Local engine.
@@ -686,6 +708,53 @@ once more (§7). What changed in behaviour:
   and the comparison. Outside that is a 400 with the reason; absent is still 100,000. The
   Backtest form no longer uses the browser's own validation (its message did not show in an
   embedded browser, so the button looked dead); `btCheckInputs` names the field in a toast.
+
+**Third round (2026-10-10, same branch).** The rest of the `v2.13` findings, the two Claude
+calls and the clean-up. What changed in behaviour:
+- **What is saved or deployed is checked first** (`strategyStore.js`). A built-in strategy
+  must be one the engine lists and each setting one it has, of the right kind and inside its
+  bounds (`presetProblem`, against the engine's catalog). A watchlist entry must be a symbol
+  on a known market, five at most (`checkSymbols`); nothing is dropped or cut short silently.
+  A deployment is **replayed once before it is stored**, so a symbol with no price data, an
+  unknown market or a strategy that cannot run is refused with the reason. Deploying
+  therefore needs the engine: offline is a 503 and nothing is created.
+- **An id that no record can have is a 404**, not a 500, on the paper, saved-strategy, key
+  and `/v1` routes (`idParam`), in `deployPaper` / `stopPaper`, and from the MCP paper tools.
+  The preset routes take `:presetId`, a name.
+- **The engine's refusals reach the user in plain words** (`plainEngineError` in
+  `strategyClient.js`): a range longer than five years, an end date before the start, a
+  symbol with no data, an unknown market, a commodity it does not price, an unknown
+  strategy, a faulty bar. A refusal it does not recognise is passed on unchanged.
+- **"Offline" means unreachable.** An engine that answers with a failure of its own is a
+  **502** with its own sentence (`engineFailure`); it used to be reported as offline too.
+- **An account that leaves Pro keeps the handle on what it started**: listing its
+  deployments, reading a recorded ledger, stopping and deleting are open to any signed-in
+  account; deploying and the live replay stay Pro. The list carries `can_deploy`, and the
+  page shows the deployments with a note in place of the form. **The daily job replays Pro
+  accounts' deployments only**; back on Pro, the days missed are recorded then.
+- **Paper Trade recovers on its own**: a card whose live state failed has a retry button and
+  asks again on the next visit to the page. The deploy form names what is wrong itself.
+- **Your Strategies reads its list on every visit** and redraws when it changed.
+- **A fill email waits when no provider is configured** (it was marked skipped for good) and
+  lapses after three days like any other. `paper_mark.js --no-email` is now an explicit
+  "record and settle as skipped".
+- **The paper ledger places a fill by its date, not its instant** (`planLedger`). See the
+  note below on what this does and does not fix.
+- **The brief's HEADLINE marker is read in the forms Claude writes it** (on a line of its
+  own, or in `** **`), and **a headline with a money amount no story states is replaced** by
+  the code-written one (`headlineGrounded`). Both came out of the one brief that was run:
+  the reply put the word HEADLINE on its own line, which the parser took for the first
+  sentence, and it turned "25.9% of your portfolio" into "your $25.9B Apple and Bitcoin
+  stakes". The prompt now says a share is never money and asks for no figures in the
+  headline. The parser and the guard are tested against that reply; **the prompt change has
+  not been seen in a new reply.**
+
+**The "engine's clock" finding does not reproduce.** The first round recorded that a paper
+deployment's last fill would be stored twice if the engine ran on a host in another time
+zone. The engine stamps every daily bar at midnight `+05:30` from a constant, not from the
+host: fills and curve came out identical with the engine run under IST, UTC and US Pacific
+time (2026-10-10). The ledger now compares dates all the same, so a later change to the
+engine's stamping cannot duplicate fills.
 
 Seen in the first pass and **still not changed** (v1):
 - A report card can rest on a weak link (a rupee story shown for Reliance as "same sector").
@@ -881,6 +950,7 @@ Changes made by hand to the dev database on 2026-10-08, with backups in `samples
 | 65 company tags removed from 37 roundup stories; 28 `__MARKET__` readings added; those stories re-graded | `roundup-tags-before-2026-10-08.json` |
 | 5 `event_outcomes` rows for Indian tickers had a pre-fix `price_at_event` blanked | none |
 | Account 36 rebalanced; marked verified by hand | none |
+| 2 of 11 stored Tesla tags removed: stories about SpaceX and Starlink, tagged through Elon Musk (2026-10-10, `scripts/retag_executives.js --write`) | `removed-executive-tags-2026-10-10.json` |
 
 `samples/` also holds a sample report PDF built from account 36, and
 `sentiment-labels-2026-10-08.csv` and `sentiment-labels-2-2026-10-08.csv`: the two
@@ -906,37 +976,22 @@ hand-labelled sheets of (story, company) pairs (§8).
 - Real billing (Stripe for the US, Razorpay for India).
 - Quiet hours for alerts (dropped).
 
-**Found in the 2026-10-10 QA pass of `v2.13`, not fixed (waiting for Annas's go-ahead)**
-
-Five findings from this list were fixed in the second round (§8): the live signal against the
-backtest, crypto when the range includes today, the robustness check on windows with no
-trade, the Strategy Builder's silent replacements and stale error box, and the starting
-capital of `1e30` or `0`. What is left, re-probed on 2026-10-10 where marked *(checked)*:
-- **Paper ledger and the engine's clock.** The engine stamps a daily bar at local midnight
-  with the host's offset (`+05:30` even for AAPL) and the ledger compares instants. Run the
-  engine in another zone (a UTC host) and each deployment's last fill is recorded again, a
-  false "price history was revised" note is set, and a fill under 3 days old is emailed twice.
-- **Deploy and save validate nothing** *(checked)*: any symbol or exchange text is accepted
-  (`ZZZZQQ` on `MARS` deployed), and a preset name that does not exist is saved. Such a
-  deployment counts toward the 10, fails on every run and start, and makes `paper_mark.js`
-  exit 1.
-- Bad ids are a 500 on the paper, strategies, keys and `/v1` routes *(checked)* (the v1
-  routes are fixed; `idParam` is ready to use there). The MCP tool returns the raw Postgres
-  message.
-- The Paper Trade page keeps "engine offline" after the engine is back, until a reload.
-- Raw engine text still reaches the user *(checked)*: a 20-year range answers "interval '1d'
-  lookback 7587d exceeds cap 1825d". An engine failure that is not a refusal (a 500 from the
-  engine) is still reported as "Strategy engine is offline".
+**The 2026-10-10 QA pass of `v2.13`: closed.** Every finding was fixed in the second and
+third rounds (§8), except one that did not reproduce (the engine's clock, §8). Known limits
+that remain, none of them a defect waiting for a fix:
 - A signal's state is the last entry or exit **in the history read** (two years after
   warm-up, 1,500 days at most). A slow strategy whose entry is older than that reads "FLAT,
   no signal since" and the date, where a longer backtest would show it long.
-- Your Strategies loads its list once per page load; a strategy saved through the API or in
-  another tab appears after a reload.
-- A fill email is marked skipped for good when no provider is configured; a downgraded Pro
-  account cannot see or stop its deployments while the job keeps replaying them.
-- The QA copy `seniq_qa` still exists, with the rows these two rounds made in it (account
-  `qa-v213-final@example.test`, three saved strategies, three paper deployments, one API key).
-  Drop it when it is no longer wanted: `dropdb seniq_qa`.
+- A rule between two settings of a built-in strategy (a fast average shorter than the slow
+  one) is not in the engine's catalog, so it is caught when the strategy first runs — on
+  deploy, or on the first signal — not when it is saved.
+- A deployment made before the checks existed can still be one that cannot run; the daily
+  job reports it with the reason and exits 1 until it is stopped or deleted. The dev
+  database has none.
+- The code-written brief and Ask's code-written answer still say "(impact 0.17)".
+- The body of a Claude-written brief is not checked against the packet the way an Ask
+  answer is; the one brief run on 2026-10-10 tied a market-wide figure from a story's title
+  to the reader's own position. The prompt now says not to; only the headline has a guard.
 
 **Build queue, roughly by value**
 1. Ask precision: measure the tool changes; try another answer model for the eval only; stop
@@ -960,6 +1015,7 @@ capital of `1e30` or `0`. What is left, re-probed on 2026-10-10 where marked *(c
 - **Noel Tata retires as Trent chairman in November 2026.** Update `executives.json` then.
 - Re-run `refresh_executives.js` now and then (US only; India is by hand).
 - Re-run `retag_commodities.js` after any change to the commodity rules.
+- Re-run `retag_executives.js` after adding an executive to `OTHER_VENTURES`.
 
 **Small**
 - Dark-mode toggle (colours are already CSS variables).
@@ -1034,9 +1090,9 @@ migrations (`0031`–`0041`), `server/services/ipoWatch/`, a tab with an India /
 two touches on the news pipeline (company news for newly filed or priced US issues; linking
 and reading IPO stories at the end of each pass). `IPO_PLAN.md` is the full record.
 
-**Branch `v1-qa-fixes`** (2026-10-10) is local only: the QA fixes of §8 (both rounds), in
-commits on top of `main`. Not pushed; no pull request. The engine's part of the second round
-is in `strategy-service/` and in no commit.
+**Branch `v1-qa-fixes`** (2026-10-10) is local only: the QA fixes of §8 (all three rounds),
+in commits on top of `main`. Not pushed; no pull request. The engine's part of the second
+round is in `strategy-service/` and in no commit.
 
 **Pull request #14** (`paper-ledger`) was merged by Annas on 2026-10-09 as `f3638fb`. Tagged
 **`v2.13` only**, and the branch deleted. The paper ledger (§5): migration `0042`,
