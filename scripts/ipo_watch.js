@@ -76,7 +76,7 @@ async function main() {
   const r = await pollCalendar({ today, ...(dry ? { save: async (issues) => { seen = issues; return 0; }, saveGmp: async () => 0, saveSubscriptions: async () => 0, saveGmpHistory: async () => 0, saveOutcomes: async () => 0 } : {}) });
   for (const f of r.failed) console.warn(`⚠️  ${f.source}: ${f.error}`);
   if (dry) {
-    for (const i of seen) console.log(`${stageOf(i, today).padEnd(9)} ${i.board.padEnd(9)} ${i.open_date || '—'.padEnd(10)} → ${i.listing_date || '—'.padEnd(10)}  ${i.gmp == null ? '' : `GMP ₹${i.gmp}  `}${i.subscription ? `${i.subscription.total}x  ` : ''}${i.listing_gain_pct != null ? `listed ${i.listing_gain_pct}%  ` : ''}${i.name}`);
+    for (const i of seen) console.log(`${stageOf(i, today).padEnd(9)} ${(i.board || i.market).padEnd(9)} ${i.open_date || '—'.padEnd(10)} → ${i.listing_date || '—'.padEnd(10)}  ${i.gmp == null ? '' : `GMP ₹${i.gmp}  `}${i.subscription ? `${i.subscription.total}x  ` : ''}${i.listing_gain_pct != null ? `listed ${i.listing_gain_pct}%  ` : ''}${i.name}`);
     console.log(`${seen.length} issue(s) parsed, nothing stored`);
   } else {
     console.log(`${r.stored} issue(s), ${r.gmp} GMP reading(s) for today and ${r.gmpHistory} for earlier days, ${r.subscriptions} subscription reading(s), ${r.outcomes} new outcome(s) stored from ${r.sources} source(s)`);

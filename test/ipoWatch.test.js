@@ -6,7 +6,8 @@
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://offline:offline@localhost:5432/offline';
 
 const assert = require('node:assert');
-const { nameKey, normalizeIssue, mergeIssues, stageOf, marketDate, pollCalendar, gmpReadings, gmpView, cleanSubscription, cleanHistory, outcomesOf, listingGain, priceFromGain } = require('../server/services/ipoWatch');
+const { IPO_WATCH } = require('../server/config');
+const { calendarAge, nameKey, normalizeIssue, mergeIssues, stageOf, marketDate, pollCalendar, gmpReadings, gmpView, cleanSubscription, cleanHistory, outcomesOf, listingGain, priceFromGain } = require('../server/services/ipoWatch');
 const { buildMatcher, joinInitials, pickSymbol, looseKey, priceConfirms, referenceExchange } = require('../server/services/ipoWatch/registry');
 const { namesHolding, coreName, setIpoTier } = require('../server/services/entityResolver');
 const { parseBars, barOnOrAfter, returnsFrom, firstTradeDay, usDate } = require('../server/services/ipoWatch/returns');
@@ -611,6 +612,20 @@ check('graduation: a graduated company is matched as strictly as a listed one', 
   assert.strictEqual(names('ETRA', 'Electra Therapeutics reports Phase 2 data'), true);
   assert.strictEqual(names('ETRA', 'Tetra Pak and others expand'), false);
   setIpoTier([]);
+});
+
+check('calendar age: the page is told when the last refresh was, and when that is too long ago', async () => {
+  const now = new Date('2026-10-10T08:00:00Z');
+  const at = (hoursAgo) => ({ run: async () => [{ at: new Date(now - hoursAgo * 3600e3) }], now });
+  assert.deepStrictEqual(await calendarAge('IN', at(3)), { updatedAt: new Date(now - 3 * 3600e3), stale: false });
+  assert.strictEqual((await calendarAge('IN', at(IPO_WATCH.STALE_AFTER_HOURS + 1))).stale, true);   // a missed daily poll
+  assert.deepStrictEqual(await calendarAge('US', { run: async () => [{ at: null }], now }), { updatedAt: null, stale: true });   // never polled
+});
+check('a listed issue stays on the calendar until its last return can be shown', () => {
+  // The 3-month close is first readable the day after listing + 90; at a 90-day window the
+  // issue had already left the page.
+  assert.ok(IPO_WATCH.RECENT_LISTED_DAYS > 90);
+  assert.ok(IPO_WATCH.RECENT_LISTED_DAYS >= IPO_WATCH.RETURN_GIVE_UP_DAYS);
 });
 
 (async () => {
