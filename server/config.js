@@ -477,6 +477,15 @@ const QA = {
   // A stock the user does not hold (services/stockSnapshot.js): price and sentiment only.
   SNAPSHOT_MAX_NAMES: 3,             // names snapshotted in one code-written answer; the rest are named as not shown
   SNAPSHOT_MATCHES: 5,               // companies offered back when a typed name fits several
+  // What the other pages show, read by Ask (services/pageTools.js). Each result must fit MAX_TOOL_RESULT_CHARS.
+  PAGE_MATCHES: 5,                   // funds, politicians or investors offered back when a name fits several
+  PAGE_ROWS: 10,                     // trades or deals in one result
+  PAGE_FUND_TOP: 10,                 // a fund's largest positions
+  PAGE_FUND_CHANGES: 3,              // its largest new, added and reduced positions
+  PAGE_ALERTS: 10,                   // newest alerts, asked for on their own
+  PAGE_ALERTS_WITH_BRIEF: 6,         // and when the brief shares the result
+  PAGE_ALERT_CHARS: 140,             // one alert's text
+  PAGE_BRIEF_CHARS: 1100,            // the daily brief's text
   // Price history (services/priceHistory.js): daily bars fetched when asked, never stored.
   PRICE_HISTORY_PERIODS: [['1_week', 7], ['1_month', 30], ['3_months', 91], ['6_months', 182], ['1_year', 365]],
   PRICE_HISTORY_SLACK_DAYS: 5,       // a year of bars can start a weekend short of a year back

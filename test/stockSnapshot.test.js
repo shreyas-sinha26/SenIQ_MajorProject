@@ -149,7 +149,8 @@ const reading = (count, score = 0.5, z = null, points = 12) => ({ label: score >
     assert.ok(t && typeof EXECUTORS.get_stock_snapshot === 'function');
     assert.deepStrictEqual(t.input_schema.required, ['name']);
     // Appended after the tools that were there before: the cached prefix ahead of them is unchanged.
-    assert.deepStrictEqual(TOOLS.slice(-2).map((x) => x.name), ['get_stock_snapshot', 'get_price_history']);
+    const at = TOOLS.findIndex((x) => x.name === 'get_story_detail');
+    assert.deepStrictEqual(TOOLS.slice(at + 1, at + 3).map((x) => x.name), ['get_stock_snapshot', 'get_price_history']);
   });
   await checkAsync('no name is an error the model can read, and no lookup is made', async () => {
     const r = await runTool({ id: 't1', name: 'get_stock_snapshot', input: {} }, { heldSet: new Set() });

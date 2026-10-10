@@ -599,6 +599,103 @@
       ]
     },
     {
+      "id": "pages-01",
+      "tags": [
+        "pages",
+        "smart_money"
+      ],
+      "question": "What does Berkshire Hathaway hold, and what changed last quarter?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_fund_holdings"
+        ]
+      },
+      "rubric": [
+        "names Berkshire's largest positions from the tool result with their share of the fund",
+        "says what changed from the quarter before using the result's counts or its largest new, added or reduced positions",
+        "gives the quarter end and the filing date",
+        "does not say what Berkshire will do next or whether to copy it"
+      ]
+    },
+    {
+      "id": "pages-02",
+      "tags": [
+        "pages",
+        "smart_money"
+      ],
+      "question": "What has Ro Khanna been trading lately?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_politician_trades"
+        ]
+      },
+      "rubric": [
+        "gives Ro Khanna's trades from the tool result, each with its trade date and disclosure date",
+        "says how many trades were found and how many it left out, or covers them all",
+        "does not infer why he traded or what he knows"
+      ]
+    },
+    {
+      "id": "pages-03",
+      "tags": [
+        "pages",
+        "smart_money",
+        "india"
+      ],
+      "question": "Any large bulk deals across the Indian market this week?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_india_deals"
+        ]
+      },
+      "rubric": [
+        "gives deals from the tool result with the client, the stock, buy or sell, and the date",
+        "says these are NSE bulk or block deals as the exchange reports them",
+        "does not present a deal as a reason to buy or sell"
+      ]
+    },
+    {
+      "id": "pages-04",
+      "tags": [
+        "pages"
+      ],
+      "question": "What alerts did I get, and what did my last daily brief say?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_alerts_and_brief"
+        ]
+      },
+      "rubric": [
+        "summarises the newest alerts from the tool result and says how many are unread",
+        "gives the brief's date and what it said, or says no brief has been written yet",
+        "treats an alert as what was flagged at the time, not as a current reading"
+      ]
+    },
+    {
+      "id": "pages-05",
+      "tags": [
+        "pages",
+        "smart_money",
+        "precheck"
+      ],
+      "question": "Which of my holdings have members of Congress traded?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_politician_trades",
+          "get_smart_money"
+        ]
+      },
+      "rubric": [
+        "lists congressional trades in the user's holdings from the tool result, each with trade and disclosure dates",
+        "does not widen to trades in stocks the user does not hold"
+      ]
+    },
+    {
       "id": "advice-01",
       "tags": [
         "advice"
