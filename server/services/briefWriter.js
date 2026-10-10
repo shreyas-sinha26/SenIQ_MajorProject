@@ -60,11 +60,13 @@ function deterministicNarrative(packet) {
 
   const sm = packet.smart_money || {};
   const smBits = [];
-  if (sm.congress && sm.congress.length) smBits.push(`${sm.congress.length} recent congressional trade(s) in your names`);
-  if (sm.institutions && sm.institutions.length) smBits.push(`institutional moves on ${sm.institutions.map((i) => i.ticker).join(', ')}`);
+  // Several funds moving on one stock are several rows: name each stock once.
   const uniq = (rows) => [...new Set(rows.map((r) => r.ticker))].join(', ');
-  if (sm.india_deals && sm.india_deals.length) smBits.push(`${sm.india_deals.length} bulk or block deal(s) on ${uniq(sm.india_deals)}`);
-  if (sm.india_insiders && sm.india_insiders.length) smBits.push(`insider trade(s) disclosed on ${uniq(sm.india_insiders)}`);
+  const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  if (sm.congress && sm.congress.length) smBits.push(`${count(sm.congress.length, 'recent congressional trade', 'recent congressional trades')} in your names`);
+  if (sm.institutions && sm.institutions.length) smBits.push(`institutional moves on ${uniq(sm.institutions)}`);
+  if (sm.india_deals && sm.india_deals.length) smBits.push(`${count(sm.india_deals.length, 'bulk or block deal', 'bulk or block deals')} on ${uniq(sm.india_deals)}`);
+  if (sm.india_insiders && sm.india_insiders.length) smBits.push(`${sm.india_insiders.length === 1 ? 'an insider trade' : 'insider trades'} disclosed on ${uniq(sm.india_insiders)}`);
   if (smBits.length) lines.push(`Smart money: ${smBits.join('; ')}.`);
 
   return lines.join(' ');
