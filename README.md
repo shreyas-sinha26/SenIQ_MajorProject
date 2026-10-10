@@ -92,7 +92,9 @@ off, `v2.N` with them on. The latest is `v1.14` / `v2.15`: IPO Watch opens an is
 - **Ask** — a tool-calling agent with saved conversations. It answers about the user's
   holdings, market news and general finance education, and each answer is checked against
   its evidence. For a stock outside the portfolio it gives the price, the sentiment
-  reading and what the price did over the past year, and nothing more. With IPO Watch on it also answers about the issues on that calendar: it
+  reading and what the price did over the past year, and nothing more. It also reads what
+  the Institutions and Congress pages show (a fund's holdings, a politician's trades,
+  Indian deals) and the user's own alerts and daily brief. With IPO Watch on it also answers about the issues on that calendar: it
   compares them on recorded figures (subscription, grey market premium, news tone) and never
   names one as the better buy.
 - Both use Claude Haiku and fall back to code-written text when the model is off or fails.
