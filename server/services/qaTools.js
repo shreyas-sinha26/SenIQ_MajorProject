@@ -8,6 +8,8 @@
  * SCOPE IS ENFORCED HERE, not in the prompt: every ticker argument is checked against the
  * user's holdings (ctx.heldSet) before any query runs. A prompt-injected or confused model
  * asking for a stock the user doesn't own gets a not_in_portfolio error, never data.
+ * The one exception is get_stock_snapshot: the price and sentiment reading of any company in
+ * the reference, held or not, and nothing more (stockSnapshot.js).
  */
 
 const { QA, SENTIMENT } = require('../config');
@@ -15,6 +17,7 @@ const { scoreTicker, explainSentiment, labelFor } = require('./sentimentScoring'
 const { getImpactFeed } = require('./impactScoring');
 const { searchNews, getStory } = require('./newsSearch');
 const { listDisclosures, getDisclosure } = require('./disclosures');
+const { findCompany, snapshot } = require('./stockSnapshot');
 
 const round = (n, d = 2) => (n == null ? null : Math.round(n * 10 ** d) / 10 ** d);
 const day = (t) => (t ? new Date(t).toISOString().slice(0, 10) : null);
@@ -231,6 +234,11 @@ const TOOLS = [
     description: 'The articles behind ONE story returned by search_news (pass its id, e.g. "e12"): each article\'s title, longer summary, source and date. Use only when a story card is not enough to answer.',
     input_schema: { type: 'object', properties: { id: { type: 'string', description: 'A story id from search_news results.' } }, required: ['id'] },
   },
+  {
+    name: 'get_stock_snapshot',
+    description: 'Price and sentiment for ONE company the user does NOT hold, by name or ticker: live price, day change %, and SenIQ\'s sentiment label and score with the number of stories behind it. This is everything SenIQ can say about a stock outside the portfolio: no news detail, smart money or impact. Use it when a question sets a held stock beside one that is not held. If several companies match the name, the result lists them: ask the user which one. For a held stock use the holding tools instead.',
+    input_schema: { type: 'object', properties: { name: { type: 'string', description: 'The company\'s name or ticker as the user wrote it, e.g. "AMD" or "Hero MotoCorp".' } }, required: ['name'] },
+  },
 ];
 
 // ── Executors ──
@@ -267,6 +275,15 @@ const EXECUTORS = {
       ...rankHoldings(out),
       note: 'Holdings are listed largest first; rank 1 is the largest exposure. exposure_pct is the holding\'s share of the portfolio, as the Portfolio page shows it. A holding marked exposure_estimated has no live price or no quantity, so its share is an estimate (it is counted at the average size of the priced holdings); say "about". A holding in "unpriced" has no live price, so its day change is unknown.',
     };
+  },
+
+  async get_stock_snapshot({ name } = {}, ctx) {
+    const typed = String(name || '').trim().slice(0, 40);
+    if (!typed) throw new ScopeError('name is required');
+    const found = await findCompany(typed);
+    if (found.none) throw new ScopeError(`not_found: SenIQ's company reference has nothing called "${typed}", so there is no price or sentiment for it. Say so; do not describe it from memory.`);
+    if (found.matches) return { kind: 'stock_snapshot', matches: found.matches, note: 'Several companies match that name. Ask the user which one they mean; do not pick one.' };
+    return snapshot(found.company, { held: ctx.heldSet.has(found.company.ticker) });
   },
 
   async get_attribution(_args, ctx) {

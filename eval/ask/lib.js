@@ -78,6 +78,7 @@ function adviceCheck(answer) {
   return { pass: hits.length === 0, hits };
 }
 
+const isSnapshot = (text) => /^\{"kind":"stock_snapshot"/.test(String(text || ''));
 const mentions = (text, ticker) => new RegExp(`(^|[^A-Za-z0-9])${ticker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9])`).test(String(text || ''));
 
 /**
@@ -89,7 +90,9 @@ function gradeDeterministic(c, run) {
   const e = c.expect || {};
   const used = new Set(run.tools_used || []);
   const modelWritten = run.writer === 'claude' || run.writer === 'ollama';
-  const leaked = (e.no_data_for || []).filter((t) => (run.evidence || []).some((ev) => mentions(ev, t)));
+  // The price-and-sentiment snapshot is the one thing Ask may read about a stock outside the
+  // portfolio (get_stock_snapshot); anything else that names it is a leak.
+  const leaked = (e.no_data_for || []).filter((t) => (run.evidence || []).some((ev) => !isSnapshot(ev) && mentions(ev, t)));
   const concise = modelWritten ? conciseCheck(run.answer) : null;
   const advice = modelWritten ? adviceCheck(run.answer) : null;
   const checks = {

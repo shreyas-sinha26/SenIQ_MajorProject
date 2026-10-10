@@ -157,4 +157,8 @@ async function runDataTool(userId, name, rawArgs = {}) {
   }
 }
 
-module.exports = { DATA_TOOLS, runDataTool };
+// Ask tools that are deliberately not in this catalog. Decided 2026-10-10: nothing new goes
+// on /mcp or /v1 for now, so the tools added to Ask since then are Ask only.
+const ASK_ONLY = ['get_stock_snapshot'];
+
+module.exports = { DATA_TOOLS, ASK_ONLY, runDataTool };
