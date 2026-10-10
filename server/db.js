@@ -25,6 +25,21 @@ pool.on('error', (err) => {
   console.error('⚠️  Unexpected Postgres pool error:', err.message);
 });
 
+// A Postgres error carries the row it refused ("Failing row contains (…)") and the bound
+// values in `detail` and `where`. Handlers print the whole error, so a failed write to
+// users would put an email address and a password hash in the logs. The two fields stay
+// readable to code (err.detail) but are left out when the error is printed or reported.
+function hideRowData(err) {
+  for (const key of ['detail', 'where']) {
+    if (err && typeof err === 'object' && err[key] !== undefined) {
+      Object.defineProperty(err, key, { value: err[key], enumerable: false, writable: true, configurable: true });
+    }
+  }
+  return err;
+}
+const rawPoolQuery = pool.query.bind(pool);
+pool.query = (...args) => rawPoolQuery(...args).catch((err) => { throw hideRowData(err); });
+
 // ─── Query helpers ───────────────────────────────────────────
 // Use $1, $2… placeholders (Postgres), not ?.
 async function query(text, params = []) {
@@ -52,7 +67,7 @@ async function tx(fn) {
     return out;
   } catch (err) {
     await client.query('ROLLBACK');
-    throw err;
+    throw hideRowData(err);
   } finally {
     client.release();
   }
@@ -109,4 +124,4 @@ async function closePool() {
   await pool.end();
 }
 
-module.exports = { pool, query, queryOne, execute, tx, runMigrations, healthCheck, closePool };
+module.exports = { pool, query, queryOne, execute, tx, hideRowData, runMigrations, healthCheck, closePool };

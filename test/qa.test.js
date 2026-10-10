@@ -7,7 +7,7 @@
 const assert = require('node:assert');
 const { QA } = require('../server/config');
 const { computeAttribution, rankHoldings, tallyBy, findMentionedTickers, scopeCheck, outOfScopeAnswer, runTool, TOOLS, EXECUTORS } = require('../server/services/qaTools');
-const { sanitizeHistory, runAgent, agentSetup, deterministicAnswer, buildOllamaPrompt, ollamaAnswer, SYSTEM_PROMPT } = require('../server/services/qa');
+const { sanitizeQuestion, sanitizeHistory, runAgent, agentSetup, deterministicAnswer, buildOllamaPrompt, ollamaAnswer, SYSTEM_PROMPT } = require('../server/services/qa');
 const ST = require('../server/services/strategyTools');
 const { checkGrounding, extractClaims } = require('../server/services/answerCheck');
 const { toVectors, searchTerms, keywordPatterns, storyOf, fuseStories, rankStories } = require('../server/services/newsSearch');
@@ -35,6 +35,14 @@ const universe = [
 const held = new Set(['AAPL', 'RELIANCE']);
 
 section('findMentionedTickers / scopeCheck:');
+check('a question is text: a number or an object in its place is no question', () => {
+  assert.strictEqual(sanitizeQuestion('  What  moved\nmy book? '), 'What moved my book?');
+  assert.strictEqual(sanitizeQuestion({ a: 1 }), '');   // was asked, and saved, as "[object Object]"
+  assert.strictEqual(sanitizeQuestion(42), '');
+  assert.strictEqual(sanitizeQuestion(['why']), '');
+  assert.strictEqual(sanitizeQuestion(null), '');
+  assert.strictEqual(sanitizeQuestion('x'.repeat(QA.MAX_QUESTION_CHARS + 50)).length, QA.MAX_QUESTION_CHARS);
+});
 check('ticker and company name both match', () => {
   assert.deepStrictEqual(findMentionedTickers('news on nvidia and $AAPL?', universe).sort(), ['AAPL', 'NVDA']);
 });
