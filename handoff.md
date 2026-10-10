@@ -1,6 +1,6 @@
 # SenIQ — Handoff
 
-Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10). This file describes the project **as it stands now**. The previous
+Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14` (§3, §11). This file describes the project **as it stands now**. The previous
 handoff was a session-by-session log (1,658 lines); it is still in git history
 (`git show 6ee98d9:handoff.md`) if a detail of how something was built is needed.
 
@@ -61,26 +61,22 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ## 3. Current state
 
-- **Git** *(checked 2026-10-09, evening)*: on `main`, level with `origin/main`, no open pull
-  request. Latest tags **`v1.12`** on `d9ec9df` (the merge of pull request #13, IPO Watch) and
-  **`v2.13`** on `f3638fb` (the merge of pull request #14, the paper ledger, §5). `v2.13` is
-  strategies-only work, so there is no `v1.13` (Annas's decision, §11). The one commit after
-  `f3638fb` on `main` is handoff and README notes. One other branch exists, local and on
-  GitHub: `crypto-kb`, already merged as pull request #12 and still checked out in the
-  worktree `.claude/worktrees/crypto-kb`; nothing on it is missing from `main`. Untracked and
-  never pushed: `samples/` and `.github/` (see §11).
-- **Branch `v1-qa-fixes`** *(2026-10-10)*: local commits on top of `main`, **not pushed, no
-  pull request yet**. It holds the fixes from a QA pass of `v1.12` (§8, "QA pass") and, from
-  the second and third rounds, the fixes on the strategies side (§8). On `main` itself the
-  figures below still describe `v2.13`.
-- **The local engine changed with it** *(2026-10-10)*: three files in `strategy-service/`
+- **Git** *(checked 2026-10-10, evening)*: on `main`, level with `origin/main`, no open pull
+  request. Latest tags **`v1.13`** and **`v2.14`**, both on `71230ec`, the merge of pull
+  request #15 (the QA pass, §8). Before it: `v1.12` on `d9ec9df` and `v2.13` on `f3638fb`;
+  `v2.13` was strategies-only work, which is why the two numbers differ (§11). The one
+  commit after `71230ec` on `main` is handoff and README notes. One other branch exists,
+  local and on GitHub: `crypto-kb`, already merged as pull request #12 and still checked out
+  in the worktree `.claude/worktrees/crypto-kb`; nothing on it is missing from `main`.
+  Untracked and never pushed: `samples/` and `.github/` (see §11).
+- **The local engine changed with the QA pass** *(2026-10-10)*: three files in `strategy-service/`
   (gitignored, so not in any commit): `service/signal_runner.py`, `engine/data/base.py`,
   `engine/analytics/walk_forward.py`, plus `tests/test_qa_fixes.py`. The files as they were
   are in the macOS Trash as `seniq-engine-pre_qa_2026-10-10` (gone once the Trash is
-  emptied). The pages on this branch expect this engine: with the old one the signal and
+  emptied). The pages on `main` expect this engine: with the old one the signal and
   crypto fixes are absent and the robustness verdict is the old one.
-- **Tests** *(checked 2026-10-10 on `v1-qa-fixes`, after the third round)*: `npm test` passes — 27 files, 668 checks, offline
-  (no database or API calls). On `main`: 25 files, 619 checks. The local engine's own tests: 60 pass
+- **Tests** *(checked 2026-10-10 on the commit that was merged)*: `npm test` passes — 27 files, 668 checks, offline
+  (no database or API calls). The local engine's own tests: 60 pass
   (`cd strategy-service && ./venv/bin/python -m pytest -q`).
 - **Dev database** *(checked 2026-10-09, evening)*: Postgres `seniq`, 42 of the 43 migration
   files applied (latest `0041_ipo_graduation`). **`0042_paper_ledger` is not applied yet**; the
@@ -98,9 +94,6 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ### Next, in order
 
-00. **Review `v1-qa-fixes`, push it and open the pull request** (Annas merges; both sides
-   changed, so the tags would be `v1.13` / `v2.14`). Every finding of the QA pass is closed
-   on this branch (§8); what is left is listed in §10 as known limits.
 0. **IPO Watch: let it run.** `IPO_WATCH=1` is in the local `.env` since 2026-10-09. The 09:15
    IST poll has not yet fired on its own, and the GMP trend, the 1-week and later returns and
    graduation have only been seen on their first day. The "+ Portfolio" button has not been
@@ -650,7 +643,7 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
   news row (`impactScoring.dirLabel` has no neutral band).
 - Alerts, cached briefs and `event_outcomes` made before the re-score keep the old readings.
 
-**QA pass (2026-10-10, branch `v1-qa-fixes`).** `v1.12` was tested through the API and the
+**QA pass (2026-10-10, branch `v1-qa-fixes`, merged as pull request #15).** `v1.12` was tested through the API and the
 browser, the defects fixed, and the branch re-checked the same way (91 API probes, all pages).
 What changed in behaviour:
 - **Bad input is a 400 or 404, never a 500**: malformed JSON (400), a body over 100 KB (413),
@@ -1074,6 +1067,7 @@ that remain, none of them a defect waiting for a fix:
 | `v1.11` / `v2.11` | `68ef315` | #11: two-tier company reference (1,839 listed companies: S&P 1500 and Nifty 500), strict matching for held listed names, listed names shielding curated ones, 15 commodities |
 | `v1.12` / `v2.12` | `d9ec9df` | #13: IPO Watch (opt-in) — Indian and US IPO calendar, grey market premium and subscription, stories linked and read for tone, outcomes to the three-month close, graduation into the company reference as an `ipo` tier. Also #12: the curated coins and crypto news feeds |
 | `v2.13` (no `v1.13`) | `f3638fb` | #14: the paper ledger — a daily job stores each paper deployment's fills and closing value from completed days, emails a new fill, and the record is read on the Paper Trade page, at `/v1/paper/:id/ledger` and through `get_paper_ledger` |
+| `v1.13` / `v2.14` | `71230ec` | #15: the QA pass of 2026-10-10 — no new feature, no migration. v1: bad input is a 400 or 404, logs carry no bodies or failed rows, Ask's holding size is the exposure figure, an executive's other venture is not their company, the brief's writer sees no engine scores and its headline is checked. v2: saves and deployments are checked first, bad ids are 404s, engine refusals in plain words, starting capital bounded, the Builder keeps what was typed, the robustness check counts traded windows, an account off Pro keeps the handle on its deployments |
 
 Pull request #6 was closed by GitHub when its base branch was deleted; #7 replaced it.
 
@@ -1103,9 +1097,11 @@ migrations (`0031`–`0041`), `server/services/ipoWatch/`, a tab with an India /
 two touches on the news pipeline (company news for newly filed or priced US issues; linking
 and reading IPO stories at the end of each pass). `IPO_PLAN.md` is the full record.
 
-**Branch `v1-qa-fixes`** (2026-10-10) is local only: the QA fixes of §8 (all three rounds),
-in commits on top of `main`. Not pushed; no pull request. The engine's part of the second
-round is in `strategy-service/` and in no commit.
+**Pull request #15** (`v1-qa-fixes`) was merged on 2026-10-10 as `71230ec`, at Annas's
+request from a session, and the branch deleted. Tagged `v1.13` / `v2.14`: both sides
+changed, so each took its next free number. It holds the QA fixes of §8 (all three rounds),
+20 commits. The engine's part of the second round is in `strategy-service/` and in no
+commit.
 
 **Pull request #14** (`paper-ledger`) was merged by Annas on 2026-10-09 as `f3638fb`. Tagged
 **`v2.13` only**, and the branch deleted. The paper ledger (§5): migration `0042`,
@@ -1124,4 +1120,4 @@ round is in `strategy-service/` and in no commit.
 | `RAG_PLAN.md` | Ask, retrieval and signals plan (agreed 2026-10-07); India filings spike notes | Partly built |
 | `IPO_PLAN.md` | Sentiment for IPOs and small/mid-caps, where 13F and congress data are blind | Change 3 (IPO Watch) and Change 4 (graduation) built, pull request #13; Changes 1, 2 and 5 are plan only |
 | `DEPLOY.md` | Render + Neon + Cloudflare steps | Ready, not executed |
-| `README.md` | Project overview, features, setup (macOS and Windows), known limits | Yes — rewritten 2026-10-08 against this handoff, up to `v1.8` / `v2.8`; later features added section by section, latest `v2.13` |
+| `README.md` | Project overview, features, setup (macOS and Windows), known limits | Yes — rewritten 2026-10-08 against this handoff, up to `v1.8` / `v2.8`; later features added section by section, latest `v1.13` / `v2.14` |
