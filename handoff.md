@@ -1,6 +1,6 @@
 # SenIQ — Handoff
 
-Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening). This file describes the project **as it stands now**. The previous
+Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8). This file describes the project **as it stands now**. The previous
 handoff was a session-by-session log (1,658 lines); it is still in git history
 (`git show 6ee98d9:handoff.md`) if a detail of how something was built is needed.
 
@@ -68,8 +68,11 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   GitHub: `crypto-kb`, already merged as pull request #12 and still checked out in the
   worktree `.claude/worktrees/crypto-kb`; nothing on it is missing from `main`. Untracked and
   never pushed: `samples/` and `.github/` (see §11).
-- **Tests** *(checked 2026-10-09)*: `npm test` passes — 25 files, 619 checks, offline
-  (no database or API calls). The local engine's own tests: 49 pass
+- **Branch `v1-qa-fixes`** *(2026-10-10)*: local commits on top of `main`, **not pushed, no
+  pull request yet**. It holds the fixes from a QA pass of `v1.12` (§8, "QA pass"). On `main`
+  itself the figures below still describe `v2.13`.
+- **Tests** *(checked 2026-10-10 on `v1-qa-fixes`)*: `npm test` passes — 26 files, 630 checks, offline
+  (no database or API calls). On `main`: 25 files, 619 checks. The local engine's own tests: 49 pass
   (`cd strategy-service && ./venv/bin/python -m pytest -q`).
 - **Dev database** *(checked 2026-10-09, evening)*: Postgres `seniq`, 42 of the 43 migration
   files applied (latest `0041_ipo_graduation`). **`0042_paper_ledger` is not applied yet**; the
@@ -84,6 +87,9 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ### Next, in order
 
+00. **Review `v1-qa-fixes`, push it and open the pull request** (Annas merges; both sides
+   changed, so the tags would be `v1.13` / `v2.14`). The `v2.13` findings from the same QA
+   pass are listed in §10 and are **not fixed yet**: that work waits for Annas's go-ahead.
 0. **IPO Watch: let it run.** `IPO_WATCH=1` is in the local `.env` since 2026-10-09. The 09:15
    IST poll has not yet fired on its own, and the GMP trend, the 1-week and later returns and
    graduation have only been seen on their first day. The "+ Portfolio" button has not been
@@ -222,7 +228,10 @@ in for the company reference while a company has no ticker: stored stories are l
 issue by name and read for tone as news about it (`ipo_articles`). After listing the issue
 gets its ticker, its outcome is logged (`ipo_outcomes`: listing gain, then listing-day,
 1-week, 1-month and 3-month closes from Yahoo), and once a price confirms the ticker the
-company graduates into `companies` in a tier of its own, `ipo`. With the switch on, the news
+company graduates into `companies` in a tier of its own, `ipo`. A listed issue stays on the
+calendar 100 days (`RECENT_LISTED_DAYS`; at 90 it left the day before its 3-month return could
+be shown), and the page says when the calendar was last refreshed, with a warning past 30
+hours (`STALE_AFTER_HOURS`) — the poll is daily and never runs on start. With the switch on, the news
 pipeline also fetches company news for up to 10 newly filed or priced US issues and links
 IPO stories at the end of each pass. **`IPO_PLAN.md` is the full record**: decisions, build
 status, limits. Before any hosting, InvestorGain's reuse terms must be settled (the same open
@@ -246,7 +255,10 @@ half has never run. Both features fall back to code-written text when Claude is 
 **Model access and cost guards** (`llmClient.js`). Claude goes through AIRouter when
 `AIROUTER_API_KEY` is set, otherwise the Anthropic key. Nothing is called unless
 `CLAUDE_REPORTS=1`. Guards: per-user daily quotas by tier, a $5/day global ceiling, every call
-logged with its cost in `claude_calls`.
+logged with its cost in `claude_calls`. The daily brief's allowance is the plan's
+(`TIERS[tier].claudeReportsPerDay`: Free 0, Plus 1, Pro 2); until 2026-10-10 it was a flat 1,
+so the scheduler paid for a Claude brief for every Free account, which cannot open it. A
+Refresh that may not use Claude keeps a Claude-written brief instead of replacing it.
 
 **Report emails** (`reportEmails.js`, `reportPdf.js`, `reportInsights.js`, `cardWriter.js`,
 `eveningReport.js`). The report is a PDF attachment; the email body is one line.
@@ -286,7 +298,9 @@ unsubscribe links, so changing it breaks links in emails already sent. Request s
 | API / MCP, webhooks | no | no | yes |
 
 Checkout is a **dev stub** that flips the tier directly; it refuses in production unless the
-caller is an admin. No payment provider is wired.
+caller is an admin. No payment provider is wired. A move to a plan whose holdings limit is
+below what the account holds is refused (409, "remove N first") — Annas's choice, 2026-10-10.
+The limit and the duplicate check run under a per-user lock, so parallel adds cannot pass it.
 
 **v2: strategies, MCP and the public API.** A separate FastAPI engine (`strategy-service/`,
 port 8100, lifted from Zeuniq; backtest and paper trading only). The Builder mixes technical
@@ -411,16 +425,42 @@ All the write scripts are dry runs without their flag.
   and 471 days on the run after start; each one's last recorded value matched the live replay;
   the stopped one was closed; the Paper Trade page showed the ledger.
 
+- **2026-10-10, QA pass** (branch `v1-qa-fixes`, a copy of the dev database, 15 Claude calls,
+  $0.106):
+  - Ask through AIRouter from the page and the API: 9 questions (tools, a follow-up in a
+    thread, a refusal with no model call, an advice probe, a prompt-injection attempt, a
+    general explanation, smart money). Every answer came back grounded.
+  - The daily brief through AIRouter, on request and **written by the scheduler on its own**
+    at 15:00 IST for the three Pro accounts whose New York clock had reached 05:30; the six
+    Free accounts on that clock got the code-written brief and cost nothing.
+  - One alert explanation and one set of report cards through AIRouter (called directly, no
+    email): 4 of 6 cards rewritten, one rewrite rejected by its check, one line left out.
+  - **Two real emails to Annas**: a password reset, and an end-of-day PDF report (outcome
+    `full`) **sent by the scheduler's own 14:45 run**. The copy's account was put on Sydney
+    time so its 20:00 window was open. SMTP worked from the usual network that day.
+  - **The IPO poll through the scheduler** (its time moved to five minutes ahead by a start
+    wrapper, nothing else changed): 3 sources, 108 issues, 4 GMP and 44 subscription
+    readings, 3 new outcomes; then 5 of 20 tickers found, 8 of 9 returns updated, 6
+    companies graduated. No error.
+  - "+ Portfolio" on IPO Watch clicked (an Indian issue: NSE, priced in rupees).
+  - A browser click-through of every v1 page, and of Strategy Builder, Backtest, Your
+    Strategies and Paper Trade with the engine.
+  - Google and GitHub sign-in **against simulated providers** (the real routes, sessions and
+    database; only the providers' HTTP endpoints stood in): 38 checks, including the state
+    and nonce refusals and both account-linking rules.
+
 **Never run for real:**
 - Any hosting. Scheduled reports and the India poll only run while the app happens to be up.
-- A report email sent by the scheduler; the 15-minute jobs through a real morning or evening.
-- The end-of-day report's "closed" and "skip" outcomes, and an actual evening send.
-- Google/GitHub sign-in end to end on the new sessions.
-- The daily brief and the alert narrative through AIRouter.
+- The 15-minute jobs through a real morning or evening on the users' real clocks; the weekly
+  summary and the weekday morning brief email.
+- The end-of-day report's "closed" and "skip" outcomes.
+- Google/GitHub sign-in with the real providers (no client ids are set).
+- An alert email with its Claude narrative actually sent.
 - Vector news search and embeddings (no `HF_API_TOKEN`, no pgvector).
 - Ask's strategy tools and the strategy-draft tool against the real engine (stand-in only).
 - The Ollama fallbacks against a real local model.
-- A full browser click-through of v1 or v2 on any tag from `v1.2` onwards.
+- The MCP server and `/v1` from a real client since 2026-10-07 (the QA pass called them with
+  a test key only).
 - An India alert from live NSE data.
 - Email through Resend; bounce and complaint handling.
 - A paper fill email actually sent (offline tests only), the 01:15 UTC ledger job firing on
@@ -550,6 +590,47 @@ coverage. Hosting and a sentiment backfill would fix it; both are parked by Anna
 - A story read as neutral just below the middle (0.46) is still worded "Reads negative" on the
   news row (`impactScoring.dirLabel` has no neutral band).
 - Alerts, cached briefs and `event_outcomes` made before the re-score keep the old readings.
+
+**QA pass (2026-10-10, branch `v1-qa-fixes`).** `v1.12` was tested through the API and the
+browser, the defects fixed, and the branch re-checked the same way (91 API probes, all pages).
+What changed in behaviour:
+- **Bad input is a 400 or 404, never a 500**: malformed JSON (400), a body over 100 KB (413),
+  a route id that is not a plain positive number (`middleware/idParam.js`, 404), a plan or
+  provider name such as `__proto__` (`tier.isTier`). An unknown `/api` path is a 404 in JSON
+  and a path naming a file that is not in `public/` is a 404, not the app's page.
+- **Logs no longer carry secrets**: a refused request body is not logged, and a database
+  error prints without its `detail` / `where` (`db.hideRowData`) — a failed write to `users`
+  used to print the row, password hash included.
+- **Portfolio**: quantity and cost are capped at 1e12; a symbol in no company list with no
+  price is still added but the answer carries a `warning` the page shows; the Portfolio
+  table shows the same exposure figure as every other page (`exposure_pct`, marked `≈` when
+  the holding has no quantity or price); "added" is said only after the server accepts it;
+  the table keeps its sentiment columns through a redraw; prices re-read every five minutes.
+- **The header's "Live"** turns to "Offline" when the server cannot be reached, and the
+  page says so in words instead of the browser's "Failed to fetch".
+- **IPO Watch**: the header's switches wrap instead of overlapping (they covered the US
+  button on a phone); an issue's news wraps inside the visible width; rows open from the
+  keyboard; an unknown issue id is a 404.
+- **News matching**: a commodity word describing something else is not the commodity ("gold
+  grills", "gold medal", "silver lining", "palm oil" — `describesSomethingElse` in
+  `entityResolver.js`). Stored tags are unchanged.
+- **Sign-in**: the address is trimmed at sign-in and reset; a new password equal to the old
+  one is refused; in production the reset email is sent after the answer, so a registered
+  address no longer answers seconds slower than an unknown one.
+- The headline analyzer reads with FinBERT when it is on and says which reader it used.
+
+Seen in the same pass and **not changed** (v1):
+- Ask reports a holding's share among **priced** holdings (`weight_pct`), every other page
+  the exposure figure; they differ only when a holding has no quantity (52.3% against 41.8%
+  for the same Apple position in the test account).
+- News about SpaceX and Starlink is tagged to Tesla through Elon Musk, and pulled Tesla's
+  score to 35 in the test account.
+- The Claude brief's headline runs to a full sentence and its text quotes raw scores
+  ("0.173-impact event", "z-score +0.27").
+- A report card can rest on a weak link (a rupee story shown for Reliance as "same sector").
+- The sign-in limiter counts successful sign-ins and is one bucket per address for sign-up,
+  sign-in and reset together (20 in 10 minutes).
+- The pipeline's log line says "read by the word list" when a run stored no new story.
 
 **Front end.**
 - Do not use the browser's `confirm()`, `alert()` or `prompt()`. Embedded browsers (the
@@ -764,6 +845,32 @@ hand-labelled sheets of (story, company) pairs (§8).
 - Real billing (Stripe for the US, Razorpay for India).
 - Quiet hours for alerts (dropped).
 
+**Found in the 2026-10-10 QA pass of `v2.13`, not fixed (waiting for Annas's go-ahead)**
+- **Paper ledger and the engine's clock.** The engine stamps a daily bar at local midnight
+  with the host's offset (`+05:30` even for AAPL) and the ledger compares instants. Run the
+  engine in another zone (a UTC host) and each deployment's last fill is recorded again, a
+  false "price history was revised" note is set, and a fill under 3 days old is emailed twice.
+- **Deploy and save validate nothing**: any symbol or exchange text is accepted, and a preset
+  name that does not exist is saved. Such a deployment counts toward the 10, fails on every
+  run and start, and makes `paper_mark.js` exit 1.
+- Bad ids are a 500 on the paper, strategies, keys and `/v1` routes (the v1 routes are fixed;
+  `idParam` is ready to use there). The MCP tool returns the raw Postgres message.
+- The Paper Trade page keeps "engine offline" after the engine is back, until a reload.
+- Engine errors read wrong: a starting capital of `1e30` is "Strategy engine is offline" from
+  the API and nothing at all on the Backtest page; `0` becomes 100,000; raw engine text
+  reaches the user ("interval '1d' lookback 7578d exceeds cap 1825d").
+- **The live signal can disagree with the backtest.** A saved EMA 20/50 strategy on AAPL
+  shows "FLAT, no signal yet" on Your Strategies while its one-year backtest has been long
+  since 2026-04-21: the signal reads about 130 bars and the entry is older than that.
+- **Crypto fails when the range includes today**: "OHLC out of [low,high] for CRYPTO:BTC" on
+  the day's unfinished bar, in backtests and in signals.
+- The robustness check calls a slow strategy "Fragile, profitable in 0% of unseen windows"
+  when the unseen windows simply had no trade (each starts flat and needs a new cross).
+- Strategy Builder: a period of 0, blank or 2.5 and a sizing of 0 are replaced silently; an
+  old "Fix these before running" box stays after a template is loaded.
+- A fill email is marked skipped for good when no provider is configured; a downgraded Pro
+  account cannot see or stop its deployments while the job keeps replaying them.
+
 **Build queue, roughly by value**
 1. Ask precision: measure the tool changes; try another answer model for the eval only; stop
    the automatic grounding check counting a general explanation as ungrounded; have Annas
@@ -859,6 +966,9 @@ matched in news strictly and only while held; commodities go from 4 to 15.
 migrations (`0031`–`0041`), `server/services/ipoWatch/`, a tab with an India / US switch, and
 two touches on the news pipeline (company news for newly filed or priced US issues; linking
 and reading IPO stories at the end of each pass). `IPO_PLAN.md` is the full record.
+
+**Branch `v1-qa-fixes`** (2026-10-10) is local only: the QA fixes of §8, in commits on top of
+`main`. Not pushed; no pull request.
 
 **Pull request #14** (`paper-ledger`) was merged by Annas on 2026-10-09 as `f3638fb`. Tagged
 **`v2.13` only**, and the branch deleted. The paper ledger (§5): migration `0042`,
