@@ -442,7 +442,9 @@ const REPORTS = {
 // to a deterministic grounded data summary (no NL reasoning, but it cites the numbers).
 const QA = {
   MODEL: 'claude-haiku-4-5',
-  MAX_OUTPUT_TOKENS: 1000,
+  // A model that thinks (Claude Haiku 5.5 and later) spends this limit on its thinking too:
+  // at 1,000 two of six answers were cut off before or in the middle of the text.
+  MAX_OUTPUT_TOKENS: 3000,
   PER_USER_DAILY_QUESTIONS: 10,  // fallback only — the real cap is TIERS[tier].qaPerDay (Plus 10 / Pro 30)
   MAX_QUESTION_CHARS: 500,       // clamp the (untrusted) question before prompting
   TOP_EVENTS: 10,                // extended grounding: fuller impact feed than the daily brief
