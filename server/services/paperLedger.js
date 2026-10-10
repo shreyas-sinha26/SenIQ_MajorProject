@@ -12,9 +12,16 @@
  * Rules the job keeps:
  *   - Completed days only. A bar dated today (UTC) may still be trading; it is stored on a
  *     later run. PAPER.MARK_CRON is set after every market it covers has closed.
- *   - Append-only. Nothing dated on or before the newest recorded fill (or day) is added,
- *     so a revised history cannot slip an older trade into the record. When a fresh replay
- *     disagrees with the record about which days traded, the deployment gets a note.
+ *   - Append-only. Nothing dated on or before the newest recorded fill's day (or the newest
+ *     recorded day) is added, so a revised history cannot slip an older trade into the
+ *     record. When a fresh replay disagrees with the record about which days traded, the
+ *     deployment gets a note.
+ *   - Days, not instants. A fill is placed by the date the engine gives it, never by the
+ *     moment in time. The engine stamps a daily bar at midnight in one fixed zone; if that
+ *     zone ever changes, every instant moves and every date stays, and a record kept by
+ *     instant would take each deployment's last fill a second time.
+ *   - Pro accounts only. A deployment whose owner is no longer on Pro is left as it is; if
+ *     the owner returns, the days it missed are recorded then.
  *   - A deployment is marked once per UTC day. A failed attempt (engine offline) leaves it
  *     due, so the next run or the next start picks it up.
  *   - A stopped deployment is recorded through its stop date once, then left alone.
@@ -23,7 +30,7 @@
  * PAPER.NOTIFY_FRESH_DAYS old when first recorded. Older fills are history, never sent.
  */
 const { PAPER, APP_URL, ALERT_EMAIL } = require('../config');
-const { iso } = require('./strategyClient');
+const { iso, engineFailure } = require('./strategyClient');
 
 const dayOf = (ts) => String(ts).slice(0, 10);
 const utcDay = (d = new Date()) => d.toISOString().slice(0, 10);
@@ -41,7 +48,7 @@ const addDays = (day, n) => {
  */
 function planLedger(replay, stored, today) {
   const seen = (stored && stored.fills) || [];
-  const lastMs = seen.length ? Math.max(...seen.map((f) => new Date(f.filled_at).getTime())) : null;
+  const lastFillDay = seen.length ? seen.map((f) => f.filled_on).sort().pop() : null;
   const lastDay = (stored && stored.lastDay) || null;
 
   const completed = (replay.fills || [])
@@ -55,7 +62,7 @@ function planLedger(replay, stored, today) {
     }))
     .filter((f) => f.filled_on < today);
 
-  const fills = completed.filter((f) => lastMs == null || new Date(f.filled_at).getTime() > lastMs);
+  const fills = completed.filter((f) => lastFillDay == null || f.filled_on > lastFillDay);
 
   // One value per day: the last point of that day (an intraday run has several).
   const byDay = new Map();
@@ -70,10 +77,10 @@ function planLedger(replay, stored, today) {
   // not compared: a dividend adjustment moves every past price a little without changing
   // what the strategy did.
   let note = null;
-  if (lastMs != null) {
+  if (lastFillDay != null) {
     const key = (day, side) => `${day}|${side}`;
     const recorded = seen.map((f) => key(f.filled_on, f.side)).sort();
-    const replayed = completed.filter((f) => new Date(f.filled_at).getTime() <= lastMs).map((f) => key(f.filled_on, f.side)).sort();
+    const replayed = completed.filter((f) => f.filled_on <= lastFillDay).map((f) => key(f.filled_on, f.side)).sort();
     if (recorded.join(',') !== replayed.join(',')) {
       note = 'A fresh replay no longer matches the recorded trades — the price history was revised after they were recorded. The recorded ledger stands.';
     }
@@ -139,7 +146,7 @@ async function markDeployment(row, { today = utcDay(), replayFn } = {}) {
 
   const out = await replay(row);
   let error = null;
-  if (out.status !== 200) error = out.status === 503 ? 'strategy engine is offline' : String((out.data && out.data.detail) || 'replay failed').slice(0, 300);
+  if (out.status !== 200) error = out.status === 503 ? 'strategy engine is offline' : String(engineFailure(out, 'replay failed').error).slice(0, 300);
   else if (!Array.isArray(out.data.fills)) error = 'the strategy engine is older than the ledger: its replay has no fills list';
   if (error) {
     await execute('UPDATE paper_deployments SET last_mark_error = $2 WHERE id = $1', [row.id, error]);
@@ -181,7 +188,11 @@ async function markDeployment(row, { today = utcDay(), replayFn } = {}) {
 }
 
 // Email the fills waiting to be sent, one message per user. Never throws.
-async function sendFillEmails({ today = utcDay(), sendEmailFn, emailEnabledFn } = {}) {
+//   noEmail — the by-hand "record, but send nothing": waiting fills are settled as skipped.
+// With no email provider configured the fills are NOT settled: they stay pending and go out
+// on a later run if a provider is set while they are still fresh, then lapse like any other
+// (they used to be marked skipped for good on the first run, provider or no provider).
+async function sendFillEmails({ today = utcDay(), sendEmailFn, emailEnabledFn, noEmail = false } = {}) {
   const summary = { sent: 0, skipped: 0, failed: 0 };
   try {
     const { query, queryOne, execute } = require('../db');
@@ -207,7 +218,8 @@ async function sendFillEmails({ today = utcDay(), sendEmailFn, emailEnabledFn } 
     for (const [userId, fills] of byUser) {
       const ids = fills.map((f) => f.id);
       try {
-        if (!enabled()) { await settle(ids, 'skipped'); summary.skipped++; continue; }
+        if (noEmail) { await settle(ids, 'skipped'); summary.skipped++; continue; }
+        if (!enabled()) { summary.skipped++; continue; } // left pending
         const user = await queryOne(
           'SELECT email, email_verified, email_alerts, subscription_tier FROM users WHERE id = $1', [userId]);
         const blocked = recipientBlock(user);
@@ -239,23 +251,26 @@ async function sendFillEmails({ today = utcDay(), sendEmailFn, emailEnabledFn } 
 
 let running = false;
 
+// The deployments a run marks: not closed, not already marked today (unless forced), and
+// owned by an account that is on Pro now. $1 = today (UTC), $2 = force.
+const DUE_SQL = `SELECT d.* FROM paper_deployments d JOIN users u ON u.id = d.user_id
+        WHERE d.ledger_closed_at IS NULL
+          AND u.subscription_tier = 'pro'
+          AND ($2::boolean OR d.last_marked_at IS NULL OR (d.last_marked_at AT TIME ZONE 'UTC')::date < $1::date)
+        ORDER BY d.id`;
+
 /**
  * The daily job: mark every deployment that is due, then send the fill emails.
  *   force — also mark deployments already marked today (the by-hand script).
  * → { due, marked, fills, days, failed: [{ id, error }], emails }
  */
-async function runPaperMarks({ today = utcDay(), force = false, replayFn, sendEmailFn, emailEnabledFn } = {}) {
+async function runPaperMarks({ today = utcDay(), force = false, replayFn, sendEmailFn, emailEnabledFn, noEmail = false } = {}) {
   const summary = { due: 0, marked: 0, fills: 0, days: 0, failed: [], emails: { sent: 0, skipped: 0, failed: 0 } };
   if (running) return summary;
   running = true;
   try {
     const { query } = require('../db');
-    const rows = await query(
-      `SELECT * FROM paper_deployments
-        WHERE ledger_closed_at IS NULL
-          AND ($2::boolean OR last_marked_at IS NULL OR (last_marked_at AT TIME ZONE 'UTC')::date < $1::date)
-        ORDER BY id`,
-      [today, force]);
+    const rows = await query(DUE_SQL, [today, force]);
     summary.due = rows.length;
     for (const row of rows) {
       const r = await markDeployment(row, { today, replayFn });
@@ -263,7 +278,7 @@ async function runPaperMarks({ today = utcDay(), force = false, replayFn, sendEm
       summary.failed.push({ id: row.id, error: r.error });
       if (r.status === 503) break; // engine offline: the rest would fail the same way
     }
-    if (summary.fills || summary.marked) summary.emails = await sendFillEmails({ today, sendEmailFn, emailEnabledFn });
+    if (summary.fills || summary.marked) summary.emails = await sendFillEmails({ today, sendEmailFn, emailEnabledFn, noEmail });
   } finally {
     running = false;
   }
@@ -298,5 +313,5 @@ async function readLedger(row) {
 
 module.exports = {
   planLedger, notifyState, recipientBlock, buildFillEmail,
-  markDeployment, sendFillEmails, runPaperMarks, readLedger, utcDay, addDays,
+  markDeployment, sendFillEmails, runPaperMarks, readLedger, utcDay, addDays, DUE_SQL,
 };
