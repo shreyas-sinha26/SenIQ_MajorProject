@@ -7,7 +7,7 @@
 const assert = require('node:assert');
 const { guardCheck, briefQuota } = require('../server/services/reports');
 const { buildDiff } = require('../server/services/grounding');
-const { deterministicBrief, parseClaudeOutput } = require('../server/services/briefWriter');
+const { deterministicBrief, parseClaudeOutput, packetForWriter, tidyHeadline } = require('../server/services/briefWriter');
 const { sanitizeQuestion, deterministicAnswer } = require('../server/services/qa');
 
 let passed = 0;
@@ -95,7 +95,44 @@ check('parseClaudeOutput splits HEADLINE marker', () => {
 });
 check('parseClaudeOutput falls back to first sentence', () => {
   const { headline } = parseClaudeOutput('Markets were calm today. The rest follows.');
-  assert.strictEqual(headline, 'Markets were calm today.');
+  assert.strictEqual(headline, 'Markets were calm today');
+});
+check('a headline that runs to a full sentence is cut to its first clause, or to 14 words', () => {
+  assert.strictEqual(tidyHeadline('Tesla drags 18% of your book.'), 'Tesla drags 18% of your book');
+  assert.strictEqual(
+    tidyHeadline('Apple leads your portfolio today as a new iPhone launch story touches 41.8% of your exposure, while Reliance and TCS stay quiet and Bitcoin slips.'),
+    'Apple leads your portfolio today as a new iPhone launch story touches 41.8%…');
+  assert.strictEqual(
+    tidyHeadline('Nvidia earnings beat — the biggest story for your portfolio today because it touches nearly a third of everything you hold'),
+    'Nvidia earnings beat');
+  const cut = tidyHeadline('one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen');
+  assert.strictEqual(cut, 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen…');
+  assert.strictEqual(parseClaudeOutput('HEADLINE: "Quiet day."\n\nBody').headline, 'Quiet day');
+});
+check('the writer never sees the engine\'s scores, only rank, share of the portfolio and words', () => {
+  const packet = {
+    user_id: 7, date: '2026-10-10',
+    portfolio: { holdings_count: 2, top_holdings: [
+      { ticker: 'AAPL', name: 'Apple', sector: 'Technology', exposure_pct: 41.8, sentiment_label: 'positive', sentiment_acute: 0.71, z: 1.62 },
+      { ticker: 'TCS', name: 'TCS', sector: 'IT', exposure_pct: 20, sentiment_label: 'neutral', sentiment_acute: 0.5, z: null }] },
+    top_events: [ev(1, { title: 'Big merger', impact_score: 0.173, exposure_pct: 41.8, last_seen: '2026-10-09T10:00:00Z' }), ev(2, { title: 'Second', impact_score: 0.09 })],
+    smart_money: { congress: [{ politician: 'A', action: 'buy', ticker: 'AAPL', date: '2026-09-01' }] },
+    changed: { has_prior: true, new_events: [{ event_id: 1, title: 'Big merger', impact_score: 0.173, exposure_pct: 41.8, direction: 'positive' }],
+      dropped_events: [], rank_changes: [], sentiment_swings: [{ ticker: 'AAPL', from_label: 'neutral', to_label: 'positive', from_acute: 0.52, to_acute: 0.71 }] },
+  };
+  const w = packetForWriter(packet);
+  const text = JSON.stringify(w);
+  assert.ok(!/impact_score|sentiment_acute|from_acute|to_acute|"z"|0\.173|0\.71|1\.62|user_id|event_id/.test(text), text);
+  assert.strictEqual(w.top_events[0].rank, 1);
+  assert.strictEqual(w.most_important.title, 'Big merger');
+  assert.strictEqual(w.most_important.exposure_pct, 41.8);
+  assert.strictEqual(w.top_events[0].date, '2026-10-09');
+  assert.strictEqual(w.portfolio.top_holdings[0].sentiment_vs_usual, 'well above its usual level');
+  assert.ok(!('sentiment_vs_usual' in JSON.parse(text).portfolio.top_holdings[1]), 'no history → nothing said about "usual"');
+  assert.deepStrictEqual(w.changed.sentiment_swings[0], { ticker: 'AAPL', from: 'neutral', to: 'positive', moved: 'more positive than yesterday' });
+  assert.deepStrictEqual(w.smart_money, packet.smart_money);
+  assert.strictEqual(packet.top_events[0].impact_score, 0.173, 'the stored packet is untouched');
+  assert.deepStrictEqual(packetForWriter({}).top_events, []);
 });
 
 console.log('\nQ&A (E6 — ask it anything):');
