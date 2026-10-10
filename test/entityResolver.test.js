@@ -51,6 +51,16 @@ check('new CEO resolves: John Ternus → AAPL', () => assert.ok(tk('John Ternus 
 check('chair still resolves: Warren Buffett → BRK.B', () => assert.ok(tk('Warren Buffett trims a stake').includes('BRK.B')));
 check('surname alias: "Musk" → TSLA', () => assert.deepStrictEqual(tk('Musk pay package faces a new vote'), ['TSLA']));
 check('surname alias is case-sensitive: "musk" → nothing', () => assert.deepStrictEqual(tk('a musk fragrance launch'), []));
+check('an executive\'s other venture is not their listed company: SpaceX and Starlink are not Tesla', () => {
+  assert.deepStrictEqual(tk("Elon Musk's SpaceX files to go public at a $1.5 trillion valuation"), []);
+  assert.deepStrictEqual(tk('Starlink wins India licence, Musk says service starts in weeks'), []);
+  assert.deepStrictEqual(resolve('Musk says xAI will double its Memphis data centre', 'The Grok maker is raising $20 billion.').tickers, []);
+  assert.deepStrictEqual(resolve("Musk's SpaceX wins a $5 billion NASA contract", '').executives, []);
+});
+check('the company named beside the other venture still counts', () => {
+  assert.deepStrictEqual(tk('Musk says SpaceX and Tesla will share a chip plant'), ['TSLA']);
+  assert.deepStrictEqual(resolve('Musk says SpaceX and Tesla will share a chip plant', '').executives, ['elon musk']);
+});
 check('"Sachin Gupta" does NOT match Achin Gupta (CIPLA)', () => assert.deepStrictEqual(tk('Sachin Gupta joins a fintech startup'), []));
 check('accented name: Carol Tomé → UPS', () => assert.ok(tk('Carol Tomé says volumes are recovering').includes('UPS')));
 
