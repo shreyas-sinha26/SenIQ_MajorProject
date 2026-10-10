@@ -350,7 +350,7 @@ operators. The user runs the backtest and deploys.
 - Event-type factor.
 - Historical analogues: similar past events joined to `outcomes`.
 
-### R9. IPO Watch in Ask — DONE 2026-10-10 against a scripted model (uncommitted, branch `ipo-ask`)
+### R9. IPO Watch in Ask — DONE 2026-10-10 (branch `ipo-ask`, commit `1f0e368`)
 Kickoff answers: compare, do not pick; Ask only (not MCP or `/v1`); India and the US together
 when the question names no market.
 - **Built** (`server/services/ipoTools.js`, loaded only when `FEATURES.IPO_WATCH` is on):
@@ -363,7 +363,7 @@ when the question names no market.
     in it skips the holdings pre-check and nothing else.
   - With no model, an IPO question gets a digest of the calendar.
 - **Details and limits:** `IPO_PLAN.md`, Change 3 build status.
-- **Open:** a paid run of the four `ipo-` eval cases.
+- **Paid runs 2026-10-11:** the four `ipo-` cases answered (`ipo-04` on a second run, after a timeout); see `handoff.md` §3, step P2.
 
 ## UI pass — DONE 2026-10-08 (uncommitted)
 Six items, all seen working in a browser against a scratch database copy in v2 mode.
