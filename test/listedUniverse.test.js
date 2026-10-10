@@ -145,6 +145,14 @@ check('"and" in a name may be "&", or dropped as the feeds drop it', () => {
     assert.ok(names('VISL', t), t);
   assert.ok(!names('VISL', 'Vedanta Iron ore output rises'));
 });
+check('an initial in a name, with its full stop and space or without', () => {
+  for (const t of ['D.R. Horton (DHI) Stock Sinks As Market Gains', 'D. R. Horton cuts its outlook', 'DR Horton orders fall 4%'])
+    assert.ok(names('DHI', t), t);
+  for (const t of ['JK Cement Q2 profit rises 18%', 'J.K. Cement to add 6 mtpa', 'J K Cement shares gain'])
+    assert.ok(names('JKCEMENT', t), t);
+  assert.ok(names('USB', 'US Bancorp tops estimates') && names('TROW', 'T Rowe Price sees outflows') && names('AJG', 'Arthur J Gallagher buys a broker'));
+  assert.ok(!names('DHI', 'Dr Horton hears a Who'));   // capitals as written
+});
 check('a company named for the part it plays in someone else\'s story is not the subject', () => {
   // The source of a view.
   assert.ok(!names('BANKBARODA', 'The rupee’s decline reflects RBI intervention. A Bank of Baroda analysis finds no single dominant driver.'));
