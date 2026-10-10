@@ -158,9 +158,15 @@
     strategies and start or stop paper deployments — virtual money only, no real orders, and nothing can be
     deleted through the API. A read-only key gets <code>403</code>.</p>
     <h3><span class="method post">POST</span>/v1/strategies/saved</h3>
-    <p>Body: <code>{name, custom | strategy, params?, symbols?}</code>. Max 20 saved strategies.</p>
+    <p>Body: <code>{name, custom | strategy, params?, symbols?}</code>. Max 20 saved strategies. What is saved is
+    checked first: a Builder spec by the engine, a built-in strategy and its params against the catalog, and each
+    of up to 5 <code>symbols</code> for a known market (<code>US</code>, <code>NSE</code>, <code>BSE</code>,
+    <code>CRYPTO</code>, <code>COMMODITY</code>). Anything else is a <code>400</code> with the reason.</p>
     <h3><span class="method post">POST</span>/v1/paper</h3>
-    <p>Body: <code>{strategy_id, symbol, exchange?, initial_cash?}</code>. Max 10 active deployments.</p>
+    <p>Body: <code>{strategy_id, symbol, exchange?, initial_cash?}</code>. Max 10 active deployments. The
+    deployment is replayed once before it is stored, so a symbol with no price data, an unknown market or a
+    strategy that cannot run is refused with a <code>400</code> and the reason. It needs the engine: with it
+    offline the answer is <code>503</code> and nothing is created.</p>
     <h3><span class="method post">POST</span>/v1/paper/:id/stop</h3>
     <p>Freezes a deployment; its record and trades are kept.</p>
 
@@ -221,8 +227,9 @@
       <tr><td>400</td><td>invalid request — the <code>error</code> field explains (bad params, unknown symbol, invalid spec)</td></tr>
       <tr><td>401</td><td>missing, malformed, or revoked API key</td></tr>
       <tr><td>403</td><td>key is valid but the account isn't on the Pro plan</td></tr>
-      <tr><td>404</td><td>unknown endpoint / strategy / deployment</td></tr>
+      <tr><td>404</td><td>unknown endpoint / strategy / deployment (an id that is not a plain positive number is a 404 too)</td></tr>
       <tr><td>429</td><td>rate limit exceeded — honor <code>Retry-After</code></td></tr>
+      <tr><td>502</td><td>the strategy engine is running but failed on this request — check the inputs; retrying unchanged will not help</td></tr>
       <tr><td>503</td><td>strategy engine offline — retry later</td></tr>
     </table>
 
