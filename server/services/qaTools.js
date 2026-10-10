@@ -244,12 +244,12 @@ const TOOLS = [
   },
   {
     name: 'get_stock_snapshot',
-    description: 'Price and sentiment for ONE company the user does NOT hold, by name or ticker: live price, day change %, and SenIQ\'s sentiment label and score with the number of stories behind it. This is everything SenIQ can say about a stock outside the portfolio: no news detail, smart money or impact. Use it when a question sets a held stock beside one that is not held. If several companies match the name, the result lists them: ask the user which one. For a held stock use the holding tools instead.',
+    description: 'Price and sentiment for ONE company the user does NOT hold, by name or ticker: live price, day change %, the latest session\'s high and low, and SenIQ\'s sentiment label and score with the number of stories behind it. This is everything SenIQ can say about a stock outside the portfolio: no news detail, smart money or impact. Use it when a question sets a held stock beside one that is not held. If several companies match the name, the result lists them: ask the user which one. For a held stock use the holding tools instead.',
     input_schema: { type: 'object', properties: { name: { type: 'string', description: 'The company\'s name or ticker as the user wrote it, e.g. "AMD" or "Hero MotoCorp".' } }, required: ['name'] },
   },
   {
     name: 'get_price_history',
-    description: 'What ONE price did over the past year, for a holding or any company, coin or commodity in SenIQ\'s reference, by name or ticker: the change over 1 week, 1 month, 3 months, 6 months, 1 year and the calendar year to date (each with the date and close it is measured from), the highest and lowest close with their dates, average daily volume, the latest daily closes and the month-end closes. Use for "how has X done this year / this month", "what was X\'s high", "how far is X off its peak". Closing prices only; it does not explain why the price moved (use the news tools for a holding).',
+    description: 'What ONE price did over the past year, for a holding or any company, coin or commodity in SenIQ\'s reference, by name or ticker: the change over 1 week, 1 month, 3 months, 6 months, 1 year and the calendar year to date (each with the date and close it is measured from), the highest and lowest price traded and the highest and lowest close with their dates and how far the last close is from each, the latest session\'s high and low, average daily volume, the latest daily closes and the month-end closes. Use for "how has X done this year / this month", "what was X\'s high today", "what is X\'s high for the year", "how far is X off its peak". It does not explain why the price moved (use the news tools for a holding).',
     input_schema: { type: 'object', properties: { name: { type: 'string', description: 'The name or ticker as the user wrote it, e.g. "NVDA", "Bitcoin" or "Hero MotoCorp".' } }, required: ['name'] },
   },
   {
@@ -475,7 +475,7 @@ const EXECUTORS = {
       india_insider_trades: insiderRows,
     } : {};
     return {
-      note: 'Disclosures lag the actual trades (13F up to 45 days after quarter end; congress up to 45 days after the trade). Each row\'s "action"/"change" is exactly what was disclosed — repeat it as written.',
+      note: 'Disclosures lag the actual trades (13F up to 45 days after quarter end; congress up to 45 days after the trade). Each row\'s "action"/"change" is exactly what was disclosed — repeat it as written. For a fund, shares and value_usd are the SIZE OF ITS POSITION at the quarter end, not the amount it bought or sold; a 13F does not give that amount.',
       congress_summary: tallyBy(congressRows, 'action'),
       congress: congressRows,
       institutions_summary: tallyBy(institutionRows, 'change'),

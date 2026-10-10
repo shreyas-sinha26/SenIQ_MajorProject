@@ -62,6 +62,13 @@ const reading = (count, score = 0.5, z = null, points = 12) => ({ label: score >
     assert.strictEqual(s.sentiment.z_vs_90d, 1.4);
     assert.ok(!('z_note' in s.sentiment));
   });
+  check('the latest session\'s high and low, when the price feed gives them', () => {
+    const s = S.buildSnapshot(HERO, { price: 4895.5, currency: 'INR', changePct: 0.8, dayHigh: 4953, dayLow: 4825 }, reading(2), { now: NOW });
+    assert.deepStrictEqual([s.session_high, s.session_low], [4953, 4825]);
+    assert.ok(S.snapshotLine(s).includes("Price ₹4,895.50, up 0.80% today. Its latest session's high was ₹4,953.00 and its low ₹4,825.00. News sentiment"));
+    const none = S.buildSnapshot(HERO, { price: 4895.5, currency: 'INR', changePct: 0.8, dayHigh: null, dayLow: null }, reading(2), { now: NOW });
+    assert.ok(!('session_high' in none) && !/latest session/.test(S.snapshotLine(none)));
+  });
   check('no stories is "no reading", never neutral', () => {
     const s = S.buildSnapshot(HERO, { price: 10, currency: 'INR', changePct: 0 }, reading(0), { now: NOW });
     assert.strictEqual(s.sentiment, null);
@@ -137,6 +144,9 @@ const reading = (count, score = 0.5, z = null, points = 12) => ({ label: score >
     const line = S.historyLine(h);
     assert.strictEqual(line, 'Closing prices to 2026-10-09 (its history here starts 2026-06-01): 1 week -5.27%, 1 month -6.18%, 3 months +1.50%. Highest close in the period ₹6,350.50 on 2025-12-05, lowest ₹4,775.50 on 2026-06-08.');
     assert.strictEqual(S.historyLine({ history: null }), 'There is no price history for it right now.');
+    // With each session's high and low to hand, the extremes are the prices traded.
+    assert.ok(S.historyLine({ ...h, highest_price: { date: '2025-12-04', price: 6388 }, lowest_price: { date: '2026-06-08', price: 4731.2 } })
+      .endsWith('Highest price in the period ₹6,388.00 on 2025-12-04, lowest ₹4,731.20 on 2026-06-08.'));
     const snap = S.buildSnapshot(HERO, { price: 4895.5, currency: 'INR', changePct: 0.8 }, reading(2), { now: NOW });
     const a = S.snapshotAnswer([snap], [], { histories: { HEROMOTOCO: h } }).split('\n');
     assert.ok(/price and sentiment reading, and what the price did over the past year\.$/.test(a[0]));

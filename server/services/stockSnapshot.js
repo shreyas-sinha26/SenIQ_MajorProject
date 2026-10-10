@@ -19,6 +19,7 @@
 const { QA, SENTIMENT } = require('../config');
 
 const round = (n, d = 2) => (n == null || !Number.isFinite(Number(n)) ? null : Math.round(Number(n) * 10 ** d) / 10 ** d);
+const px = (n) => round(n, n < 1 ? 6 : 2);
 
 // ── Pure ──
 
@@ -57,10 +58,12 @@ function buildSnapshot(company, quote, sentiment, { held = false, now = new Date
     exchange: company.exchange || null,
     held,
     as_of: now.toISOString(),
-    price: quote && quote.price != null ? round(quote.price, quote.price < 1 ? 6 : 2) : null,
+    price: quote && quote.price != null ? px(quote.price) : null,
     currency: quote ? quote.currency || null : null,
     day_change_pct: quote && quote.changePct != null ? round(quote.changePct) : null,
   };
+  // The latest session's high and low, where the price feed gives them (not for coins).
+  if (quote && quote.dayHigh != null && quote.dayLow != null) Object.assign(out, { session_high: px(quote.dayHigh), session_low: px(quote.dayLow) });
   if (out.price == null) out.price_note = 'no live price available right now';
   if (stories > 0) {
     out.sentiment = {
@@ -98,7 +101,8 @@ function snapshotLine(s) {
   else {
     const c = s.day_change_pct;
     const move = c == null ? 'day change not available' : c === 0 ? 'unchanged today' : `${c > 0 ? 'up' : 'down'} ${Math.abs(c).toFixed(2)}% today`;
-    price = `Price ${priceText(s.price, s.currency)}, ${move}.`;
+    const range = s.session_high != null ? ` Its latest session's high was ${priceText(s.session_high, s.currency)} and its low ${priceText(s.session_low, s.currency)}.` : '';
+    price = `Price ${priceText(s.price, s.currency)}, ${move}.${range}`;
   }
   let tone;
   if (!s.sentiment) {
@@ -137,7 +141,10 @@ function historyLine(h) {
   const moves = Object.entries(h.changes).filter(([, c]) => c)
     .map(([k, c]) => `${LABEL[k] || k} ${c.change_pct > 0 ? '+' : ''}${c.change_pct.toFixed(2)}%`);
   const from = h.history_starts ? ` (its history here starts ${h.history_starts})` : '';
-  return `Closing prices to ${h.last_close.date}${from}: ${moves.join(', ')}. Highest close in the period ${priceText(h.highest_close.close, h.currency)} on ${h.highest_close.date}, lowest ${priceText(h.lowest_close.close, h.currency)} on ${h.lowest_close.date}.`;
+  const extremes = h.highest_price
+    ? `Highest price in the period ${priceText(h.highest_price.price, h.currency)} on ${h.highest_price.date}, lowest ${priceText(h.lowest_price.price, h.currency)} on ${h.lowest_price.date}.`
+    : `Highest close in the period ${priceText(h.highest_close.close, h.currency)} on ${h.highest_close.date}, lowest ${priceText(h.lowest_close.close, h.currency)} on ${h.lowest_close.date}.`;
+  return `Closing prices to ${h.last_close.date}${from}: ${moves.join(', ')}. ${extremes}`;
 }
 
 /**

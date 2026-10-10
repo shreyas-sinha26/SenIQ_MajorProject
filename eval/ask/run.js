@@ -252,7 +252,7 @@ async function run() {
       const trace = r.trace || {};
       const cost = trace.cost_usd || 0;
       spent += cost;
-      const runView = { writer: r.writer, answer: r.answer, tools_used: r.tools_used, grounding: r.grounding, guard: r.guard, evidence: trace.evidence || [], trace };
+      const runView = { writer: r.writer, answer: r.answer, tools_used: r.tools_used, grounding: r.grounding, guard: r.guard, evidence: trace.evidence || [], trace, holdings: doc.fixture.holdings.map((h) => h.ticker) };
 
       const infra = lib.infraFailure(c, runView);
       if (infra) {

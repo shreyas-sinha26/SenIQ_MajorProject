@@ -22,14 +22,15 @@ async function checkAsync(name, fn) {
 }
 
 const ts = (date, hour = 4) => Date.parse(`${date}T${String(hour).padStart(2, '0')}:00:00Z`) / 1000;
-const yahoo = (rows, meta = { currency: 'INR', gmtoffset: 19800 }) => ({ chart: { result: [{ meta, timestamp: rows.map((r) => ts(r[0])), indicators: { quote: [{ close: rows.map((r) => r[1]), volume: rows.map((r) => r[2]) }] } }] } });
+// rows: [date, close, volume, high?, low?]
+const yahoo = (rows, meta = { currency: 'INR', gmtoffset: 19800 }) => ({ chart: { result: [{ meta, timestamp: rows.map((r) => ts(r[0])), indicators: { quote: [{ close: rows.map((r) => r[1]), volume: rows.map((r) => r[2]), high: rows.map((r) => r[3]), low: rows.map((r) => r[4]) }] } }] } });
 // One bar a weekday from `from` for `n` sessions, closing at f(i).
 function sessions(from, n, f, vol = () => 1000) {
   const out = [];
   for (let d = Date.parse(`${from}T00:00:00Z`), i = 0; i < n; d += 86400e3) {
     const day = new Date(d).getUTCDay();
     if (day === 0 || day === 6) continue;
-    out.push({ date: new Date(d).toISOString().slice(0, 10), close: f(i), volume: vol(i) });
+    out.push({ date: new Date(d).toISOString().slice(0, 10), close: f(i), high: f(i) + 2, low: f(i) - 3, volume: vol(i) });
     i++;
   }
   return out;
@@ -38,9 +39,10 @@ function sessions(from, n, f, vol = () => 1000) {
 (async () => {
   console.log('reading the replies:');
   check('Yahoo: the exchange\'s own dates, days without a close dropped, volume kept', () => {
-    const { currency, bars } = H.parseYahoo(yahoo([['2026-10-07', 5004, 400000], ['2026-10-08', null, 0], ['2026-10-09', 4895.456, 0]]));
+    const { currency, bars } = H.parseYahoo(yahoo([['2026-10-07', 5004, 400000, 5060.127, 4990], ['2026-10-08', null, 0, 1, 1], ['2026-10-09', 4895.456, 0]]));
     assert.strictEqual(currency, 'INR');
-    assert.deepStrictEqual(bars, [{ date: '2026-10-07', close: 5004, volume: 400000 }, { date: '2026-10-09', close: 4895.46, volume: null }]);
+    // Each session's high and low are read; its open is not. A bar the feed gives no range for keeps its close.
+    assert.deepStrictEqual(bars, [{ date: '2026-10-07', close: 5004, high: 5060.13, low: 4990, volume: 400000 }, { date: '2026-10-09', close: 4895.46, high: null, low: null, volume: null }]);
     assert.deepStrictEqual(H.parseYahoo({ chart: { result: null } }), { currency: null, bars: [] });
   });
   check('Yahoo: a late-evening UTC stamp lands on the exchange\'s next day', () => {
@@ -49,14 +51,14 @@ function sessions(from, n, f, vol = () => 1000) {
     assert.strictEqual(H.parseYahoo(json).bars[0].date, '2026-10-09');
   });
   check('Yahoo: a price in US cents becomes dollars', () => {
-    const { currency, bars } = H.parseYahoo(yahoo([['2026-10-09', 20.25, 9]], { currency: 'USX', gmtoffset: 0 }));
-    assert.deepStrictEqual([currency, bars[0].close], ['USD', 0.2025]);
+    const { currency, bars } = H.parseYahoo(yahoo([['2026-10-09', 20.25, 9, 20.5, 19.75]], { currency: 'USX', gmtoffset: 0 }));
+    assert.deepStrictEqual([currency, bars[0].close, bars[0].high, bars[0].low], ['USD', 0.2025, 0.205, 0.1975]);
   });
   check('CoinGecko: one bar a day, the last reading of a day wins, volume in dollars', () => {
     const ms = (d, h) => Date.parse(`${d}T${h}:00:00Z`);
     const { currency, bars } = H.parseCoinGecko({ prices: [[ms('2026-10-08', '00'), 80000], [ms('2026-10-09', '00'), 81000], [ms('2026-10-09', '14'), 82971.789]], total_volumes: [[ms('2026-10-08', '00'), 3.2e10], [ms('2026-10-09', '14'), 2.9e10]] });
     assert.strictEqual(currency, 'USD');
-    assert.deepStrictEqual(bars, [{ date: '2026-10-08', close: 80000, volume: 32000000000 }, { date: '2026-10-09', close: 82971.79, volume: 29000000000 }]);
+    assert.deepStrictEqual(bars, [{ date: '2026-10-08', close: 80000, high: null, low: null, volume: 32000000000 }, { date: '2026-10-09', close: 82971.79, high: null, low: null, volume: 29000000000 }]);
     assert.deepStrictEqual(H.parseCoinGecko({}).bars, []);
   });
 
@@ -100,7 +102,40 @@ function sessions(from, n, f, vol = () => 1000) {
     const r = H.summarize(bars);
     assert.deepStrictEqual([r.highest_close, r.lowest_close], [{ date: '2026-09-03', close: 70 }, { date: '2026-09-07', close: 40 }]);
   });
-  check('average volume: the recent sessions and the period; none when the source gives none', () => {
+  check('how far the last close stands from the highest and the lowest, worked out here', () => {
+  // The eval's question: "How far is Apple off its high for the year?" The model subtracted.
+  const bars = sessions('2026-09-01', 10, (i) => [50, 55, 70, 65, 40, 45, 60, 62, 61, 63][i]);
+  const r = H.summarize(bars);
+  assert.deepStrictEqual(r.last_close_vs_highest_close, { below_by: 7, pct_below: 10 });
+  assert.deepStrictEqual(r.last_close_vs_lowest_close, { above_by: 23, pct_above: 57.5 });
+  assert.deepStrictEqual(s.last_close_vs_highest_close, { below_by: 0, pct_below: 0 });   // the last close is the highest
+});
+check('the highest and lowest price TRADED come from each session\'s high and low, not from the closes', () => {
+  // "What was Apple's high today?" and "its high for the year" mean these, not a close.
+  const bars = [
+    { date: '2026-10-05', close: 100, high: 112, low: 98, volume: 1 },    // the year's high was touched on a day that closed lower
+    { date: '2026-10-06', close: 108, high: 109, low: 101, volume: 1 },   // the highest close
+    { date: '2026-10-07', close: 95, high: 104, low: 90, volume: 1 },     // the low was touched here
+    { date: '2026-10-08', close: 96, high: 99, low: 93, volume: 1 },
+  ];
+  const r = H.summarize(bars);
+  assert.deepStrictEqual(r.highest_close, { date: '2026-10-06', close: 108 });
+  assert.deepStrictEqual(r.highest_price, { date: '2026-10-05', price: 112, last_close_below_by: 16, last_close_pct_below: 14.29 });
+  assert.deepStrictEqual(r.lowest_price, { date: '2026-10-07', price: 90, last_close_above_by: 6, last_close_pct_above: 6.67 });
+  assert.deepStrictEqual(r.latest_session, { date: '2026-10-08', high: 99, low: 93, close: 96 });
+  assert.ok(!('open' in bars[0]) && !JSON.stringify(r).includes('open'));
+});
+check('a source with no session range (a coin) gives closes only, says so, and carries its last 24 hours', () => {
+  const coin = sessions('2026-09-01', 10, (i) => 100 + i).map((b) => ({ ...b, high: null, low: null }));
+  const r = H.summarize(coin);
+  assert.ok(!('highest_price' in r) && !('latest_session' in r) && r.highest_close.close === 109);
+  const out = H.buildHistory({ ticker: 'BTC', name: 'Bitcoin' }, { currency: 'USD', bars: coin, volumeUnit: 'USD traded a day', last24h: { high: 83094, low: 82262 } });
+  assert.deepStrictEqual(out.last_24_hours, { high: 83094, low: 82262 });
+  assert.ok(/This is a coin/.test(out.note) && /no session high or low/.test(out.note));
+  const share = H.buildHistory({ ticker: 'AAPL', name: 'Apple' }, { currency: 'USD', bars: sessions('2026-09-01', 10, (i) => 100 + i), volumeUnit: 'shares a day' });
+  assert.ok(!('last_24_hours' in share) && !/This is a coin/.test(share.note) && /which may not be today/.test(share.note));
+});
+check('average volume: the recent sessions and the period; none when the source gives none', () => {
     assert.deepStrictEqual(s.avg_daily_volume, { last_20_sessions: 2000, period: Math.round((242 * 1000 + 20 * 2000) / 262) });
     assert.strictEqual(H.summarize(year.map((b) => ({ ...b, volume: null }))).avg_daily_volume, null);
   });
@@ -120,7 +155,7 @@ function sessions(from, n, f, vol = () => 1000) {
   const company = { ticker: 'HEROMOTOCO', name: 'Hero MotoCorp', asset_class: 'equity', exchange: 'NSE' };
   check('it fits the tool-result allowance with room to spare, and says what not to do with it', () => {
     const r = H.buildHistory(company, { currency: 'INR', bars: sessions('2025-10-09', 262, (i) => 4000.55 + i * 3.37, (i) => 500000 + i * 997), volumeUnit: 'shares a day' });
-    assert.ok(JSON.stringify(r).length < QA.MAX_TOOL_RESULT_CHARS / 2);
+    assert.ok(JSON.stringify(r).length < QA.MAX_TOOL_RESULT_CHARS * 0.75, String(JSON.stringify(r).length));
     assert.deepStrictEqual([r.kind, r.ticker, r.held, r.currency, r.volume_unit], ['price_history', 'HEROMOTOCO', false, 'INR', 'shares a day']);
     assert.ok(/do not call a trend, forecast/.test(r.note) && /do not work out a change over any other period/.test(r.note));
     assert.ok(JSON.stringify(r).startsWith('{"kind":"price_history"'));    // the eval's leak check reads this

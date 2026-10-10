@@ -23,6 +23,22 @@ const num = (v) => (v == null ? null : Number(v));
 const round = (n, d = 2) => (n == null || !Number.isFinite(Number(n)) ? null : Math.round(Number(n) * 10 ** d) / 10 ** d);
 const key = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const polKey = (name) => String(name).toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '');
+// A sum of money as Ask may quote it, in the unit a reader uses: billions and millions of
+// dollars, crore and lakh of rupees. Left as a bare number the model converted it itself, and
+// got crore wrong by a factor of ten. Pure.
+function moneyText(value, currency) {
+  const v = Number(value);
+  if (value == null || !Number.isFinite(v)) return null;
+  const fmt = (n, d) => n.toLocaleString(currency === 'INR' ? 'en-IN' : 'en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  if (currency === 'INR') {
+    if (Math.abs(v) >= 1e7) return `₹${fmt(v / 1e7, 2)} crore`;
+    if (Math.abs(v) >= 1e5) return `₹${fmt(v / 1e5, 2)} lakh`;
+    return `₹${fmt(Math.round(v), 0)}`;
+  }
+  if (Math.abs(v) >= 1e9) return `$${fmt(v / 1e9, 2)} billion`;
+  if (Math.abs(v) >= 1e6) return `$${fmt(v / 1e6, 2)} million`;
+  return `$${fmt(Math.round(v), 0)}`;
+}
 const unescape = (s) => String(s || '').replace(/&amp;/g, '&').replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"');
 const rowCap = (ctx, n) => (TIERS[ctx.tier] && TIERS[ctx.tier].smartMoney === 'teaser' ? Math.min(n, TEASER_ROWS) : n);
 const teaserNote = (ctx) => (TIERS[ctx.tier] && TIERS[ctx.tier].smartMoney === 'teaser' ? { plan_limit: `This plan shows the first ${TEASER_ROWS} rows; the full list is on Plus and Pro.` } : {});
@@ -85,7 +101,7 @@ function holdingRow(h, total, heldSet) {
   return {
     issuer: unescape(h.issuer_name),
     ticker: h.ticker || null,
-    value_usd: value,
+    value: moneyText(value, 'USD'),
     pct_of_fund: total > 0 && value != null ? round((value / total) * 100) : null,
     change: h.change_type === 'baseline' ? 'no earlier quarter to compare' : h.change_type,
     ...(h.ticker && heldSet.has(h.ticker) ? { held_by_user: true } : {}),
@@ -109,7 +125,7 @@ function dealRow(d, heldSet) {
   return {
     client: d.client_name, ...(investor ? { investor } : {}), deal: d.deal_type, action: d.side,
     ticker: d.ticker, company: d.security_name || null,
-    shares: num(d.quantity), price_inr: num(d.price), value_inr: d.value == null ? null : Math.round(Number(d.value)),
+    shares: num(d.quantity), price_inr: num(d.price), value: moneyText(d.value, 'INR'),
     traded: d.deal_date,
     ...(heldSet.has(d.ticker) ? { held_by_user: true } : {}),
   };
@@ -117,7 +133,7 @@ function dealRow(d, heldSet) {
 function insiderRow(t, heldSet) {
   return {
     person: t.person, category: t.category, how: t.mode, action: t.side, ticker: t.ticker, company: t.company || null,
-    shares: num(t.quantity), value_inr: t.value == null ? null : Math.round(Number(t.value)),
+    shares: num(t.quantity), value: moneyText(t.value, 'INR'),
     traded: t.trade_from, disclosed: t.disclosed_at,
     ...(heldSet.has(t.ticker) ? { held_by_user: true } : {}),
   };
@@ -162,7 +178,7 @@ async function fundHoldings({ fund } = {}, ctx) {
     [ctx.userId]
   );
   const card = (f) => ({ fund: f.name, manager: f.manager || null, quarter_end: f.period_of_report, filed: f.filed_at ? f.filed_at.slice(0, 10) : null,
-    positions: f.holdings_count, total_value_usd: num(f.total_value), ...(f.following ? { followed_by_user: true } : {}) });
+    positions: f.holdings_count, total_value: moneyText(f.total_value, 'USD'), ...(f.following ? { followed_by_user: true } : {}) });
 
   if (!String(fund || '').trim()) {
     return { kind: 'fund_holdings', funds: funds.slice(0, rowCap(ctx, funds.length)).map(card), ...teaserNote(ctx),
@@ -298,4 +314,4 @@ async function alertsAndBrief({ what } = {}, ctx) {
   return out;
 }
 
-module.exports = { isPageQuestion, TRACKED_FUNDS, pickNamed, holdingRow, congressRow, dealRow, insiderRow, alertRow, briefCard, fundHoldings, politicianTrades, indiaDeals, alertsAndBrief };
+module.exports = { isPageQuestion, TRACKED_FUNDS, moneyText, pickNamed, holdingRow, congressRow, dealRow, insiderRow, alertRow, briefCard, fundHoldings, politicianTrades, indiaDeals, alertsAndBrief };

@@ -190,6 +190,9 @@ function judgePrompt(c, run, lines, { maxEvidenceChars = 24000 } = {}) {
   const turns = (c.history || []).map((m) => `${m.role}: ${m.content}`).join('\n');
   return [
     fence('question', c.question),
+    // The model is given the user's holdings with the question (qa.js userTurn), so naming
+    // them is not a claim that needs a tool result.
+    run.holdings && run.holdings.length ? fence('holdings_given_with_the_question', `${run.holdings.join(', ')}\n(The assistant was told these are the user's holdings. Naming them, or saying a stock is or is not among them, needs no tool result.)`) : null,
     turns ? fence('turns', turns) : null,
     fence('tool_results', evidence),
     fence('answer', run.answer || '(empty)'),
