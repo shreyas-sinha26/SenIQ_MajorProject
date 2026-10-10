@@ -28,7 +28,7 @@ const { DISCLAIMER, STRATEGY_SERVICE } = require('../config');
 // Auth + rate limits shared with the public REST API (/v1): one budget per key
 // across both transports.
 const { resolveApiKey, heavyLimiter, lightLimiter } = require('../services/apiKeyGate');
-const { callService, flattenDetail, cleanSymbols, replayPaper, MAX_WATCH_SYMBOLS } = require('../services/strategyClient');
+const { callService, flattenDetail, cleanSymbols, parseCapital, replayPaper, MAX_WATCH_SYMBOLS } = require('../services/strategyClient');
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
 const { DATA_TOOLS, runDataTool } = require('../services/dataTools');
 const { saveStrategy, deployPaper, stopPaper, strategyToJson, deploymentToJson } = require('../services/strategyStore');
@@ -115,6 +115,8 @@ function buildMcpServer(ctx) {
     if ((!args.strategy && !args.custom) || !args.symbol || !args.start_date || !args.end_date) {
       return fail('strategy (or custom), symbol, start_date and end_date are required');
     }
+    const capital = parseCapital(args.initial_cash);
+    if (!capital.ok) return fail(capital.error);
     const seniqData = args.custom ? await seniqDataIfNeeded(args.custom, args.symbol) : null;
     return serviceResult(await callService('/api/backtest', {
       method: 'POST',
@@ -126,7 +128,7 @@ function buildMcpServer(ctx) {
         exchange: args.exchange || 'US',
         start_date: args.start_date,
         end_date: args.end_date,
-        initial_cash: String(args.initial_cash || '100000'),
+        initial_cash: capital.value,
         seniq_data: seniqData,
       },
     }));
@@ -164,7 +166,7 @@ function buildMcpServer(ctx) {
   });
 
   server.registerTool('run_walk_forward', {
-    description: 'Out-of-sample robustness check for one strategy on one symbol: the date range is cut into folds, and the same fixed rules are run on each in-sample window and on the unseen window after it. Returns per-fold metrics and a verdict (robust / moderate / fragile / insufficient_data). Use after run_backtest to see whether a good result survives on data it was not judged on. Costs 2 × n_splits backtests — rate-limited.',
+    description: 'Out-of-sample robustness check for one strategy on one symbol: the date range is cut into folds, and the same fixed rules are run on each in-sample window and on the unseen window after it. Returns per-fold metrics and a verdict (robust / moderate / fragile / insufficient_data). Only the unseen windows in which the strategy held a position are judged (n_traded_folds); fewer than two is insufficient_data, not fragile. Use after run_backtest to see whether a good result survives on data it was not judged on. Costs 2 × n_splits backtests — rate-limited.',
     inputSchema: {
       ...backtestArgs,
       n_splits: z.number().int().min(2).max(12).optional().describe('Number of folds (default 4)'),

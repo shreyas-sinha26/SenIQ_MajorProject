@@ -2587,9 +2587,17 @@ async function runBacktest(e) {
     exchange: document.getElementById('bt-exchange').value,
     start_date: document.getElementById('bt-start').value,
     end_date: document.getElementById('bt-end').value,
-    initial_cash: document.getElementById('bt-cash').value || '100000',
+    initial_cash: document.getElementById('bt-cash').value.trim(),
   };
-  if (!body.symbol) { showToast('Enter a symbol to backtest', 'error'); return; }
+  // The form is novalidate: the browser's own bubbles do not show in every browser (an
+  // embedded one swallows them, so "Run backtest" looked dead), and they said nothing useful.
+  const problem = btCheckInputs(body);
+  if (problem) {
+    showToast(problem.message, 'error');
+    const el = document.getElementById(problem.field);
+    if (el) el.focus();
+    return;
+  }
 
   const btn = document.getElementById('bt-run');
   btn.disabled = true;
@@ -2615,6 +2623,19 @@ async function runBacktest(e) {
     btn.disabled = false;
     btn.innerHTML = '<span class="material-symbols-outlined">play_arrow</span> Run backtest';
   }
+}
+
+// What is wrong with the Backtest form, as { field, message }, or null. Pure.
+const BT_CASH_MIN = 1000, BT_CASH_MAX = 100000000;
+function btCheckInputs(body) {
+  if (!body.symbol) return { field: 'bt-symbol', message: 'Enter a symbol to backtest' };
+  if (!body.start_date || !body.end_date) return { field: body.start_date ? 'bt-end' : 'bt-start', message: 'Choose both a From and a To date' };
+  if (body.start_date >= body.end_date) return { field: 'bt-end', message: 'The To date must be after the From date' };
+  const cash = body.initial_cash === '' ? NaN : Number(body.initial_cash);
+  if (!Number.isFinite(cash) || cash < BT_CASH_MIN || cash > BT_CASH_MAX) {
+    return { field: 'bt-cash', message: `Starting capital must be between ${BT_CASH_MIN.toLocaleString()} and ${BT_CASH_MAX.toLocaleString()}` };
+  }
+  return null;
 }
 
 // "Did the SenIQ signal help?" — offered after a backtest of a Builder strategy that uses
@@ -2784,26 +2805,32 @@ async function runWalkForward() {
   try {
     const data = await api('/api/strategies/walk-forward', { method: 'POST', body: JSON.stringify({ ...btLastBody, n_splits: 4 }) });
     const wf = data.walk_forward, s = wf.summary;
+    // A window the strategy sat out (each starts with no position and needs a fresh entry)
+    // is not a losing window: the verdict and the percentage count only the windows that traded.
+    const sat = (f) => f.oos_traded === false || (f.oos_traded == null && f.oos_metrics && f.oos_metrics.n_trades === 0 && Number(f.oos_metrics.total_return_pct) === 0);
+    const traded = s.n_traded_folds != null ? s.n_traded_folds : wf.folds.filter(f => f.valid && !sat(f)).length;
     const VERDICT_TEXT = {
       robust: 'Held up on data it wasn\'t judged on.',
       moderate: 'Profitable out of sample, but not consistently.',
       fragile: 'Results did not carry over to unseen data.',
-      insufficient_data: 'Not enough data in these windows to judge — try a longer date range.',
+      insufficient_data: !s.n_valid_folds ? 'Not enough data in these windows to judge — try a longer date range.'
+        : traded === 0 ? 'The strategy made no trade in any unseen window, so there is nothing to judge. Each window starts with no position and waits for a new entry — try a longer date range.'
+        : `Only ${traded} unseen ${traded === 1 ? 'window' : 'windows'} had a trade — too few to judge. Try a longer date range.`,
     };
     const cell = (v) => v == null ? '<td>—</td>' : `<td class="${Number(v) >= 0 ? 'pos' : 'neg'}">${btPct(v)}</td>`;
     out.innerHTML = `
       <div class="bt-wf-verdict">
         <span class="bt-wf-pill ${escapeHtml(s.verdict)}">${escapeHtml(s.verdict.replace('_', ' '))}</span>
         <span>${VERDICT_TEXT[s.verdict] || ''}</span>
-        <span class="brief-muted">${s.n_valid_folds} of ${s.n_folds} folds usable${s.oos_consistency != null ? ` · profitable in ${btPct(s.oos_consistency)} of unseen windows` : ''}</span>
+        <span class="brief-muted">${s.n_valid_folds} of ${s.n_folds} folds usable · ${traded} traded${s.oos_consistency != null ? ` · profitable in ${btPct(s.oos_consistency)} of the unseen windows that traded` : ''}</span>
       </div>
       <div class="bt-trades-scroll"><table class="bt-wf-table">
         <thead><tr><th>Fold</th><th>Judged on</th><th>Return</th><th>Then tested on</th><th>Return</th><th>Max drawdown</th><th>Trades</th></tr></thead>
         <tbody>${wf.folds.map(f => `<tr>
           <td>${f.index}</td>
           <td>${f.is_start} → ${f.is_end}</td>${cell(f.is_metrics && f.is_metrics.total_return_pct)}
-          <td>${f.oos_start} → ${f.oos_end}</td>${cell(f.oos_metrics && f.oos_metrics.total_return_pct)}
-          <td>${f.oos_metrics ? btPct(f.oos_metrics.max_drawdown_pct) : '—'}</td>
+          <td>${f.oos_start} → ${f.oos_end}</td>${sat(f) ? '<td class="brief-muted">no trade</td>' : cell(f.oos_metrics && f.oos_metrics.total_return_pct)}
+          <td>${f.oos_metrics && !sat(f) ? btPct(f.oos_metrics.max_drawdown_pct) : '—'}</td>
           <td>${f.oos_metrics ? f.oos_metrics.n_trades : '—'}</td>
         </tr>`).join('')}</tbody>
       </table></div>`;
@@ -2893,7 +2920,9 @@ function sbReadUi() {
     const fn = row.querySelector('.sb-fn').value;
     const params = {};
     row.querySelectorAll('.sb-param').forEach(inp => {
-      params[inp.dataset.p] = inp.dataset.kind === 'text' ? inp.value.replace(/\s+/g, ' ').trim().slice(0, 80) : (Number(inp.value) || 1);
+      // A number is kept as typed, blank included: sbCheckUi says what is wrong with it. (A
+      // blank or 0 used to become 1 here without a word, and the strategy ran with it.)
+      params[inp.dataset.p] = inp.dataset.kind === 'text' ? inp.value.replace(/\s+/g, ' ').trim().slice(0, 80) : sbNum(inp.value);
     });
     ui.factors.push({ fn, params });
   });
@@ -2910,8 +2939,63 @@ function sbReadUi() {
   ui.stop = document.getElementById('sb-stop').value;
   ui.target = document.getElementById('sb-target').value;
   ui.sizingType = document.getElementById('sb-sizing-type').value;
-  ui.sizingValue = Number(document.getElementById('sb-sizing-value').value) || 25;
+  ui.sizingValue = sbNum(document.getElementById('sb-sizing-value').value);
   return ui;
+}
+
+// A number input's value: '' when blank or unreadable, else the number.
+function sbNum(v) {
+  const t = String(v ?? '').trim();
+  return t === '' || !Number.isFinite(Number(t)) ? '' : Number(t);
+}
+
+// What the editor's numbers get wrong, as sentences for the "Fix these" box. The engine
+// checks the same things, but in its own terms ("factors[0] (f1): param period=0 out of
+// range 1..500"); these name the row the user is looking at. Pure.
+const SB_WINDOW_MAX = { window_days: 365 };
+function sbCheckUi(ui) {
+  const problems = [];
+  ui.factors.forEach((f, i) => {
+    for (const [k, v] of Object.entries(f.params)) {
+      if (typeof SB_PARAMS[f.fn]?.[k] === 'string') continue; // optional text
+      const max = SB_WINDOW_MAX[k] || 500;
+      const label = `Indicator f${i + 1} (${sbFnLabel(f.fn)}): ${SB_PARAM_LABELS[k] || k}`;
+      if (v === '') problems.push(`${label} is empty — enter a whole number from 1 to ${max}.`);
+      else if (!Number.isInteger(v) || v < 1 || v > max) problems.push(`${label} is ${v} — it must be a whole number from 1 to ${max}.`);
+    }
+  });
+  for (const [kind, name] of [['entry', 'Entry'], ['exit', 'Exit']]) {
+    ui[kind].forEach((r, i) => {
+      if (r.right === '__num__' && sbNum(r.num) === '') problems.push(`${name} rule ${i + 1}: enter the number to compare with.`);
+    });
+  }
+  for (const [key, name] of [['stop', 'Stop-loss'], ['target', 'Take-profit']]) {
+    if (ui[key] === '' || ui[key] == null) continue;
+    const n = sbNum(ui[key]);
+    if (n === '' || n <= 0 || n >= 100) problems.push(`${name} is ${ui[key]} — it must be a percent above 0 and below 100, or left empty.`);
+  }
+  const size = ui.sizingValue;
+  if (ui.sizingType === 'fixed_cash') {
+    if (size === '' || size <= 0) problems.push(`Cash per trade is ${size === '' ? 'empty' : size} — it must be above 0.`);
+  } else if (size === '' || size <= 0 || size > 100) {
+    problems.push(`Position size is ${size === '' ? 'empty' : `${size}%`} — it must be above 0 and at most 100.`);
+  }
+  return problems;
+}
+
+function sbShowErrors(lead, items) {
+  const errEl = document.getElementById('sb-errors');
+  errEl.classList.remove('hidden');
+  errEl.innerHTML = `<strong>${escapeHtml(lead)}</strong><ul>${items.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>`;
+}
+
+// The box lists what was wrong with the strategy that WAS in the editor; once a template or
+// a reset replaces that strategy, the list is about something that is gone.
+function sbClearErrors() {
+  const errEl = document.getElementById('sb-errors');
+  if (!errEl) return;
+  errEl.classList.add('hidden');
+  errEl.innerHTML = '';
 }
 
 // Builds the engine spec from the UI model.
@@ -3114,6 +3198,7 @@ async function initBuilderPage() {
   });
   document.getElementById('sb-reset').addEventListener('click', () => {
     localStorage.removeItem(SB_UI_KEY);
+    sbClearErrors();
     sbRender();
   });
 
@@ -3122,16 +3207,12 @@ async function initBuilderPage() {
     const ui = sbReadUi();
     sbSaveUi(ui);
     const spec = sbEmitSpec(ui);
-    const errEl = document.getElementById('sb-errors');
-    errEl.classList.add('hidden');
+    sbClearErrors();
+    const problems = sbCheckUi(ui);
+    if (problems.length) return sbShowErrors('Fix these before saving:', problems);
     try {
       const check = await api('/api/strategies/validate', { method: 'POST', body: JSON.stringify(spec) });
-      if (!check.valid) {
-        errEl.classList.remove('hidden');
-        errEl.innerHTML = '<strong>Fix these before saving:</strong><ul>' +
-          check.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('') + '</ul>';
-        return;
-      }
+      if (!check.valid) return sbShowErrors('Fix these before saving:', check.errors);
     } catch (err) {
       showToast(err.status === 503 ? 'Strategy engine is offline' : (err.message || 'Validation failed'), 'error');
       return;
@@ -3170,7 +3251,7 @@ async function sbInitPresets() {
       const { spec } = await api(`/api/strategies/seniq-presets/${encodeURIComponent(p.id)}`, { method: 'POST', body: JSON.stringify(body) });
       const out = sbSpecToUi(spec);
       if (!out.ok) return showToast(`This template can't be shown here: ${out.reason}`, 'error');
-      sbSaveUi(out.ui); sbRender();
+      sbSaveUi(out.ui); sbClearErrors(); sbRender();
       showToast(`“${out.ui.name}” loaded. Review it, then backtest.`, 'success');
     } catch (err) {
       showToast(err.message || 'Could not load the template', 'error');
@@ -3182,16 +3263,12 @@ async function sbBacktest() {
   const ui = sbReadUi();
   sbSaveUi(ui);
   const spec = sbEmitSpec(ui);
-  const errEl = document.getElementById('sb-errors');
-  errEl.classList.add('hidden');
+  sbClearErrors();
+  const problems = sbCheckUi(ui);
+  if (problems.length) return sbShowErrors('Fix these before running:', problems);
   try {
     const check = await api('/api/strategies/validate', { method: 'POST', body: JSON.stringify(spec) });
-    if (!check.valid) {
-      errEl.classList.remove('hidden');
-      errEl.innerHTML = '<strong>Fix these before running:</strong><ul>' +
-        check.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('') + '</ul>';
-      return;
-    }
+    if (!check.valid) return sbShowErrors('Fix these before running:', check.errors);
   } catch (err) {
     showToast(err.status === 503 ? 'Strategy engine is offline' : (err.message || 'Validation failed'), 'error');
     return;
@@ -3360,7 +3437,9 @@ async function ysLoadSignal(id, nSymbols) {
       if (sig.error) return `<span class="ys-sig ys-sig-err" title="${escapeHtml(sig.error)}">${escapeHtml(sig.symbol)} — no data</span>`;
       const cls = sig.state === 'long' ? 'ys-sig-long' : 'ys-sig-flat';
       const fresh = sig.fired_on_latest_bar ? ' <span class="ys-new">NEW</span>' : '';
-      const last = sig.last_signal ? ` · ${sig.last_signal.side} ${sig.last_signal.date}` : ' · no signal yet';
+      // No signal means none in the history the engine read (about two years), not none ever.
+      const last = sig.last_signal ? ` · ${sig.last_signal.side} ${sig.last_signal.date}`
+        : (sig.evaluated_from ? ` · no signal since ${sig.evaluated_from}` : ' · no signal yet');
       return `<span class="ys-sig ${cls}" title="as of ${escapeHtml(sig.as_of || '')} · close ${escapeHtml(String(Number(sig.last_close || 0).toFixed(2)))}">${escapeHtml(sig.symbol)}: ${sig.state.toUpperCase()}${fresh}<small>${escapeHtml(last)}</small></span>`;
     }).join('');
     const note = data.has_protective_exits
@@ -3963,6 +4042,7 @@ function openDraftInBuilder(i) {
   const out = sbSpecToUi(d.spec);
   if (!out.ok) return showToast(`The Builder can't show this draft yet: ${out.reason}`, 'error');
   sbSaveUi(out.ui);
+  sbClearErrors();
   if (sbInitDone) sbRender();
   switchToPage('strategy-builder');
   showToast(`“${out.ui.name}” loaded into the Builder. Review it, then backtest.`, 'success');

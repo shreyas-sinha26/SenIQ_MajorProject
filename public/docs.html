@@ -102,7 +102,7 @@
       <tr><td>exchange</td><td>no</td><td>US · NASDAQ · NYSE · NSE · BSE · CRYPTO · COMMODITY (default US)</td></tr>
       <tr><td>start_date, end_date</td><td>yes</td><td>YYYY-MM-DD</td></tr>
       <tr><td>params</td><td>no</td><td>registry params (see catalog schema)</td></tr>
-      <tr><td>initial_cash</td><td>no</td><td>default 100000</td></tr>
+      <tr><td>initial_cash</td><td>no</td><td>default 100000; from 1,000 to 100,000,000, anything else is a 400</td></tr>
     </table>
 
     <h3><span class="method post">POST</span>/v1/walk-forward</h3>
@@ -110,7 +110,10 @@
     and <code>scheme</code> (<code>anchored</code> | <code>rolling</code>). The range is cut into folds; the
     same fixed rules run on each in-sample window and on the unseen window after it. Returns per-fold metrics
     and a verdict: <code>robust</code>, <code>moderate</code>, <code>fragile</code> or
-    <code>insufficient_data</code>. Heavy limit (it runs 2 × n_splits backtests).</p>
+    <code>insufficient_data</code>. Each unseen window starts with no position, so a slow strategy can sit
+    one out; only the windows in which it held a position are judged (<code>n_traded_folds</code>, and
+    <code>oos_traded</code> on each fold), and fewer than two is <code>insufficient_data</code>.
+    Heavy limit (it runs 2 × n_splits backtests).</p>
 
     <h3><span class="method get">GET</span>/v1/strategies/seniq-presets</h3>
     <p>Ready-made strategy templates built on SenIQ signals: news sentiment, congress disclosures and tracked
