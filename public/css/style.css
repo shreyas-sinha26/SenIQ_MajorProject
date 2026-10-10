@@ -410,6 +410,8 @@ body::before {
   animation: ping 1.8s infinite;
 }
 .live-dot.small { width: 6px; height: 6px; }
+.live-indicator.offline { color: var(--red); }
+.live-indicator.offline .live-dot { background: var(--red); box-shadow: none; animation: none; }
 @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(20,184,106,.5); } 70% { box-shadow: 0 0 0 8px rgba(20,184,106,0); } 100% { box-shadow: 0 0 0 0 rgba(20,184,106,0); } }
 
 .user-menu { position: relative; }
@@ -556,6 +558,8 @@ body::before {
 .holdings-tbl tbody tr:hover { background: rgba(10,37,64,.03); }
 .holdings-tbl tbody tr.row-active td { background: rgba(30,64,175,.05); }
 .holdings-tbl tbody tr.row-dimmed { opacity: .38; }
+.holdings-tbl tbody tr.row-pending { opacity: .55; }
+.ht-estimate { color: var(--muted); cursor: help; }
 .holdings-tbl tbody tr:last-child td { border-bottom: none; }
 .empty-state-td { text-align: center !important; padding: 44px 20px !important; border: none !important; }
 .ht-ticker { font-family: var(--mono); font-weight: 700; font-size: .9rem; color: var(--text); }
@@ -1798,6 +1802,14 @@ body input::placeholder, body textarea::placeholder { color: #94A3B8; }
 .ni-level.low { color: var(--muted); font-weight: 600; }
 
 /* ─── IPO Watch ─── */
+/* The header's switches wrap onto their own line instead of shrinking into each other. */
+.ipo-header { flex-wrap: wrap; gap: 10px 16px; }
+.ipo-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }
+.ipo-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.ipo-controls .scope-toggle { flex-shrink: 0; }
+.ipo-controls .scope-btn { white-space: nowrap; }
+.ipo-age { margin: -6px 0 12px; }
+.ipo-age.stale { color: var(--red); }
 .ipo-tbl tbody tr { cursor: default; }
 .ipo-tbl td.mono { white-space: nowrap; }
 .ipo-tbl th, .ipo-tbl td { padding-left: 10px; padding-right: 10px; }
@@ -1809,7 +1821,11 @@ body input::placeholder, body textarea::placeholder { color: #94A3B8; }
 .ipo-stage.open { background: var(--royal); color: #fff; }
 .ipo-stage.upcoming { background: rgba(30,64,175,.1); color: var(--royal); }
 .ipo-stage.listed { background: rgba(10,37,64,.1); color: var(--text); }
-.ipo-table-wrap { overflow-x: auto; }
+.ipo-table-wrap { overflow-x: auto; container-type: inline-size; }
+/* An issue's news sits in a row as wide as the whole table; held to the visible width so
+   its headlines wrap in view instead of running off to the right. */
+.ipo-stories { position: sticky; left: 10px; max-width: calc(100cqw - 20px); }
+.ipo-tbl tbody tr.ipo-row-click:focus-visible { outline: 2px solid var(--royal); outline-offset: -2px; }
 .ipo-meta-inline { color: var(--muted); font-size: .76rem; }
 .ipo-gmp-up, .ipo-gmp-down { font-size: .62rem; color: var(--muted); }
 .ipo-gmp-up { color: var(--royal); }

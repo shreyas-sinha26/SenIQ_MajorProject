@@ -264,7 +264,8 @@ research says predicts the pop.
 **The lifecycle today.** An issue is tracked from first sighting; the listing result is logged
 once; GMP stops at listing; the ticker is looked for for 14 days (India); the name matches news
 for 30 days after listing; prices are fetched for 45 days (so the 1-month return is the last
-one); the issue leaves the IPO Watch page 90 days after listing. Its row and history are kept
+one); the issue leaves the IPO Watch page 100 days after listing (90 until 2026-10-10: the
+3-month return is first readable on day 91, so at 90 it could never be shown). Its row and history are kept
 for good — they are the training data for Change 5.
 
 **The gap.** After that a newly listed company is nobody's. It is not in the company reference
@@ -303,7 +304,7 @@ news is matched the loose way reserved for "a ticker we know nothing about".
    more request per issue.
 8. **On the page.** A graduated issue shows an "Add to portfolio" action in IPO Watch.
 
-**Unchanged.** The 14 / 30 / 90-day windows above; nothing is ever deleted; an issue with no
+**Unchanged.** The 14 / 30-day windows above (the 90-day one became 100 on 2026-10-10); nothing is ever deleted; an issue with no
 ticker (most SME issues) cannot graduate and stays as history only.
 
 **Decided by Annas (2026-10-09).** SME issues graduate too, when they pass the price check.

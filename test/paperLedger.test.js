@@ -12,9 +12,10 @@ const db = { deployments: [], fills: [], equity: [], users: [], emailLog: [] };
 let fillId = 0;
 async function run(sql, params = []) {
   const q = sql.replace(/\s+/g, ' ').trim();
-  if (q.startsWith('SELECT * FROM paper_deployments WHERE ledger_closed_at IS NULL')) {
+  if (q.startsWith('SELECT d.* FROM paper_deployments d JOIN users u ON u.id = d.user_id WHERE d.ledger_closed_at IS NULL')) {
     const [today, force] = params;
-    return db.deployments.filter((d) => !d.ledger_closed_at
+    const onPro = (d) => db.users.some((u) => u.id === d.user_id && u.subscription_tier === 'pro');
+    return db.deployments.filter((d) => !d.ledger_closed_at && onPro(d)
       && (force || !d.last_marked_at || d.last_marked_at.toISOString().slice(0, 10) < today));
   }
   if (q.startsWith('UPDATE paper_deployments SET last_mark_error')) {
@@ -147,6 +148,21 @@ check('a changed price alone is not a mismatch', () => {
   assert.strictEqual(plan.fills.length, 0);
 });
 
+check('the same fill stamped in another zone is the same fill: nothing is added, no note', () => {
+  // Recorded with the engine stamping midnight +05:30; replayed by an engine stamping midnight UTC.
+  // The instant is 5½ hours later, the date is the same. Kept by instant, this was a new fill.
+  const recorded = { fills: [{ filled_at: '2026-10-05T00:00:00+05:30', filled_on: '2026-10-05', side: 'BUY' }], lastDay: '2026-10-07' };
+  const utc = (day, side) => ({ ...fill(day, side), timestamp: `${day}T00:00:00+00:00` });
+  const plan = planLedger(replayOf([utc('2026-10-05', 'BUY')], [{ ...point('2026-10-07', 101000), timestamp: '2026-10-07T00:00:00+00:00' }]), recorded, TODAY);
+  assert.strictEqual(plan.fills.length, 0);
+  assert.strictEqual(plan.equity.length, 0);
+  assert.strictEqual(plan.note, null);
+  // A later fill in the new zone is still taken, once.
+  const next = planLedger(replayOf([utc('2026-10-05', 'BUY'), utc('2026-10-08', 'SELL')], []), recorded, TODAY);
+  assert.deepStrictEqual(next.fills.map((f) => `${f.filled_on} ${f.side}`), ['2026-10-08 SELL']);
+  assert.strictEqual(next.note, null);
+});
+
 check('an intraday curve stores the last value of each day', () => {
   const plan = planLedger(replayOf([], [
     { ...point('2026-10-07', 100000), timestamp: '2026-10-07T10:00:00-04:00' },
@@ -224,6 +240,7 @@ check('first run records history without emailing it; a fresh fill is emailed on
 check('engine offline: nothing stored, the error is kept, and the deployment stays due', async () => {
   reset();
   db.deployments.push(deployment(), deployment({ id: 2 }));
+  db.users.push(proUser);
   let calls = 0;
   const offline = async () => { calls++; return { status: 503, data: { detail: 'strategy engine is offline' } }; };
   const r = await runPaperMarks({ today: TODAY, replayFn: offline });
@@ -240,6 +257,7 @@ check('engine offline: nothing stored, the error is kept, and the deployment sta
 check('an engine without a fills list is refused, not read as "no trades"', async () => {
   reset();
   db.deployments.push(deployment());
+  db.users.push(proUser);
   const r = await runPaperMarks({ today: TODAY, replayFn: engine({ report: { equity_curve: [point('2026-10-08', 100000)] } }) });
   assert.strictEqual(r.marked, 0);
   assert.match(r.failed[0].error, /older than the ledger/);
@@ -265,7 +283,7 @@ check('a stopped deployment is recorded through its stop date, then left alone',
 check('a user who may not be emailed: fills settle as skipped and the refusal is logged', async () => {
   reset();
   db.deployments.push(deployment());
-  db.users.push({ ...proUser, subscription_tier: 'plus' });
+  db.users.push({ ...proUser, email_verified: false });
   const sent = [];
   const r = await runPaperMarks({
     today: TODAY, replayFn: engine(replayOf([fill('2026-10-08', 'BUY')], [])),
@@ -289,6 +307,61 @@ check('an undelivered email stays pending and is retried while the fill is fresh
   await runPaperMarks({ today: '2026-10-10', replayFn: replay, sendEmailFn: async (m) => { sent.push(m); return { delivered: true }; }, emailEnabledFn: () => true });
   assert.strictEqual(sent.length, 1);
   assert.strictEqual(db.fills[0].notify, 'sent');
+});
+
+check('no email provider: a fresh fill waits, and goes out once a provider is set', async () => {
+  reset();
+  db.deployments.push(deployment());
+  db.users.push(proUser);
+  const replay = engine(replayOf([fill('2026-10-08', 'BUY')], []));
+  const sent = [];
+  const sendEmailFn = async (m) => { sent.push(m); return { delivered: true }; };
+  const r = await runPaperMarks({ today: TODAY, replayFn: replay, sendEmailFn, emailEnabledFn: () => false });
+  assert.deepStrictEqual(r.emails, { sent: 0, skipped: 1, failed: 0 });
+  assert.strictEqual(db.fills[0].notify, 'pending'); // was 'skipped', for good
+  assert.strictEqual(sent.length, 0);
+  await runPaperMarks({ today: '2026-10-10', replayFn: replay, sendEmailFn, emailEnabledFn: () => true });
+  assert.strictEqual(sent.length, 1);
+  assert.strictEqual(db.fills[0].notify, 'sent');
+});
+
+check('no email provider for days: the waiting fill lapses instead of arriving stale', async () => {
+  reset();
+  db.deployments.push(deployment());
+  db.users.push(proUser);
+  const replay = engine(replayOf([fill('2026-10-08', 'BUY')], []));
+  const sent = [];
+  await runPaperMarks({ today: TODAY, replayFn: replay, emailEnabledFn: () => false });
+  await runPaperMarks({ today: '2026-10-20', replayFn: replay, sendEmailFn: async (m) => { sent.push(m); return { delivered: true }; }, emailEnabledFn: () => true });
+  assert.strictEqual(sent.length, 0);
+  assert.strictEqual(db.fills[0].notify, 'skipped');
+});
+
+check('--no-email: the fill is recorded and its email settled as skipped, never sent later', async () => {
+  reset();
+  db.deployments.push(deployment());
+  db.users.push(proUser);
+  const replay = engine(replayOf([fill('2026-10-08', 'BUY')], []));
+  const sent = [];
+  const sendEmailFn = async (m) => { sent.push(m); return { delivered: true }; };
+  const r = await runPaperMarks({ today: TODAY, replayFn: replay, sendEmailFn, emailEnabledFn: () => true, noEmail: true });
+  assert.deepStrictEqual([r.fills, r.emails.skipped], [1, 1]);
+  assert.strictEqual(db.fills[0].notify, 'skipped');
+  await runPaperMarks({ today: '2026-10-10', replayFn: replay, sendEmailFn, emailEnabledFn: () => true });
+  assert.strictEqual(sent.length, 0);
+});
+
+check('an account that left Pro is not replayed; back on Pro, the days it missed are recorded', async () => {
+  reset();
+  db.deployments.push(deployment());
+  db.users.push({ ...proUser, subscription_tier: 'free' });
+  let calls = 0;
+  const replay = async () => { calls++; return { status: 200, data: replayOf([fill('2026-10-06', 'BUY')], [point('2026-10-06', 100000), point('2026-10-07', 100500), point('2026-10-08', 101000)]) }; };
+  const off = await runPaperMarks({ today: TODAY, replayFn: replay });
+  assert.deepStrictEqual([off.due, calls, db.fills.length, db.equity.length], [0, 0, 0, 0]);
+  db.users[0].subscription_tier = 'pro';
+  const back = await runPaperMarks({ today: TODAY, replayFn: replay, emailEnabledFn: () => false });
+  assert.deepStrictEqual([back.due, back.marked, back.fills, back.days], [1, 1, 1, 3]);
 });
 
 (async () => {

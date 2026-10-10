@@ -13,7 +13,7 @@
 const { asyncRouter } = require('../middleware/asyncRouter');
 const { queryOne } = require('../db');
 const { authMiddleware } = require('./auth');
-const { attachTier } = require('../middleware/tier');
+const { attachTier, isTier } = require('../middleware/tier');
 const { TIERS, PRICING } = require('../config');
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -30,9 +30,21 @@ router.get('/plans', authMiddleware, attachTier, async (req, res) => {
 router.post('/checkout', authMiddleware, attachTier, async (req, res) => {
   try {
     const { tier, period } = req.body || {};
-    if (!TIERS[tier]) return res.status(400).json({ error: 'Invalid tier' });
+    if (!isTier(tier)) return res.status(400).json({ error: 'Invalid tier' });
     if (isProd && !req.isAdmin) {
       return res.status(501).json({ error: 'Paid plans are not open yet — payments are still being set up.' });
+    }
+    // A plan with a holdings limit cannot be taken with more holdings than it covers: the
+    // extra ones would stay monitored for free. The user removes some first.
+    const cap = TIERS[tier].maxHoldings;
+    if (Number.isFinite(cap)) {
+      const { n } = await queryOne('SELECT count(*)::int AS n FROM portfolio WHERE user_id = $1', [req.user.id]);
+      if (n > cap) {
+        return res.status(409).json({
+          error: `${TIERS[tier].label} covers ${cap} holdings and you have ${n}. Remove ${n - cap} from your portfolio first.`,
+          holdings: n, maxHoldings: cap,
+        });
+      }
     }
     const p = period === 'annual' ? 'annual' : 'monthly';
     const updated = await queryOne(

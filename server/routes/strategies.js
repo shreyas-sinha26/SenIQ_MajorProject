@@ -18,12 +18,17 @@ const { STRATEGY_SERVICE } = require('../config');
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
 
 const { saveStrategy, strategyToJson, MAX_SAVED_STRATEGIES } = require('../services/strategyStore');
-const { callService, flattenDetail, cleanSymbols } = require('../services/strategyClient');
+const { callService, engineFailure, checkSymbols, parseCapital } = require('../services/strategyClient');
+const { idParam } = require('../middleware/idParam');
 const { userRateLimit, LIMITS } = require('../middleware/rateLimit');
 const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../services/strategySignals');
 
 const router = asyncRouter();
 router.use(authMiddleware, attachTier);
+router.param('id', idParam('strategy not found')); // a saved strategy's id; presets use :presetId
+
+// An engine reply that is not a 200, as this route's answer.
+const refuse = (res, out, fallback) => { const f = engineFailure(out, fallback); return res.status(f.status).json({ error: f.error }); };
 
 // Runs on the engine are bounded per user (API keys have their own hourly budget).
 const engineLimit = userRateLimit(LIMITS.ENGINE);
@@ -33,8 +38,8 @@ router.get('/seniq-presets', (req, res) => res.json({ presets: listPresets() }))
 
 // POST /api/strategies/seniq-presets/:id — the preset's Builder spec with its inputs filled
 // in (e.g. {politician}). Returns a spec to load into the Builder; saves nothing.
-router.post('/seniq-presets/:id', (req, res) => {
-  const out = instantiatePreset(req.params.id, req.body || {});
+router.post('/seniq-presets/:presetId', (req, res) => {
+  const out = instantiatePreset(req.params.presetId, req.body || {});
   if (!out.ok) return res.status(400).json({ error: out.error });
   res.json({ spec: out.spec, preset: out.preset });
 });
@@ -50,9 +55,7 @@ router.post('/compare', requireTier('plus'), engineLimit, async (req, res) => {
 // GET /api/strategies/catalog — strategy list + param schemas (any tier).
 router.get('/catalog', async (req, res) => {
   const out = await callService('/api/strategies', { timeoutMs: STRATEGY_SERVICE.CATALOG_TIMEOUT_MS });
-  if (out.status !== 200) {
-    return res.status(503).json({ error: 'Strategy engine is offline — try again later.' });
-  }
+  if (out.status !== 200) return refuse(res, out);
   res.json(out.data);
 });
 
@@ -64,9 +67,7 @@ router.post('/validate', async (req, res) => {
     body: req.body || {},
     timeoutMs: STRATEGY_SERVICE.CATALOG_TIMEOUT_MS,
   });
-  if (out.status !== 200) {
-    return res.status(503).json({ error: 'Strategy engine is offline — try again later.' });
-  }
+  if (out.status !== 200) return refuse(res, out);
   res.json(out.data);
 });
 
@@ -77,6 +78,8 @@ router.post('/backtest', requireTier('plus'), engineLimit, async (req, res) => {
   if ((!strategy && !custom) || !symbol || !start_date || !end_date) {
     return res.status(400).json({ error: 'strategy (or custom), symbol, start_date and end_date are required' });
   }
+  const capital = parseCapital(initial_cash);
+  if (!capital.ok) return res.status(400).json({ error: capital.error });
   // Builder specs with SenIQ factors get that ticker's raw signal history
   // pushed along; the service derives + aligns the series.
   const seniqData = custom ? await seniqDataIfNeeded(custom, symbol) : null;
@@ -91,16 +94,12 @@ router.post('/backtest', requireTier('plus'), engineLimit, async (req, res) => {
       exchange: exchange || 'US',
       start_date,
       end_date,
-      initial_cash: String(initial_cash || '100000'),
+      initial_cash: capital.value,
       seniq_data: seniqData,
     },
   });
   if (out.status === 200) return res.json(out.data);
-  if (out.status === 400 || out.status === 404 || out.status === 422) {
-    // 422 = FastAPI/pydantic validation; its detail is an array of field errors.
-    return res.status(out.status === 422 ? 400 : out.status).json({ error: flattenDetail(out.data) || 'invalid backtest request' });
-  }
-  return res.status(503).json({ error: 'Strategy engine is offline — try again later.' });
+  return refuse(res, out, 'invalid backtest request');
 });
 
 // POST /api/strategies/walk-forward — out-of-sample robustness check (Plus).
@@ -120,10 +119,7 @@ router.post('/walk-forward', requireTier('plus'), engineLimit, async (req, res) 
     },
   });
   if (out.status === 200) return res.json(out.data);
-  if (out.status === 400 || out.status === 404 || out.status === 422) {
-    return res.status(out.status === 422 ? 400 : out.status).json({ error: flattenDetail(out.data) || 'invalid request' });
-  }
-  return res.status(503).json({ error: 'Strategy engine is offline — try again later.' });
+  return refuse(res, out);
 });
 
 // ─── Saved strategies (Your Strategies) — all Plus+ ─────────
@@ -150,11 +146,21 @@ router.put('/saved/:id', requireTier('plus'), async (req, res) => {
   if (!row) return res.status(404).json({ error: 'strategy not found' });
   const newName = name != null ? String(name).trim().slice(0, 80) : row.name;
   if (!newName) return res.status(400).json({ error: 'name cannot be empty' });
-  const newSymbols = symbols != null ? cleanSymbols(symbols) : row.symbols;
-  const updated = await queryOne(
-    `UPDATE user_strategies SET name = $1, symbols = $2, updated_at = now()
-     WHERE id = $3 AND user_id = $4 RETURNING *`,
-    [newName, JSON.stringify(newSymbols), req.params.id, req.user.id]);
+  const watch = symbols != null ? checkSymbols(symbols) : { ok: true, symbols: row.symbols };
+  if (!watch.ok) return res.status(400).json({ error: watch.error });
+  let updated;
+  try {
+    updated = await queryOne(
+      `UPDATE user_strategies SET name = $1, symbols = $2, updated_at = now()
+       WHERE id = $3 AND user_id = $4 RETURNING *`,
+      [newName, JSON.stringify(watch.symbols), req.params.id, req.user.id]);
+  } catch (err) {
+    // Renamed onto a name already in use: the same answer saving gives, not a 500.
+    if (String(err.message).includes('user_strategies_user_id_name_key')) {
+      return res.status(400).json({ error: `You already have a strategy named “${newName}” — pick another name.` });
+    }
+    throw err;
+  }
   res.json(strategyToJson(updated));
 });
 
@@ -181,10 +187,9 @@ router.post('/saved/:id/signal', requireTier('plus'), async (req, res) => {
       : { strategy: row.strategy_name, params: row.params || {}, symbols },
   });
   if (out.status === 200) return res.json(out.data);
-  if (out.status === 400 || out.status === 404) {
-    return res.status(out.status).json({ error: out.data.detail || 'signal evaluation failed' });
-  }
-  return res.status(503).json({ error: 'Strategy engine is offline — try again later.' });
+  // A 404 here would read as "strategy not found"; the strategy exists, the engine refused it.
+  const f = engineFailure(out, 'signal evaluation failed');
+  return res.status(f.status === 404 ? 400 : f.status).json({ error: f.error });
 });
 
 module.exports = router;

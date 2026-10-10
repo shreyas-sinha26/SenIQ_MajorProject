@@ -7,7 +7,8 @@
  *   node scripts/paper_mark.js --write --force
  *                                           also re-mark the ones already marked today
  *   node scripts/paper_mark.js --write --no-email
- *                                           record, but leave the fill emails unsent
+ *                                           record, and settle the fill emails as skipped
+ *                                           (they are not sent later either)
  *
  * The same job the scheduler runs once a day when FEATURES_STRATEGIES=1
  * (services/paperLedger.js): replay each deployment, store the fills and the closing value
@@ -21,14 +22,10 @@ async function main() {
   const write = args.includes('--write');
   const force = args.includes('--force');
   const db = require('../server/db');
-  const { runPaperMarks, utcDay } = require('../server/services/paperLedger');
+  const { runPaperMarks, utcDay, DUE_SQL } = require('../server/services/paperLedger');
   try {
     if (!write) {
-      const rows = await db.query(
-        `SELECT id, name, symbol, status, last_marked_at, last_mark_error FROM paper_deployments
-          WHERE ledger_closed_at IS NULL
-            AND (last_marked_at IS NULL OR (last_marked_at AT TIME ZONE 'UTC')::date < $1::date)
-          ORDER BY id`, [utcDay()]);
+      const rows = await db.query(DUE_SQL, [utcDay(), false]);
       console.log(`${rows.length} deployment(s) due (dry run; pass --write to mark them)`);
       for (const r of rows) {
         console.log(`  #${r.id} ${r.name} on ${r.symbol} [${r.status}] last marked ${r.last_marked_at ? r.last_marked_at.toISOString() : 'never'}${r.last_mark_error ? ` — last error: ${r.last_mark_error}` : ''}`);
@@ -37,7 +34,7 @@ async function main() {
     }
     const r = await runPaperMarks({
       force,
-      ...(args.includes('--no-email') ? { emailEnabledFn: () => false } : {}),
+      noEmail: args.includes('--no-email'),
     });
     console.log(`${r.marked} of ${r.due} deployment(s) marked; ${r.fills} fill(s) and ${r.days} day(s) recorded`);
     console.log(`emails: ${r.emails.sent} sent, ${r.emails.skipped} skipped, ${r.emails.failed} failed`);

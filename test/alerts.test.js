@@ -13,7 +13,7 @@ const {
 } = require('../server/services/alertNotifier');
 const { unsubscribeUrl, unsubscribeToken, verifyUnsubscribeToken } = require('../server/services/emailService');
 const {
-  buildFacts, deterministicNarrative, writeAlertNarrative, confidenceLabel, wordCount,
+  buildFacts, deterministicNarrative, writeAlertNarrative, confidenceLabel, wordCount, factsForModel,
 } = require('../server/services/alertNarrative');
 const { guardCheck } = require('../server/services/reports');
 
@@ -255,6 +255,17 @@ const baseDeps = (over = {}) => ({
     assert.match(n, /20%/);           // exposure cited
     assert.ok(wordCount(n) > 40);     // substantive
     assert.ok(['high', 'moderate', 'low'].includes(confidenceLabel(FACTS)));
+  });
+  check('what a model is shown: the code-worked confidence, and no "MARKET" ticker', () => {
+    const market = factsForModel(buildFacts({ ticker: 'MARKET', title: 'Fed hikes rates', direction: 'neutral', priority: 0.7, source_count: 1, exposure_pct: 31.6 }));
+    assert.strictEqual(market.ticker, null);
+    assert.ok(/broad market/.test(market.scope));
+    assert.strictEqual(market.confidence, confidenceLabel(buildFacts({ ticker: 'MARKET', title: 'Fed hikes rates', direction: 'neutral', priority: 0.7, source_count: 1 })));
+    assert.ok(!JSON.stringify(market).includes('"MARKET"'));
+    const one = factsForModel(FACTS);
+    assert.strictEqual(one.ticker, FACTS.ticker);
+    assert.strictEqual(one.scope, 'one holding');
+    assert.strictEqual(one.confidence, confidenceLabel(FACTS));
   });
   check('market/world alert renders without a ticker/exposure', () => {
     const marketFacts = buildFacts({ ticker: 'MARKET', title: 'Fed hikes rates', direction: 'neutral', priority: 0.7, source_count: 5, event_id: 20, user_id: 1 });

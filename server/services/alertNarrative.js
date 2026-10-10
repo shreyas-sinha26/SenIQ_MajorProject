@@ -114,7 +114,20 @@ const SYSTEM_PROMPT = `You are SenIQ's personal market analyst writing a SHORT a
 Rules:
 - Ground every statement in the numbers provided (affected ticker, exposure %, sentiment score, impact/materiality score, source count). Never invent events, prices, or figures.
 - Informational only — never give buy/sell/hold advice or price targets.
+- State the confidence given in the facts; do not choose your own. When the scope is the broad market, say it reaches the portfolio broadly — do not name a category or a holding the facts do not give.
 - Write ${ALERT_NARRATIVE.MIN_WORDS}–${ALERT_NARRATIVE.MAX_WORDS} words of plain text (no markdown, no bullet characters), covering, in order: what happened; why it matters; which holdings are affected; portfolio exposure; expected short-term impact; your confidence; key risks.`;
+
+// Pure: the facts as a model is shown them. The confidence is the label the template uses,
+// worked out in code, so the written explanation cannot disagree with it; and a market-wide
+// alert carries no ticker — "MARKET" is an internal tag a model repeats as if it were a holding.
+function factsForModel(facts) {
+  return {
+    ...facts,
+    ticker: facts.isMarket ? null : facts.ticker,
+    scope: facts.isMarket ? 'the broad market, not one holding' : 'one holding',
+    confidence: confidenceLabel(facts),
+  };
+}
 
 async function claudeNarrative(facts) {
   const client = require('./llmClient').getClient(); // Anthropic directly, or the router
@@ -122,7 +135,7 @@ async function claudeNarrative(facts) {
     model: ALERT_NARRATIVE.MODEL,
     max_tokens: ALERT_NARRATIVE.MAX_OUTPUT_TOKENS,
     system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-    messages: [{ role: 'user', content: `Alert facts for this user:\n${JSON.stringify(facts, null, 2)}\n\nWrite the alert explanation.` }],
+    messages: [{ role: 'user', content: `Alert facts for this user:\n${JSON.stringify(factsForModel(facts), null, 2)}\n\nWrite the alert explanation.` }],
   });
   const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
   if (!text) throw new Error('Claude returned empty narrative');
@@ -132,7 +145,7 @@ async function claudeNarrative(facts) {
 // ── Ollama tier (reuses ollamaExplainer.generate) ──
 async function ollamaNarrative(facts) {
   const { generate, OLLAMA_MODEL } = require('./ollamaExplainer');
-  const prompt = `You are a concise financial analyst. Using ONLY these facts, write ${ALERT_NARRATIVE.MIN_WORDS}-${ALERT_NARRATIVE.MAX_WORDS} words of plain text covering: what happened, why it matters, which holdings are affected, portfolio exposure, expected short-term impact, confidence, and key risks. Informational only, no buy/sell advice, do not invent numbers.\n\nFacts:\n${JSON.stringify(facts)}`;
+  const prompt = `You are a concise financial analyst. Using ONLY these facts, write ${ALERT_NARRATIVE.MIN_WORDS}-${ALERT_NARRATIVE.MAX_WORDS} words of plain text covering: what happened, why it matters, which holdings are affected, portfolio exposure, expected short-term impact, confidence, and key risks. Informational only, no buy/sell advice, do not invent numbers.\n\nFacts:\n${JSON.stringify(factsForModel(facts))}`;
   const text = await generate(prompt, { numPredict: ALERT_NARRATIVE.MAX_OUTPUT_TOKENS });
   if (!text) throw new Error('Ollama returned empty narrative');
   return { writer: 'ollama', model: OLLAMA_MODEL, narrative: text, usage: { input: 0, output: 0 } };
@@ -206,6 +219,6 @@ module.exports = {
   writeAlertNarrative,
   generateProNarrative,
   confidenceLabel,
-  wordCount,
+  wordCount, factsForModel,
   SYSTEM_PROMPT,
 };

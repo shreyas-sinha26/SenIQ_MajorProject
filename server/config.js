@@ -409,7 +409,8 @@ const REPORTS = {
   TOP_HOLDINGS: 12,              // trim the packet to the top-N holdings by exposure
   TOP_EVENTS: 6,                 // and the top-N impact events
   MAX_NEWS_CHARS: 280,           // clamp each untrusted headline/summary before prompting
-  PER_USER_DAILY_QUOTA: 1,       // Plus=1, Pro=2 (+1 manual) once tiers land; blocked before any call
+  // Claude-written briefs a day are set per plan (TIERS[tier].claudeReportsPerDay: Free 0,
+  // Plus 1, Pro 2) and checked before any call — see reports.briefQuota.
   GLOBAL_DAILY_USD_CEILING: 5,   // global kill-switch: stop calling Claude past this day's spend
   // Haiku 4.5 pricing ($/1M tokens) for the cost estimate logged per call.
   PRICE_PER_MTOK: { input: 1.0, output: 5.0 },
@@ -685,7 +686,14 @@ const INDIA_SMART_MONEY = {
 // Runs only when FEATURES.IPO_WATCH is on. Dates are the exchange's, so "today" is too.
 const IPO_WATCH = {
   TIMEZONE: 'Asia/Kolkata',
-  RECENT_LISTED_DAYS: 90,        // a listed issue stays on the calendar this long
+  // A listed issue stays on the calendar this long. The 3-month close is first readable on
+  // day 91 (the first trading day on or after listing + 90, once that day is over), so the
+  // window runs as long as prices are fetched (RETURN_GIVE_UP_DAYS) — at 90 the issue left
+  // the page the day before its last figure could be shown.
+  RECENT_LISTED_DAYS: 100,
+  // The poll runs once a day and never on start, so a server that was down at poll time
+  // shows yesterday's calendar. Older than this and the page says so.
+  STALE_AFTER_HOURS: 30,
   UNLISTED_AFTER_CLOSE_DAYS: 10, // closed this long with no listing date on record → off the calendar
   // Grey market premium is hearsay from one aggregator. A reading older than this is not
   // shown at all — an old number passed off as current is worse than none.

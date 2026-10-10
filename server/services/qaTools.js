@@ -26,6 +26,10 @@ const clampDays = (d) => Math.max(1, Math.min(QA.NEWS_DAYS_MAX, Number.isFinite(
  * Today's return attribution: each priced holding's contribution to the portfolio's move,
  * in percentage points = weight% × change% / 100. Weights are shares of the PRICED portfolio,
  * so the total is the priced part's move; unpriced holdings are listed, never guessed. Pure.
+ *
+ * That weight goes out as `priced_weight_pct`, beside `exposure_pct` — the holding's size as
+ * every page shows it. The two differ whenever a holding has no price or no quantity, and an
+ * answer that quoted the weight as the size disagreed with the Portfolio page.
  */
 function computeAttribution(holdings) {
   const priced = holdings.filter((h) => h.change_pct != null && h.weight_pct != null);
@@ -33,7 +37,8 @@ function computeAttribution(holdings) {
     .map((h) => ({
       ticker: h.ticker,
       asset_class: h.asset_class,
-      weight_pct: h.weight_pct,
+      exposure_pct: h.exposure_pct ?? null,
+      priced_weight_pct: h.weight_pct,
       change_pct: h.change_pct,
       contribution_pct: round((h.weight_pct * h.change_pct) / 100, 3),
     }))
@@ -55,7 +60,7 @@ function computeAttribution(holdings) {
     offsetting: detractors.length > 0 && contributors.length > 0, // losses and gains partly cancel
     unpriced: holdings.filter((h) => !priced.includes(h)).map((h) => h.ticker),
     note: priced.length
-      ? 'Equities: change since previous close. Crypto: rolling 24h. Covers priced holdings only.'
+      ? 'Equities: change since previous close. Crypto: rolling 24h. Covers priced holdings only. contribution_pct = priced_weight_pct × change_pct / 100; priced_weight_pct is the share among priced holdings and is only for that sum. A holding\'s size in the portfolio is exposure_pct.'
       : 'No live prices available for these holdings, so the move cannot be attributed.',
   };
 }
@@ -157,12 +162,12 @@ const daysProp = { type: 'integer', description: `Look-back window in days (1–
 const TOOLS = [
   {
     name: 'get_portfolio_overview',
-    description: 'The user\'s holdings: asset class, exposure %, weight %, live price and day change % (null when unpriced), and current sentiment (label, acute score, z-score vs 90-day baseline, momentum). Start here for most portfolio questions.',
+    description: 'The user\'s holdings: asset class, exposure % (each holding\'s share of the portfolio, the figure the app\'s pages show), live price and day change % (null when unpriced), and current sentiment (label, acute score, z-score vs 90-day baseline, momentum). Start here for most portfolio questions.',
     input_schema: { type: 'object', properties: {} },
   },
   {
     name: 'get_attribution',
-    description: 'Why the portfolio is up or down TODAY: each priced holding\'s contribution in percentage points (weight × day change), sorted biggest drag first, plus holdings that could not be priced. Use for "why is my portfolio down/up". Pair with get_top_events or get_ticker_news to explain the biggest movers.',
+    description: 'Why the portfolio is up or down TODAY: each priced holding\'s contribution in percentage points (its weight among priced holdings × day change), sorted biggest drag first, plus holdings that could not be priced. Use for "why is my portfolio down/up". Pair with get_top_events or get_ticker_news to explain the biggest movers.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -249,7 +254,8 @@ const EXECUTORS = {
         name: h.company_name || h.ticker,
         asset_class: h.asset_class,
         exposure_pct: h.exposure_pct,
-        weight_pct: h.weight_pct,
+        // No price or no quantity: the share is an estimate (the pages mark it "≈").
+        ...(h.market_value == null ? { exposure_estimated: true } : {}),
         price: h.price,
         currency: h.currency,
         day_change_pct: h.change_pct,
@@ -259,7 +265,7 @@ const EXECUTORS = {
     return {
       as_of: new Date().toISOString(),
       ...rankHoldings(out),
-      note: 'Holdings are listed largest first; rank 1 is the largest exposure. A holding in "unpriced" has no live price, so its weight_pct and day change are unknown.',
+      note: 'Holdings are listed largest first; rank 1 is the largest exposure. exposure_pct is the holding\'s share of the portfolio, as the Portfolio page shows it. A holding marked exposure_estimated has no live price or no quantity, so its share is an estimate (it is counted at the average size of the priced holdings); say "about". A holding in "unpriced" has no live price, so its day change is unknown.',
     };
   },
 
