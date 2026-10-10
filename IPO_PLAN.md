@@ -159,7 +159,8 @@ into their own surface.
   read as news about the issue — FinBERT when on, else the word list — and the reading kept
   on the link. Runs at the end of each news pipeline pass, 60 stories a run. On the page, a
   click on an issue with stories opens its overall tone, a tone-by-day chart with the open /
-  close / listing days marked, and the story list. First run: 30 stories read (17 positive,
+  close / listing days marked, and the story list: the latest 5, with a "Show all N stories"
+  button for the rest (2026-10-10; the tone and the chart are always from every story). First run: 30 stories read (17 positive,
   9 neutral, 4 negative), 12 left unread because they cover several issues.
   - **Subscription headlines are scored by rule, not by the model (2026-10-09).** FinBERT read
     "IPO subscribed 42%" and "subscribed 23%" as positive (0.83, 0.84): it reacts to the word,

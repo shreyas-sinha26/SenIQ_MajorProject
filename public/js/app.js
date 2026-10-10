@@ -2361,6 +2361,19 @@ async function toggleIpoStories(tr) {
   try { data = await api(`/api/ipo-watch/${issue.id}/stories`); }
   catch (err) { detail.firstElementChild.innerHTML = `<div class="empty-state small"><p>${escapeHtml(err.message || 'Could not load the news')}</p></div>`; return; }
   detail.firstElementChild.innerHTML = renderIpoStories(issue, data);
+  const more = detail.querySelector('.ipo-stories-more');
+  if (more) more.addEventListener('click', () => ipoToggleAllStories(more));
+}
+
+// An issue's news opens on its latest few stories; the rest sit behind "Show all N stories".
+// The tone and the chart above the list are always worked out from every story.
+const IPO_STORIES_SHOWN = 5;
+
+function ipoToggleAllStories(btn) {
+  const all = btn.getAttribute('aria-expanded') !== 'true';
+  btn.closest('.ipo-stories').querySelectorAll('.ipo-story-extra').forEach(li => li.classList.toggle('hidden', !all));
+  btn.setAttribute('aria-expanded', String(all));
+  btn.textContent = all ? `Show the latest ${IPO_STORIES_SHOWN}` : `Show all ${btn.dataset.total} stories`;
 }
 
 // Tone by day as a small chart: 0–100 up the side, a dot per day sized by its story count,
@@ -2394,8 +2407,8 @@ function renderIpoStories(issue, { stories, arc, tone }) {
     <div class="ipo-stories">
       <p class="ipo-stories-head">${head}</p>
       ${ipoArcChart(issue, arc)}
-      <ul class="ipo-story-list">${stories.map(s => `
-        <li>
+      <ul class="ipo-story-list">${stories.map((s, n) => `
+        <li${n >= IPO_STORIES_SHOWN ? ' class="ipo-story-extra hidden"' : ''}>
           ${s.sentiment ? `<span class="ht-senti-label ${escapeHtml(s.sentiment.label)}" title="${s.sentiment.model === 'subscription-rule' ? 'Scored from the subscription figure in the headline, not from its wording' : 'Tone of the headline and summary'}">${Math.round(s.sentiment.score * 100)}</span>` : '<span class="ht-senti-label neutral" title="Not read for tone">–</span>'}
           <div>
             ${/^https?:\/\//.test(s.url || '') ? `<a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title)}</a>` : escapeHtml(s.title)}
@@ -2403,6 +2416,7 @@ function renderIpoStories(issue, { stories, arc, tone }) {
           </div>
         </li>`).join('')}
       </ul>
+      ${stories.length > IPO_STORIES_SHOWN ? `<button type="button" class="ipo-stories-more" aria-expanded="false" data-total="${stories.length}">Show all ${stories.length} stories</button>` : ''}
     </div>`;
 }
 
