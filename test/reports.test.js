@@ -7,7 +7,7 @@
 const assert = require('node:assert');
 const { guardCheck, briefQuota } = require('../server/services/reports');
 const { buildDiff } = require('../server/services/grounding');
-const { deterministicBrief, parseClaudeOutput, packetForWriter, tidyHeadline } = require('../server/services/briefWriter');
+const { deterministicBrief, parseClaudeOutput, packetForWriter, tidyHeadline, headlineGrounded } = require('../server/services/briefWriter');
 const { sanitizeQuestion, deterministicAnswer } = require('../server/services/qa');
 
 let passed = 0;
@@ -109,6 +109,26 @@ check('a headline that runs to a full sentence is cut to its first clause, or to
   assert.strictEqual(cut, 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen…');
   assert.strictEqual(parseClaudeOutput('HEADLINE: "Quiet day."\n\nBody').headline, 'Quiet day');
 });
+check('HEADLINE on a line of its own, or in ** **, is still the marker (a real reply, 2026-10-10)', () => {
+  // What Claude Haiku 4.5 returned when asked for "HEADLINE: <…>": the word, a line break, the headline.
+  const real = 'HEADLINE\nCrypto rout and rising yields pressure your $25.9B Apple and Bitcoin stakes\n\nYour portfolio faces headwinds today as the story that matters most for you is US market weakness.';
+  const p = parseClaudeOutput(real);
+  assert.strictEqual(p.headline, 'Crypto rout and rising yields pressure your $25.9B Apple and Bitcoin stakes');
+  assert.ok(p.narrative.startsWith('Your portfolio faces headwinds'));
+  assert.ok(!/HEADLINE/.test(p.headline + p.narrative));
+  assert.strictEqual(parseClaudeOutput('**HEADLINE:** Apple leads a quiet day\n\nBody.').headline, 'Apple leads a quiet day');
+  assert.strictEqual(parseClaudeOutput('**HEADLINE: Apple leads a quiet day**\n\nBody.').headline, 'Apple leads a quiet day');
+  assert.strictEqual(parseClaudeOutput('Headline: Apple leads a quiet day\nBody.').narrative, 'Body.');
+});
+check('a money amount in the headline must come from a story; a share of the portfolio is not money', () => {
+  const packet = { top_events: [ev(1, { title: 'SpaceX seeks $40 billion to buy Nvidia chips' }), ev(2, { title: 'Bitcoin falls to $82,000' })] };
+  assert.strictEqual(headlineGrounded('Crypto rout and rising yields pressure your $25.9B Apple and Bitcoin stakes', packet), false);
+  assert.strictEqual(headlineGrounded('SpaceX seeks $40 billion for Nvidia chips', packet), true);
+  assert.strictEqual(headlineGrounded('Bitcoin slips to $82,000 as yields climb', packet), true);
+  assert.strictEqual(headlineGrounded('Apple weakness touches 25.9% of your portfolio', packet), true); // no money in it
+  assert.strictEqual(headlineGrounded('Rupee story costs you ₹3 crore', packet), false);
+  assert.strictEqual(headlineGrounded('', packet), true);
+});
 check('the writer never sees the engine\'s scores, only rank, share of the portfolio and words', () => {
   const packet = {
     user_id: 7, date: '2026-10-10',
@@ -168,4 +188,32 @@ check('deterministicAnswer with no holdings is graceful', () => {
   assert.ok(/add a few/i.test(deterministicAnswer('anything?', { portfolio: { holdings: [] } })));
 });
 
-console.log(`\n${passed} checks passed${process.exitCode ? ' (with failures)' : ''}`);
+// The Claude path end to end, with the model's reply stood in: the reply is the one Claude
+// Haiku 4.5 gave on 2026-10-10 (the word HEADLINE on its own line, and "$25.9B" made out of
+// "25.9% of your portfolio").
+(async () => {
+  const { writeBrief } = require('../server/services/briefWriter');
+  const llm = require('../server/services/llmClient');
+  const real = 'HEADLINE\nCrypto rout and rising yields pressure your $25.9B Apple and Bitcoin stakes\n\nYour portfolio faces headwinds today as the story that matters most for you is US market weakness.';
+  const getClient = llm.getClient;
+  let shown = null;
+  llm.getClient = () => ({ messages: { create: async (req) => { shown = req.messages[0].content; return { content: [{ type: 'text', text: real }], usage: { input_tokens: 10, output_tokens: 5 } }; } } });
+  try {
+    const packet = {
+      date: '2026-10-10', portfolio: { holdings_count: 1, top_holdings: [{ ticker: 'AAPL', exposure_pct: 25.9, sentiment_label: 'negative', sentiment_acute: 0.31, z: -0.24 }] },
+      top_events: [ev(1, { title: 'US stocks slip as yields rise', impact_score: 0.157, exposure_pct: 25.9, direction: 'negative' })],
+      most_important: ev(1, { title: 'US stocks slip as yields rise', impact_score: 0.157, exposure_pct: 25.9, direction: 'negative' }),
+      smart_money: {}, changed: { has_prior: false },
+    };
+    const b = await writeBrief(packet, { allowClaude: true });
+    try {
+      assert.strictEqual(b.writer, 'claude');
+      // "$25.9B" is in no story → the code-written headline, the one a Free account sees
+      assert.strictEqual(b.headline, 'US stocks slip as yields rise — 25.9% of your exposure, negative');
+      assert.ok(b.narrative.startsWith('Your portfolio faces headwinds') && !/HEADLINE/.test(b.narrative));
+      assert.ok(!/0\.157|impact_score|-0\.24|sentiment_acute/.test(shown), 'a raw score reached the model');
+      passed++; console.log('  ✓ Claude path: a headline with money no story states is replaced; the body is kept; no score is sent');
+    } catch (e) { console.error(`  ✗ Claude path with a real reply\n    ${e.message}`); process.exitCode = 1; }
+  } finally { llm.getClient = getClient; }
+  console.log(`\n${passed} checks passed${process.exitCode ? ' (with failures)' : ''}`);
+})();

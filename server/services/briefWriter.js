@@ -88,9 +88,10 @@ Rules:
 - Lead with what CHANGED since yesterday (the packet's "changed" block) and the single most important event for this portfolio ("most_important").
 - Be specific and personal: reference the user's actual holdings and how much of their exposure an event touches.
 - Write for a reader who has never seen how SenIQ scores things. Events are listed most important first: say "the story that matters most for you today", never a score. Give sentiment in the packet's own words ("negative", "above its usual level"). The only figures to quote are the percent of the portfolio a story touches, counts, and amounts or dates the packet states.
+- exposure_pct is a share of the portfolio, never an amount of money: write "25.9% of your portfolio", never "$25.9B" or "your $25.9 stake". A figure in a story's title is about the market or the company in that story, not about this investor's own position.
 - Informational only — never give buy/sell/hold advice or price targets.
 - Output plain text in exactly two parts:
-  HEADLINE: <a headline, not a sentence: 12 words at most, no full stop>
+  HEADLINE: <a headline, not a sentence: 12 words at most, no full stop, no figures>
   Then a 120–200 word brief in 1–2 short paragraphs.
 - No preamble, no markdown headers, no bullet lists. Just the HEADLINE line followed by the prose.`;
 
@@ -169,7 +170,10 @@ function tidyHeadline(text) {
 
 function parseClaudeOutput(text) {
   const trimmed = (text || '').trim();
-  const m = trimmed.match(/^\s*HEADLINE:\s*(.+?)\s*(?:\n|$)/i);
+  // "HEADLINE: the headline", or the word alone on a line with the headline on the next, or
+  // either wrapped in ** **. Asked for the first, a model has written each of the others; read
+  // as "no marker", the second put the word HEADLINE at the top of the brief.
+  const m = trimmed.match(/^[*#_\s]*HEADLINE[*_]*\s*[:：]?[*_\s]*(\S.*?)[*_]*\s*(?:\n|$)/i);
   if (m) {
     const headline = tidyHeadline(m[1]);
     const narrative = trimmed.slice(m[0].length).trim();
@@ -179,6 +183,18 @@ function parseClaudeOutput(text) {
   const firstStop = trimmed.search(/[.!?]\s/);
   const headline = tidyHeadline(firstStop > 0 ? trimmed.slice(0, firstStop + 1) : trimmed.slice(0, 140));
   return { headline, narrative: trimmed };
+}
+
+// A money amount in the headline has to come from one of the stories. A model once read
+// "25.9% of your portfolio" and wrote "your $25.9B Apple and Bitcoin stakes"; the headline is
+// the first thing read, so one carrying an amount no story states is not used. Pure.
+const MONEY = /[$₹€£]\s?\d[\d,]*(?:\.\d+)?\s?(?:thousand|million|billion|trillion|crore|lakh|bn|tn|[kmbt])?(?![a-z])/gi;
+function headlineGrounded(headline, packet) {
+  const amounts = String(headline || '').match(MONEY) || [];
+  if (!amounts.length) return true;
+  const squash = (t) => String(t || '').toLowerCase().replace(/\s+/g, '');
+  const titles = squash(((packet && packet.top_events) || []).map((e) => e.title).join(' | '));
+  return amounts.every((a) => titles.includes(squash(a)));
 }
 
 async function claudeBrief(packet) {
@@ -193,7 +209,9 @@ async function claudeBrief(packet) {
     messages: [{ role: 'user', content: buildUserContent(packet) }],
   });
   const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-  const { headline, narrative } = parseClaudeOutput(text);
+  const parsed = parseClaudeOutput(text);
+  const narrative = parsed.narrative;
+  const headline = headlineGrounded(parsed.headline, packet) ? parsed.headline : tidyHeadline(deterministicHeadline(packet));
   return {
     writer: 'claude',
     model: REPORTS.MODEL,
@@ -218,4 +236,4 @@ async function writeBrief(packet, { allowClaude = false } = {}) {
   return deterministicBrief(packet);
 }
 
-module.exports = { writeBrief, deterministicBrief, deterministicHeadline, deterministicNarrative, parseClaudeOutput, packetForWriter, tidyHeadline, SYSTEM_PROMPT, DISCLAIMER };
+module.exports = { writeBrief, deterministicBrief, deterministicHeadline, deterministicNarrative, parseClaudeOutput, packetForWriter, tidyHeadline, headlineGrounded, SYSTEM_PROMPT, DISCLAIMER };
