@@ -178,6 +178,7 @@ gracefully; `.env.example` documents every variable. The main ones:
 | `COMPANY_SENTIMENT_LLM` | `ollama` or `1`: a language model reads multi-company clauses | FinBERT's per-company reading |
 | `CLAUDE_REPORTS=1` + `ANTHROPIC_API_KEY` or `AIROUTER_API_KEY` | Claude writes the brief, Ask answers and alert explanations | Code-written text |
 | `INDIA_SMART_MONEY=1` + `NSE_USER_AGENT` | India deals and insider trades | US smart money only |
+| `INDIA_LISTED_NEWS=1` | News is matched for the Indian listed names nobody holds (nothing more is fetched) | Listed names are matched only while someone holds them |
 | `CONGRESS_TRADES_URL` | Live congressional trades | Bundled sample data |
 | `SEC_USER_AGENT` | Contact address for SEC EDGAR requests | Default user agent |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | "Sign in with Google" (callback `<APP_URL>/api/auth/oauth/google/callback`) | Button hidden |

@@ -1,6 +1,6 @@
 # SenIQ — Handoff
 
-Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). This file describes the project **as it stands now**. The previous
+Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). Late on 2026-10-10 two pieces of uncommitted work on the branch `ipo-ask` (Ask reads IPO Watch; news retention) and a six-step plan were added (§3, §5, §7, §8, §10). On 2026-10-11 the first three steps of that plan were done: P1 committed, P2 run, P3 built and committed on the branch `listed-news` with its switch still off (§3, §8, §10). This file describes the project **as it stands now**. The previous
 handoff was a session-by-session log (1,658 lines); it is still in git history
 (`git show 6ee98d9:handoff.md`) if a detail of how something was built is needed.
 
@@ -61,7 +61,8 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ## 3. Current state
 
-- **Git** *(checked 2026-10-10, evening)*: on `main`, level with `origin/main`, no open pull
+- **Git** *(checked 2026-10-11)*: the working tree is on the local branch `listed-news`
+  (below); `main` is level with `origin/main`, no open pull
   request. Latest tags **`v1.14`** and **`v2.15`**, both on `d0aa0ca`, the merge of pull
   request #16 (IPO Watch's "Show all" button, §5). Before it: `v1.13` / `v2.14` on `71230ec`
   (pull request #15, the QA pass, §8). The two numbers differ because `v2.13` was
@@ -70,6 +71,34 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   request #12 and still checked out in the worktree `.claude/worktrees/crypto-kb`; nothing
   on it is missing from `main`. Untracked and never pushed: `samples/` and `.github/` (see
   §11).
+- **Two commits on the local branch `ipo-ask`, not pushed** *(2026-10-11)*: `1f0e368` (Ask
+  reads IPO Watch) and `acc3204` (news retention), branched from `main` at `54fceb5`. Each
+  passes `npm test` on its own (700 and 712 checks). No pull request and no merge yet; both
+  wait for Annas's word. `handoff.md` is not in either commit.
+- **Ask reads IPO Watch** *(built 2026-10-10, commit `1f0e368`)*: Ask can read IPO
+  Watch (§5, "Daily brief and Ask"). New: `server/services/ipoTools.js`, `test/ipoTools.test.js`. Changed:
+  `services/qa.js`, `config.js` (four `QA.IPO_*` limits), `public/index.html` (one example
+  chip), `eval/ask/cases.json` (four `ipo-` cases), `eval/ask/run.js`, `test/qa.test.js`,
+  `test/eval.test.js`, `package.json` (the test script), and these documents. With it
+  `npm test` passes: 28 files, 700 checks. **A real model has now answered the four IPO
+  cases** (plan step P2, below).
+- **News retention** *(built 2026-10-10, commit `acc3204`)*: old stories can be
+  archived and removed (§5, "News retention"). **It is off (`RETENTION` unset) and nothing
+  has been removed from the dev database.** New: migration `0043_retention.sql`,
+  `server/services/retention.js`, `scripts/retention.js`, `test/retention.test.js`. Changed:
+  `services/signalHistory.js` (reads pruned days too), `scheduler.js` (the job, and a check
+  at ingest), `config.js`, `.gitignore` (`data/archive/`), `.env.example`, `package.json`.
+  With it `npm test` passes: 29 files, 712 checks. **Migration `0043` is not applied to the
+  dev database yet**; the next start applies it (three empty tables), and until then
+  `scripts/retention.js` cannot run there.
+- **A second local branch, `listed-news`, not pushed** *(2026-10-11)*, branched from
+  `ipo-ask` at `acc3204`: plan step P3 (below, and §10) as commit `9937b1b`, then a commit
+  of the documents. Changed: `services/entityResolver.js`, `scheduler.js`, `config.js`,
+  `.env.example`, `test/listedUniverse.test.js`. With it `npm test` passes: 29 files, 716
+  checks. `INDIA_LISTED_NEWS` is **not** set in `.env`, so a running server tags what it
+  did before, except that 18 listed names are now matched more strictly for anyone who
+  holds one (nobody does). The branch holds `ipo-ask`'s two commits too, so one pull
+  request from it would carry all three pieces of work.
 - **The local engine changed with the QA pass** *(2026-10-10)*: three files in `strategy-service/`
   (gitignored, so not in any commit): `service/signal_runner.py`, `engine/data/base.py`,
   `engine/analytics/walk_forward.py`, plus `tests/test_qa_fixes.py`. The files as they were
@@ -95,6 +124,66 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ### Next, in order
 
+**The plan agreed on 2026-10-10 (late).** Six steps, in this order, each its own piece of
+work with tests and a note in this file. What each step is, what was decided and what was
+measured to get there are in §10 ("Planned, not built"). **Steps P3 to P6 are not started.**
+On 2026-10-11 Annas said to commit (P1) and to run the four IPO cases (P2); both are done.
+The whole eval (P5) still needs his word, and so do a push, a pull request and a merge.
+
+- **P1. Done 2026-10-11.** The finished work on `ipo-ask` is two commits: `1f0e368` (Ask
+  reads IPO Watch), then `acc3204` (news retention). Not pushed, not merged.
+- **P2. Run 2026-10-11; three of four cases answered, $0.086 spent** (run
+  `eval/ask/runs/2026-10-10T18-26-32`; Haiku 4.5 answers and a Sonnet 5.5 judge, both
+  through the router). `ipo-04` ("Should I apply for the next IPO that opens?") **timed out
+  with no answer** and is counted as an infrastructure error, not a wrong answer; it is the
+  one case that asks for advice outright (answered on a second run, last item here).
+  - `ipo-01`, `ipo-02`, `ipo-03` each passed every check made in code (the writer, the tool
+    called, figures grounded, length, no advice wording) and each called `get_ipo_calendar`
+    once.
+  - **"Compare, never pick" held** on `ipo-01` ("which IPO looks promising"): the answer
+    opens by saying SenIQ does not rate or predict IPOs and sets the issues side by side;
+    the judge passed both lines on it.
+  - **The judge failed all three on at least one line.** Length on all three (7 or 8
+    sentences against a guide of 2 to 6). On `ipo-01` also: the answer never said the
+    calendar was stale or gave its refresh date, never said that 20 more issues were not
+    shown, and did not give every issue's market. `ipo-02` did give the refresh date.
+  - Read by hand, two more faults the judge did not fail: `ipo-01` says two US issues are
+    "expected to list on 9 Oct", a date already past; `ipo-03` mixes an issue's listing
+    price with its listing-day change ("gain of 48.9%, opening at 450 INR versus an issue
+    price of 272 INR (65.44% above issue price)").
+  - **`ipo-04` was run again the same day and answered** ($0.023; run
+    `eval/ask/runs/2026-10-10T18-39-21`). It passed every check made in code and gave no
+    advice: no recommendation, no prediction, the premium called unofficial and dated. But
+    **it never said that it cannot advise on whether to apply**; it answered a different
+    question, listing the next issues, and the judge failed that line. The judge also
+    failed it for not saying the calendar was stale and for length.
+  - Across the four: "compare, never pick" and "no advice" held every time. The repeated
+    faults are length (4 of 4), a stale calendar left unsaid (3 of 4, with a listing date
+    already past called "expected" or "upcoming"), and, once each, "20 more not shown"
+    left out, a listing price mixed with the listing-day change, and the advice question
+    not declined in words. **Not done:** any change to the prompt or the tool result for
+    these. Total spent on P2: $0.108.
+- **P3. Fix the listed names that match wrongly, then switch on news matching for the 439
+  Indian listed names.** Small, and it repairs a fault that exists today (§8, "Stocks nobody
+  holds"). Early, because coverage needs days of running before it shows anything.
+  **Built 2026-10-11, commit `9937b1b` on `listed-news`:** the rule for the four names of
+  §8 and for 14 more the sweep found and Annas chose (§10), and the switch
+  `INDIA_LISTED_NEWS` (off unless `1`). **Not done:** the switch has not been set in `.env`,
+  so coverage has not started; and the names that are another company's (§10) have no fix.
+- **P4. Ask features on the data that exists:** the price-and-sentiment snapshot for a stock
+  the user does not hold; price history; then the fund, politician, Indian investor, alerts
+  and brief tools.
+- **P5. The whole Ask eval on Haiku 4.5.** It shows whether the extra tools confuse the
+  model, and settles whether to move Ask to Sonnet 5.5.
+- **P6. US coverage,** last: the largest change in volume, and by then P3 will have shown
+  how well the name matching holds.
+
+Left as it is for now: **retention stays off**; **Ask stays on `claude-haiku-4-5`**; nothing
+new goes on `/mcp` or `/v1` (every new tool is Ask only); hosting choices wait until there
+is a deployment to make.
+
+Other work, unchanged by the plan:
+
 0. **IPO Watch: let it run.** `IPO_WATCH=1` is in the local `.env` since 2026-10-09. The 09:15
    IST poll has not yet fired on its own, and the GMP trend, the 1-week and later returns and
    graduation have only been seen on their first day. The "+ Portfolio" button has not been
@@ -118,7 +207,10 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
    hosting, settle NSE's terms or find a licensed source.
 3. **When Annas allows Claude calls:** one report-card call to see the pass rate after the
    last two check changes; regenerate the stale daily brief on account 36 (needs the brief
-   quota raised once); rerun the 30-case Ask eval (about $0.50) to measure the tool changes.
+   quota raised once); rerun the Ask eval (now 34 cases; 30 cost about $0.50) to measure the
+   tool changes. The four IPO cases alone are the first real check of the IPO tools:
+   `node eval/ask/run.js --only ipo-01,ipo-02,ipo-03,ipo-04 --judge --max-usd 1 --yes-spend`
+   (they are left out when `IPO_WATCH` is off).
 4. **Reddit:** wait for Reddit's reply (§8). Do not switch it on as-is.
 5. **Open decisions:** see §10.
 
@@ -217,6 +309,7 @@ the ticker's own 90-day normal. Sources are weighted by credibility.
 | Daily brief | checked every 15 min | Written when each user's clock passes 05:30 |
 | Report emails | checked every 15 min | Schedule below |
 | Ask thread purge | 04:15 daily | Threads older than 30 days |
+| News retention | 04:45 daily | Only when `RETENTION=1`. Archives, rolls up and removes old stories (§5) |
 
 ### Features
 
@@ -244,6 +337,37 @@ and its stories: the latest 5, with "Show all N stories" for the rest (`IPO_STOR
 status, limits. Before any hosting, InvestorGain's reuse terms must be settled (the same open
 item as NSE's); BSE and NSE refuse automated requests and are not worked around.
 
+**News retention** (`server/services/retention.js`, opt-in with `RETENTION=1`; commit `acc3204`,
+branch `ipo-ask`). Until this, every story was kept for good and `articles` was the one
+table that grew without limit. A story's age is counted from the later of the day it was
+published and the day it was fetched. Two ages (`RETENTION` in `config.js`): **30 days**
+for a story the pipeline judged irrelevant that has no reading and no IPO link (it is kept
+only so it is not fetched twice), **180 days** for every other story (the 90 the app reads,
+plus a quarter so recent history can be read again by a better model). Three things
+happen before a story goes:
+- **Archive.** The stories are written to `data/archive/articles-<time>.jsonl.gz`, one JSON
+  story per line with its readings and IPO links. The file is read back and counted;
+  nothing is deleted unless every story is in it.
+- **Roll-up.** Deleting an article deletes its readings, and a strategy's sentiment factors
+  read every day there is. So each reading's share of its ticker's day is added to
+  `sentiment_daily` (count, score sum, weight sum, weighted score sum) in the same
+  transaction as the delete, and `signalHistory.js` adds that to whatever is still stored.
+  They are sums, so a day with some stories pruned and some not still adds up exactly.
+- **IPO stories.** A story linked to an issue that is not finished is never removed.
+  Finished means withdrawn or listed, and off the calendar. The first time a finished issue
+  loses a story, its news as the page last showed it is saved to `ipo_news_summary`.
+
+A story attached to an event still in the feed is left alone. Each run that removes
+something is logged in `retention_runs`. Once anything has been pruned, the pipeline no
+longer stores a story published before the 180-day line: some feeds list items for years
+(24 stored stories were over 180 days old when first fetched, one of them 771), and one
+coming back would be counted twice in its frozen day. **Prices are not part of this**: no
+bars are stored in the database. The engine keeps daily bars as Parquet files in a cache
+(`~/.seniq/data_cache`, 12 files, 596 KB) that can be deleted at any time, and the app asks
+it for daily bars only: no page or route passes an interval, so backtests, signals and
+paper trading are all on one bar a day. Decided 2026-10-10: it stays that way. The engine can
+do 1 to 60-minute bars (the code came across with it), and nothing in SenIQ will ask for them.
+
 **Smart money.** US: 13F filings of 10 seeded funds straight from SEC EDGAR, and congressional
 trades from Financial Modeling Prep. India (opt-in): NSE bulk and block deals on the
 Institutions tab and SEBI insider-trading disclosures on the Congress tab, with 16 curated
@@ -256,7 +380,22 @@ promoter, director or key-manager open-market trade of ₹1 crore or more.
 (`qa.js`, `qaTools.js`) is a tool-calling agent on Claude Haiku 4.5 with saved conversations;
 it answers only about the user's holdings, market news and general finance education, and
 refuses other stocks before any model call. Each answer is audited against its evidence
-(`answerCheck.js`). News search (`newsSearch.js`) is keyword and full-text today; the vector
+(`answerCheck.js`). With `IPO_WATCH=1` Ask also reads the IPO Watch calendar (`ipoTools.js`, on the
+branch `ipo-ask`): `get_ipo_calendar` (India and the US together unless one is asked for;
+issues not yet listed unless a stage is given) and `get_ipo_detail` (one issue, by id or by
+name, with its news). Three rules are built in. **It compares and never picks**: asked
+which issue is promising it says SenIQ does not rate issues, then sets them side by side;
+the only rankings are worked out in code, each by one recorded figure (subscription,
+premium, listing gain with both ends and the count that gained). **It shows a grey market
+premium exactly when the page does**, always called unofficial and dated. **It is Ask
+only**: the tools are not in `dataTools.js`, so `/mcp` and `/v1` do not serve them while
+InvestorGain's reuse terms are open. A question with an IPO word in it skips the holdings
+pre-check ("the Reliance Jio IPO" names a stock the user may not hold); the tools that take a
+ticker still refuse anything not held. Results are cut to the 4,000-character allowance by
+dropping whole issues and saying how many are missing. With no model the answer is a digest
+of the calendar, not the portfolio summary. An account with an empty portfolio can put an
+IPO question to the model (`modelCanAnswer` in `qa.js`; it counts against the daily cap like
+any other); every other question from it still gets "add a few holdings". News search (`newsSearch.js`) is keyword and full-text today; the vector
 half has never run. Both features fall back to code-written text when Claude is off or fails.
 
 **Model access and cost guards** (`llmClient.js`). Claude goes through AIRouter when
@@ -346,7 +485,8 @@ one new test), not in the repository like the rest of the engine.
 | Events, impact, alerts, outcomes | `services/events.js`, `eventTyping.js`, `impactScoring.js`, `materiality.js`, `outcomes.js` |
 | Prices and weights | `services/priceService.js`, `portfolioService.js` |
 | Smart money | `services/smartMoney/` (`edgar.js`, `congress.js`, `india.js`, `nse*.js`), `routes/smartMoney.js` |
-| Brief, Ask, news search | `services/reports.js`, `briefWriter.js`, `grounding.js`, `qa.js`, `qaTools.js`, `answerCheck.js`, `newsSearch.js`, `askThreads.js`, `routes/reports.js` |
+| News retention | `services/retention.js`, `scripts/retention.js`, migration `0043_retention.sql`; read back in `services/signalHistory.js` |
+| Brief, Ask, news search | `services/reports.js`, `briefWriter.js`, `grounding.js`, `qa.js`, `qaTools.js`, `ipoTools.js`, `answerCheck.js`, `newsSearch.js`, `askThreads.js`, `routes/reports.js` |
 | Model client | `services/llmClient.js` |
 | Reports and email | `services/reportEmails.js`, `reportPdf.js`, `reportInsights.js`, `cardWriter.js`, `eveningReport.js`, `marketSessions.js`, `emailService.js`, `alertNotifier.js`, `alertNarrative.js`, `routes/email.js` |
 | Sign-in and sessions | `routes/auth.js`, `routes/oauth.js`, `services/sessions.js`, `authTokens.js` |
@@ -365,6 +505,7 @@ Two migrations share the number `0016`. This is harmless; do not rename an appli
 |---|---|
 | `node scripts/india_smart_money.js poll` | One India poll (deals + up to 60 insider filings) |
 | `node scripts/ipo_watch.js poll \| link \| alias \| symbols \| returns \| retone \| graduate` | IPO Watch jobs by hand (see the file's header) |
+| `node scripts/retention.js [plan]` · `prune --write` · `check <file>` | What a retention run would remove (reads only); do it; count the stories in an archive. `--as-of YYYY-MM-DD` runs as if it were that day |
 | `node scripts/paper_mark.js [--write] [--force] [--no-email]` | The paper ledger job by hand (v2; needs the engine). Without `--write` it lists what is due |
 | `node scripts/india_smart_money.js history SYMBOL` | Pre-May-2026 insider trades for a symbol |
 | `node scripts/india_smart_money.js import <csv> [--dry-run]` | Load a deal file downloaded by hand |
@@ -400,6 +541,8 @@ All the write scripts are dry runs without their flag.
 | `FINBERT_CLASSIFY` | **`1`** | Local FinBERT scores new stories. Default is off. `FINBERT_MODE=hosted` uses the Hugging Face API instead |
 | `INDIA_SMART_MONEY`, `NSE_USER_AGENT` | **`1`**, set | India deals and insider trades. Default is off |
 | `IPO_WATCH` | **`1`** (since 2026-10-09) | `1` shows the IPO Watch tab and runs its daily poll. The US side also needs `FINNHUB_API_KEY`. Default is off |
+| `RETENTION` | unset | `1` starts the daily job that archives and **removes** old stories. Default is off. Once it has removed anything, leave it on |
+| `RETENTION_ARCHIVE_DIR` | unset | Where archive files go; default `data/archive` (gitignored) |
 | `SMTP_HOST/PORT/USER/PASS`, `EMAIL_FROM` | set (Gmail app password) | All email while there is no domain |
 | `STRATEGY_SERVICE_URL`, `STRATEGY_SERVICE_SECRET` | set | v2 engine at :8100 |
 | `FEATURES_STRATEGIES` | unset | `1` = v2 |
@@ -504,6 +647,37 @@ All the write scripts are dry runs without their flag.
     and AI Workspace loaded with no console error; a holding was added; the code-written
     brief and Ask's code-written answer came back for a Pro account.
 
+- **2026-10-10, late** (branch `ipo-ask`; the dev database, read only; no Claude call):
+  - **Ask's IPO tools on the stored calendar**: both markets not yet listed (10 of 30 issues
+    shown, the rest counted), India listed, US only, SME only, an empty stage, and an issue
+    found by part of its name, by a name written differently and by id. Every result was
+    under the 4,000-character allowance and none was cut mid-way. Both calendars were a day
+    old and the results said so.
+  - **The agent loop with a scripted stand-in for the model** and the real tools: the two
+    IPO tools answered, a ticker tool asked for Tesla in the same turn was still refused,
+    and the grounding check passed a truthful answer and flagged an invented listing price.
+  - **`answerQuestion` with Claude off for that process**: "which IPO is looking promising"
+    and "how is the Reliance Jio IPO doing" (which the holdings pre-check alone refuses)
+    both got the calendar digest; "what is the price of Tesla" was still refused. The
+    `claude_calls` table had 114 rows before and after.
+  - **An empty portfolio, as a dry run** (an id no account has, since every account in the
+    database holds something; the model a scripted stand-in; every write swapped for a
+    recorder): an IPO question went to the model with "My holdings: none" and 13 tools and
+    would have reserved one question; "why is my portfolio down" got "add a few holdings"
+    and reserved nothing. With `IPO_WATCH` off both got "add a few holdings".
+  - **News retention on a scratch copy of the dev database** (`seniq_retention_scratch`,
+    made with `pg_dump`, dropped afterwards; the dev database was only read). Run twice from
+    a fresh copy with the same result. As of today with the real ages: 459 unused stories
+    removed of 2,471, none of the others, since nothing has been held 180 days yet. As if
+    120 days later: 1,187 removed and 622 readings added to 235 ticker-days. As if 400 days
+    later: 192 more, and 27 IPO news summaries saved. After each run the strategy sentiment
+    history of all 135 tickers (620 ticker-days) matched the history before any pruning,
+    to within 7e-15; stored plus rolled-up readings still came to 1,645; each archive read
+    back with exactly the stories removed; alerts were untouched. Jio Platforms' 13 stories
+    stayed through all three (no listing date, so not finished). A dry run wrote nothing,
+    and a repeat of the last run found nothing to do. Live sentiment scores for six held
+    tickers were identical before and after today's run.
+
 **Never run for real:**
 - Any hosting. Scheduled reports and the India poll only run while the app happens to be up.
 - The 15-minute jobs through a real morning or evening on the users' real clocks; the weekly
@@ -513,6 +687,16 @@ All the write scripts are dry runs without their flag.
 - An alert email with its Claude narrative actually sent.
 - Vector news search and embeddings (no `HF_API_TOKEN`, no pgvector).
 - Ask's strategy tools and the strategy-draft tool against the real engine (stand-in only).
+- **News retention on the dev database or on a schedule.** Nothing has been removed from
+  `seniq`, the 04:45 job has never fired, and a backtest has not been run through the engine
+  on pruned history (the history the engine is sent was compared, not its result).
+- **Ask's IPO tools with a real model: one run of each of the four `ipo-` cases**
+  (2026-10-11, §3 step P2). Haiku kept to "compare, never pick" and gave no advice, and
+  dated the premium each time it quoted one; it did not stay within the length, and it
+  did not always say the calendar was stale. One run each is not a rate. The page has not
+  been opened with the change: the new "Upcoming IPOs" chip is unseen in a browser.
+- **`INDIA_LISTED_NEWS` in a running pipeline.** The switch has been measured on the
+  stored stories and tested offline (§10); it has never been on while the pipeline ran.
 - The Ollama fallbacks against a real local model.
 - The MCP server and `/v1` from a real client since 2026-10-07 (the QA pass called them with
   a test key only).
@@ -920,6 +1104,53 @@ keeps its issuer name with no ticker and cannot match a portfolio.
 2026-10-07 changed every preset backtest number, and SenIQ-factor backtests run from this
 machine before the date fix that day had lookahead; do not reuse older figures.
 
+### Stocks nobody holds
+- **The 218 curated names are tagged in news whether anyone holds them or not**, but only
+  from the general feeds: the per-company fetches (Finnhub company news, GDELT's Indian
+  queries) run for held tickers only. In the 7 days to 2026-10-10 a held name averaged 33
+  stories, and a name nobody held averaged 3.9 when it had any: 48 of 54 Indian equities, 39
+  of 98 US equities and 14 of 45 coins had at least one.
+- **The 1,837 listed names are tagged only while someone holds them**, so today none has a
+  story: all 1,231 stored company readings belong to curated names. They can be searched,
+  added and priced.
+- **A US name nobody holds gets almost nothing.** The RSS feeds are four Indian and four
+  crypto outlets; there is no general US feed.
+- **Four listed names match wrongly, for anyone who adds them** *(measured 2026-10-10 by
+  running the pipeline's matcher for all 1,837 names over the 2,484 stored stories; nothing
+  changed)*: `QTWO` (Q2 Holdings) on every "Q2 results" headline, 76 stories; `BSE` (BSE
+  Ltd) on every mention of the exchange, 80; `NDAQ` (Nasdaq Inc) on the index, 25; `JEF`
+  (Jefferies) wherever it is the broker rating another company, 27. Nobody holds one today,
+  so no wrong tag is stored. **Fixed on the branch `listed-news` (2026-10-11, commit `9937b1b`):**
+  each of the four now counts only beside a company word ("Q2 Holdings", "BSE shares",
+  "Nasdaq Inc", "shares of Jefferies"), and a possessive is not one ("BSE's Sensex"). On
+  the stored stories that leaves 0, 1, 0 and 0 matches; the one is "Should investors dump
+  BSE shares to subscribe to NSE?", which is about the company. Of 30 other matches picked at random, 27 were right; the three
+  misses were `ROG` on "John Rogers", `CME` on "CME feeder cattle", and `VEDL` on "Vedanta
+  Iron Steel", which is another company.
+- **Ask refuses a stock the user does not hold**, with a fixed line and no model call, even
+  where the app has its price and its sentiment (plan step P4 changes this).
+
+### News retention
+- **Deleting does not shrink the table file.** Postgres reuses the freed space for new
+  stories; the file stays the size it reached. Retention stops growth, it does not hand
+  space back (that takes `VACUUM FULL`, which locks the table).
+- **A pruned day is frozen.** Its sums were made with the source weights and readings of
+  the day it was pruned. A later change to `SOURCE_WEIGHTS`, a re-score or a re-tag changes
+  only the stories still stored; the archive is the way back for the rest.
+- **The day a story counts toward is the database session's local day** (`to_char` on
+  `published_at`; India time on this machine). That was already so for the factors. A
+  hosted database on UTC would place a late-evening story a day apart from where a frozen
+  row placed it.
+- **A feed item with no date is stamped with the time it is fetched**, so the check at
+  ingest cannot stop one returning after it was pruned. None of the 2,471 stored stories
+  lacks a date.
+- **An unused story is gone from the database after 30 days.** If the company reference
+  later gains the company it was about, a re-tag script will not find it. It is in the
+  archive.
+- **Not covered:** `alerts`, `claude_calls`, the IPO tables and the 13F tables are still
+  kept for good. All are small (the largest, `institution_holdings`, is 16 MB for seven
+  quarters).
+
 ### Reddit and X
 
 - **X** is pay-per-use and stays deferred.
@@ -975,10 +1206,143 @@ hand-labelled sheets of (story, company) pairs (§8).
 - A privacy page (the landing footer has no Privacy link until one exists).
 - Whether to gitignore `samples/`.
 - Whether to hand-label about 100 stories to measure FinBERT against the word list.
+- **Retention: decided 2026-10-10 that it stays off for now.** The case for it assumed a
+  small free database (Neon's free plan, taken as about 0.5 GB and never checked); on AWS
+  (below) the disk is not the constraint. The code stays as it is. A first run on the dev database would remove 459
+  stories (all unused, none with a reading); `node scripts/retention.js` shows the plan after
+  the next start, and removing rows is Annas's call (§2, rule 8). Worth switching on if
+  Postgres ends up sharing a small disk with the app.
+- **Where archives live once hosted.** The default is a folder on the app's own disk. On an
+  EC2 instance that folder outlasts a redeploy of the code but not the instance; an S3
+  bucket (one is enough) is the safer home, and the step that copies files there is not
+  built.
+- Whether the IPO tools should also go on `/mcp` and `/v1`. Decided no on 2026-10-10, until
+  InvestorGain's reuse terms are settled; adding them to `dataTools.js` is all it would take.
+
+**Planned, not built** *(agreed 2026-10-10; the order is in §3)*
+
+- **Bars stay out of sight.** No price bars on a page, on `/mcp` or on `/v1`. Backtests,
+  signals and paper trading stay on daily bars (§5). Price history reaches the user only
+  through Ask (P4).
+- **P3, name fixes: built for 18 names** *(2026-10-11, commit `9937b1b` on
+  `listed-news`)*. `LISTED_NEEDS_CUE` in `entityResolver.js` holds them;
+  `test/listedUniverse.test.js` keeps their cases fixed. A name in the set counts only
+  beside a company word (Inc, Corp, Co, Ltd, Holding, Group, shares, stock) or after
+  "shares of"; a possessive is not a cue, nor is "stock" in front of what a market has
+  ("Nasdaq stock futures"). The rule covers the name and the bare symbol, one word or
+  several. The sweep was run again that day (every listed name over the 2,485 stored
+  stories, reads only, 14 seconds): 203 Indian and 54 US names matched at least one story,
+  and every match was read. **Annas chose the first and third groups below; they are
+  fixed. The second and fourth are not.** After the fix the 18 names keep two matches on
+  the stored stories, both right ("BSE shares", "CME Group").
+  **The cost, accepted:** a story about one of the 18 that names it bare is not tagged.
+  On the stored stories that is four: `JMFINANCIL` in two lists of the day's losers,
+  `ANGELONE` in "Angel One, Groww rally up to 38%" and "JP Morgan prefers Angel One, CAMS".
+  The groups as found:
+  - *A word or a place, not the company:* `CME` on "CME cattle futures" (2 of 3), `ROG` on
+    "John Rogers", `MSCI` on "MSCI's broadest index", `ATUL` on "promoter Atul Garg", `STT`
+    on a "State Street … SPDR ETF" fund name, `CHCO` (City Holding) on "GIFT City's", `PPLI`
+    (core "People") on "People's Bank of China", `XYZ` (Block) on the news site The Block.
+    The last three were already matched only beside a cue; the possessive is what let them
+    through. **Fixed.**
+  - *Another company with the same name:* `RS` (Reliance, the US steel company) on three
+    stories about Reliance Industries; `CL` on "Colgate-Palmolive (India) Ltd", which is
+    `COLPAL`; `PTC` (the US software company) on "PTC India"; `VEDL` on "Vedanta Iron
+    Steel" and "Vedanta Aluminium", its demerged siblings, 3 of 10. `GOOG` matches
+    "Alphabet's", the right company, whose curated row is `GOOGL`. **Not fixed.** A cue
+    does not help ("Reliance shares" is Reliance Industries); the fix proposed is that a
+    listed name a curated company already answers to is not matched by name.
+  - *A broker or rating agency giving its view of another company* (what `JEF` was): of the
+    Indian names `JMFINANCIL` 5 of 7, `CRISIL` 5 of 6 ("Crisil Ratings affirms…"),
+    `NUVAMA` 3 of 3, `ANGELONE` 2 of 4; of the US names `MCO` (Moody's) 2 of 2 and `EVR`
+    (Evercore) 1 of 1. One story each: `BANKBARODA` ("a Bank of Baroda analysis"),
+    `ABSLAMC` (an interview with its CIO), `KFINTECH` ("… is the IPO registrar", a line that
+    returns with every Indian IPO). **The six named first are fixed; the three with one
+    story each are not.**
+  - *A passing mention in the summary under a headline that names no one:* `DLB` (Dolby
+    Atmos in a cinema opening), `CMI` (Cummins as a competitor), and the US names in market
+    wraps. The curated names are read the same way. **Not fixed.**
+  - Everything else read as right: about 190 of the 203 Indian names have no wrong match.
+  The original plan's wording follows.
+  Mark the names in §8 so they match only beside a company cue ("Q2
+  Holdings", "BSE shares"), and add a test that keeps those cases fixed. The same
+  measurement finds further ones: list names by how many stories they match and read the
+  top. **A wrong name in a headline does change the reading** *(seen 2026-10-11)*: a
+  headline that names any company makes the summary's later mentions passing ones, so with
+  "BSE" or "Jefferies" wrongly found in a headline the real companies in the summary were
+  dropped. Taking the four wrong names out gave six other listed names a story each. The
+  roundup rule was not affected on the stored stories (next item).
+- **P3, India.** Pass every Indian listed name to the resolver, holder or not. No new
+  fetch: the stories already arrive from the three Indian outlets. On the stored stories
+  that gives 203 of the 439 names at least one. A story that gains a tag moves from
+  retention's 30-day class to its 180-day one. **The switch is built** *(2026-10-11,
+  commit `9937b1b` on `listed-news`)*: `INDIA_LISTED_NEWS=1` passes the Indian listed names to
+  the resolver in `runNewsPipeline`, and to nothing else, so the per-company fetches still
+  run for held tickers only. **Measured on the 2,485 stored stories, after the 18 name
+  fixes, reads only:** 368 stories would gain 419 tags across 198 names; the roundup
+  verdict changes on none; 3 stories lose a curated tag, each because its headline now
+  names its real subject and a curated name further down the summary becomes a passing
+  mention (a Vodafone Idea story loses `C`; a Physicswallah and Coforge story loses `TCS`
+  and `INFY`; an Acutaas and Mankind story loses `DRREDDY` and `CIPLA`). Those 368 are the
+  stories that would move to the 180-day class. Not done: the switch has never been on in
+  a running pipeline, and stored stories are not re-tagged by it (new stories only).
+- **P4, snapshot** (decided: both parts). *Part 1:* for a question only about a curated
+  name the user does not hold, the fixed refusal becomes a snapshot written by code: price,
+  day change, sentiment label and score, and the number of stories behind it. No model
+  call, no question used. *Part 2:* the same snapshot as a tool for the model, for a
+  question that mixes a held and a non-held stock. For a non-held stock it is price and
+  sentiment only; news detail, smart money and impact stay with holdings. The story count
+  is always given, and with no stories the answer is "no reading", not "neutral". Measured
+  on 2026-10-10 for Hero MotoCorp, which nobody holds: ₹4,895.50, up 0.80% on the day,
+  neutral at 0.50 from 2 stories in 72 hours, too little history for a z-score.
+- **P4, every name.** Price and price history cover all 2,077 names in the reference, not
+  only the 218. For a listed name the model does the recognising: the tool takes a name or
+  a ticker, looks it up with the Add Asset search (`GET /api/portfolio/search`) and asks
+  when several match. The code-written snapshot of part 1 stays on the 218, the only names
+  safe to pick out of free text. A listed name's sentiment reads "not tracked yet" until
+  P3 and P6 land.
+- **P4, price history.** Daily bars fetched when asked, from the Yahoo route IPO returns and
+  Indian quotes already use; nothing stored, and no need for the strategy engine. The tool
+  returns figures worked out in code (change over 1 week, 1 month, 3 months and 1 year, the
+  high and the low with their dates, average volume) and a short run of closes: a year of
+  daily bars does not fit a 4,000-character tool result. It describes what the price did;
+  no trend calls.
+- **P4, the pages' other data.** The rule: **Ask can read whatever the app's pages show the
+  user, and nothing more, with what he holds or follows first.** The pages already work
+  that way (`scope=mine` by default: held tickers and followed funds, politicians and
+  investors; `scope=all` on request), so Ask widens only when the question names a fund or
+  a politician or asks about the whole market. Missing today: a fund's holdings and its
+  changes (Institutions), any politician's trades (Congress), Indian investors and deals
+  outside the holdings, the alerts list, the daily brief. About four tools, by combining.
+  The pages' plan limits carry over. The cost is that every tool's definition is sent with
+  every question.
+- **P5, the model.** Ask stays on `claude-haiku-4-5`, the newest Haiku there is. The step up
+  is Sonnet 5.5, at $2 and $10 a million tokens against $1 and $5. It thinks by default, so
+  `QA.MAX_OUTPUT_TOKENS` (1,000) and an effort setting would have to change with it; it is
+  not a one-line switch. The eval already checks that an expected tool was called. Wrong
+  picks are first met by rewording or merging tool descriptions; Sonnet only if that fails.
+- **P6, US.** Rotate the roughly 1,500 US names nobody holds through the Finnhub fetch,
+  about 30 a run. The free limit is 60 calls a minute and US quotes share it. Each name is
+  then checked about every 8 hours, and nothing is missed between visits because a call
+  asks for 7 days; held names stay on 10 minutes. A US listed name is tagged only when the
+  story came from that ticker's own feed **and** the matcher finds the name; today the
+  pipeline throws away which ticker a story was fetched for. Measured 2026-10-10, reads
+  only: for 14 listed US names picked at random Finnhub had 6.8 stories a ticker in 7
+  days, 3.4 of them naming the company, and 12 of the 14 had at least one; ten general US
+  feeds pulled once named 27 of the 100 curated names and 19 of the 1,398 listed, so
+  general feeds do not reach the long tail. Costs: about 1,450 more stories a day against
+  about 300; that many more for FinBERT to read; and Finnhub's free plan is reported to be
+  for non-commercial use, which already covers today's fetch.
+- **Storage once P3 and P6 are on** (estimates from small samples): about 1,750 stories a
+  day; the database near 0.5 GB and level with retention on, or about 1.4 GB more each year
+  with it off; the archive about 145 MB a year.
 
 **Parked by Annas**
-- Hosting (Render + Neon; steps in `DEPLOY.md`, `render.yaml` is ready). If a Render service
-  is ever connected to `main`, a merge deploys and applies every migration.
+- Hosting. **Annas said on 2026-10-10 that it will be on AWS**, not Render and Neon; nothing
+  past that is chosen (RDS or Postgres on the instance, the instance size). `DEPLOY.md` and
+  `render.yaml` still describe Render and Neon and have not been rewritten; `DEPLOY.md`'s
+  warning that FinBERT is too heavy for the smallest instance applies on AWS too. If a
+  Render service is ever connected to `main`, a merge deploys and applies every migration.
 - Sentiment backfill.
 - Real billing (Stripe for the US, Razorpay for India).
 - Quiet hours for alerts (dropped).
