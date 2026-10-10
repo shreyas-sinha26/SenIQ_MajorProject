@@ -186,6 +186,21 @@ check('a company and the commodity in one headline: the commodity still counts',
   assert.deepStrictEqual(full('Oil India gains as oil tops $90', 'Crude oil rallied overnight.'), ['WTI']);
 });
 
+check('a commodity word describing something else is not the commodity', () => {
+  // The stored headline that reached a gold holder's feed as high-impact gold news.
+  assert.deepStrictEqual(tk('SIM-Swap Fraudster Who Spent Stolen Crypto on Gold Grills and Dubai Trips Jailed'), []);
+  assert.deepStrictEqual(tk('India wins Olympic gold medal in javelin'), []);
+  assert.deepStrictEqual(tk('Markets find a silver lining in weak jobs data'), []);
+  assert.deepStrictEqual(tk('Why this fund is the gold standard for index investors'), []);
+  assert.deepStrictEqual(tk('Palm oil prices jump on Indonesia export curbs'), []);
+  assert.deepStrictEqual(tk('Olive oil shortage pushes up grocery bills'), []);
+  // The commodity itself is untouched, including beside one of the phrases.
+  assert.deepStrictEqual(tk('Gold rush: prices hit a record as investors pile in'), ['XAU']);
+  assert.deepStrictEqual(tk('Gold Prices Hit Record High As Dollar Slides'), ['XAU']);
+  assert.deepStrictEqual(tk('Gold medal for bullion: gold tops $4,000'), ['XAU']);
+  assert.deepStrictEqual(full('Oil prices rise as palm oil also gains', 'Crude oil climbed.'), ['WTI']);
+});
+
 console.log('crypto and India coverage:');
 check('every universe coin is filed as crypto and has a price key', () => {
   const { resolveAsset, coingeckoIdFor, NON_EQUITY_ALIASES } = require('../server/services/assetRegistry');
