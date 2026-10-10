@@ -164,12 +164,12 @@ const TARGETED = {
     // from the company altogether, and the local model's answer is right about two times in
     // three — so its answer is stored as a neutral reading at the lowest confidence instead.
     REMOVE_NOT_ABOUT: { claude: true, ollama: false },
-    MODEL: 'claude-haiku-4-5',   // same model as the brief and alert narrative
+    MODEL: 'claude-haiku-5-5',   // same model as the brief and alert narrative
     // The local model for COMPANY_SENTIMENT_LLM=ollama. Not OLLAMA_MODEL: that one writes
     // prose for other features and defaults to a 3B model.
     OLLAMA_MODEL: process.env.COMPANY_SENTIMENT_OLLAMA_MODEL || 'qwen2.5:7b-instruct-q4_0',
     OLLAMA_TIMEOUT_MS: 120000,   // the first call also loads the model into memory
-    MAX_OUTPUT_TOKENS: 300,      // one short JSON object
+    MAX_OUTPUT_TOKENS: 1500,     // one short JSON object, and the thinking Claude Haiku 5.5 does before it
     MAX_TEXT_CHARS: 600,         // clamp the untrusted headline/summary before prompting
     MAX_CALLS_PER_DAY: 300,      // paid calls only: one per hard story; REPORTS.GLOBAL_DAILY_USD_CEILING also applies
     // A label → a score on FinBERT's scale (0.5 = neutral), so the history stays on one scale.
@@ -409,26 +409,31 @@ const ONBOARDING = {
 // local Ollama writer, then to a deterministic template — both free, so a brief still
 // ships every day; Claude is the upgrade.
 const REPORTS = {
-  MODEL: 'claude-haiku-4-5',     // cheapest-viable; Sonnet/Opus reserved for major events later
+  // Claude Haiku 5.5 everywhere (decided 2026-10-11, after the Ask eval): about a sixth of
+  // Haiku 4.5's cost an answer, and better on the eval. It thinks before it writes, and the
+  // thinking counts toward each MAX_OUTPUT_TOKENS below, so every limit leaves room for it.
+  MODEL: 'claude-haiku-5-5',     // cheapest-viable; Sonnet/Opus reserved for major events later
   // Server-scheduled, never user-triggered on demand. The job runs every few minutes and
   // writes a user's brief once their own clock passes LOCAL_TIME (services/userTime.js).
   CRON: '*/15 * * * *',
   LOCAL_TIME: { HOUR: 5, MINUTE: 30 },
   LOCAL_WINDOW_MINUTES: 180,     // a late start still writes it; the morning email writes it if this never ran
-  MAX_OUTPUT_TOKENS: 1800,       // hard per-call output cap
+  MAX_OUTPUT_TOKENS: 4000,       // hard per-call output cap: the brief (about 600 tokens) and the thinking before it
   TOP_HOLDINGS: 12,              // trim the packet to the top-N holdings by exposure
   TOP_EVENTS: 6,                 // and the top-N impact events
   MAX_NEWS_CHARS: 280,           // clamp each untrusted headline/summary before prompting
   // Claude-written briefs a day are set per plan (TIERS[tier].claudeReportsPerDay: Free 0,
   // Plus 1, Pro 2) and checked before any call — see reports.briefQuota.
   GLOBAL_DAILY_USD_CEILING: 5,   // global kill-switch: stop calling Claude past this day's spend
-  // Haiku 4.5 pricing ($/1M tokens) for the cost estimate logged per call.
-  PRICE_PER_MTOK: { input: 1.0, output: 5.0 },
+  // Claude Haiku 5.5 pricing ($/1M tokens) for the cost estimate logged per call, at its rate
+  // for a prompt of up to 100,000 tokens (above that it is $0.50 and $2.50; no call here is
+  // near that). Used only when the reply carries no cost of its own: the router's does.
+  PRICE_PER_MTOK: { input: 0.10, output: 0.50 },
   // The written layer on a report's headline cards (services/cardWriter.js): one call
   // rewrites all of a report's cards; a rewrite that fails its check keeps the template.
   CARDS: {
     TIERS: ['plus', 'pro'],
-    MAX_OUTPUT_TOKENS: 1800,     // up to six cards × three short lines, as JSON
+    MAX_OUTPUT_TOKENS: 4000,     // up to six cards × three short lines, as JSON, and the thinking before them
     PER_USER_DAILY_QUOTA: 2,     // one report a day, plus one retry if the send fails
     SUMMARIES_PER_CARD: 2,       // article summaries shown to the model for each card
     MAX_SUMMARY_CHARS: 600,      // each one clamped to this (untrusted feed text)
@@ -444,7 +449,7 @@ const REPORTS = {
 // Same FEATURES.CLAUDE_REPORTS flag gates it; with no key / flag off / over cap it degrades
 // to a deterministic grounded data summary (no NL reasoning, but it cites the numbers).
 const QA = {
-  MODEL: 'claude-haiku-4-5',
+  MODEL: 'claude-haiku-5-5',
   // A model that thinks (Claude Haiku 5.5 and later) spends this limit on its thinking too:
   // at 1,000 two of six answers were cut off before or in the middle of the text.
   MAX_OUTPUT_TOKENS: 3000,
@@ -454,7 +459,11 @@ const QA = {
   MAX_HOLDINGS: 30,              // all holdings up to this cap (not just top-N)
   // Agent (E6 v2): Claude pulls data through tools instead of one stuffed context.
   MAX_TOOL_ROUNDS: 4,            // tool-call rounds per question; then it must answer
-  MAX_INPUT_TOKENS_PER_QUESTION: 25000, // stop calling tools past this summed input (worst question ≈ $0.04)
+  // Stop calling tools past this summed input. 25,000 on Haiku 4.5; the same text is about
+  // 30% more tokens on Haiku 5.5, where three rounds of one question reach 21,000 to 26,000.
+  // The check falls between rounds, so a question can end past it (the worst seen: 43,663
+  // tokens, $0.006).
+  MAX_INPUT_TOKENS_PER_QUESTION: 35000,
   MAX_TOOL_RESULT_CHARS: 4000,   // clamp each tool result before it re-enters the prompt
   HISTORY_TURNS: 3,              // follow-ups: last N question/answer pairs sent back
   MAX_HISTORY_CHARS: 1200,       // clamp each (client-supplied, untrusted) history message
@@ -557,8 +566,8 @@ const ALERT_EMAIL = {
   REALTIME_ONLY: true,          // only 'realtime' alerts email; 'digest' stays in-app
 };
 const ALERT_NARRATIVE = {
-  MODEL: 'claude-haiku-4-5',    // cheapest-viable; matches the brief/Q&A default
-  MAX_OUTPUT_TOKENS: 400,       // 150–250 words ≈ ~350 tokens; hard per-call cap
+  MODEL: 'claude-haiku-5-5',    // cheapest-viable; matches the brief/Q&A default
+  MAX_OUTPUT_TOKENS: 2000,      // 150–250 words ≈ ~350 tokens, and the thinking before them; hard per-call cap
   PER_USER_DAILY_QUOTA: 5,      // Pro narratives/user/day — aligns with ALERT_BUDGET realtime cap
   MIN_WORDS: 150,
   MAX_WORDS: 250,
@@ -567,12 +576,13 @@ const ALERT_NARRATIVE = {
 // ─── Model access for the analyst voice (services/llmClient.js) ──
 // Claude is reached either directly (ANTHROPIC_API_KEY) or through an OpenAI-compatible
 // router (AIROUTER_API_KEY — AIRouter by default, credits topped up in INR). The router
-// names models "provider/model"; its Haiku 4.5 is priced the same as REPORTS.PRICE_PER_MTOK.
+// names models "provider/model"; its Haiku 5.5 is priced the same as REPORTS.PRICE_PER_MTOK.
+// One model for every caller: the router's name replaces whatever model a caller asks for.
 const LLM = {
   ROUTER: {
     API_KEY: process.env.AIROUTER_API_KEY || '',
     BASE_URL: (process.env.AIROUTER_BASE_URL || 'https://api.airouter.in/v1').replace(/\/$/, ''),
-    MODEL: process.env.AIROUTER_MODEL || 'anthropic/claude-haiku-4.5',
+    MODEL: process.env.AIROUTER_MODEL || 'anthropic/claude-haiku-5.5',
     TIMEOUT_MS: 60000,
   },
 };
