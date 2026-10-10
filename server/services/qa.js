@@ -242,8 +242,9 @@ async function agentLoop(messages, ctx, client, usage, toolsUsed, evidence, setu
       model: QA.MODEL,
       max_tokens: QA.MAX_OUTPUT_TOKENS,
       // Automatic caching: the breakpoint lands on the last block, so each round re-reads the
-      // conversation so far at 0.1x. Haiku 4.5 only caches prefixes >= 4096 tokens, so short
-      // questions simply don't cache (no penalty); long multi-tool ones do.
+      // conversation so far at 0.1x. Claude Haiku 5.5 caches a prefix from 512 tokens, so every
+      // question qualifies. This marker reaches Anthropic directly; the router path
+      // (llmClient.toChatRequest) does not carry one yet, and nothing is cached there.
       cache_control: { type: 'ephemeral' },
       system: setup.system,
       tools: setup.tools,
