@@ -75,9 +75,29 @@ function assetClassOf(ticker) {
 }
 
 // ─── API Helper ──────────────────────────────────────────────
+// The header's status light: green "Live" while requests are being answered, "Offline" once
+// one cannot reach the server at all. Set from api(), so it follows what the page sees.
+function setConnection(online) {
+  const el = document.getElementById('live-indicator');
+  if (!el || el.classList.contains('offline') === !online) return;
+  el.classList.toggle('offline', !online);
+  el.querySelector('.live-label').textContent = online ? 'Live' : 'Offline';
+  el.title = online ? '' : 'SenIQ cannot be reached. What you see is the last data loaded.';
+}
+
 async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
-  const res = await fetch(`${API}${path}`, { ...opts, headers, credentials: 'same-origin' });
+  let res;
+  try {
+    res = await fetch(`${API}${path}`, { ...opts, headers, credentials: 'same-origin' });
+  } catch {
+    // The browser's own wording here is "Failed to fetch", which tells a user nothing.
+    setConnection(false);
+    const err = new Error('SenIQ cannot be reached right now. Check your connection and try again.');
+    err.offline = true;
+    throw err;
+  }
+  setConnection(true);
   const data = await res.json().catch(() => ({}));
   // The session ended on the server (idle, expired, or signed out elsewhere).
   if (res.status === 401 && currentUser && !path.startsWith('/api/auth/')) sessionEnded();
@@ -348,15 +368,19 @@ async function showDashboard() {
   syncBrowserTimeZone();
   await Promise.all([loadPortfolio(), loadNewsFeed(), loadAlerts(), loadPortfolioSentiment(), loadImpactFeed(), loadDailyBrief(), loadSmartMoney(), loadAskThreads()]);
 
-  // Auto-refresh every 60s
+  // Auto-refresh every 60s. Prices and weights come from outside price sources with their
+  // own limits, so the holdings are re-read on every fifth beat only.
   if (refreshInterval) clearInterval(refreshInterval);
+  let beat = 0;
   refreshInterval = setInterval(() => {
     loadNewsFeed(); loadAlerts(); loadPortfolioSentiment(); loadImpactFeed(); loadSmartMoney();
+    if (++beat % PORTFOLIO_REFRESH_BEATS === 0) loadPortfolio();
   }, 60000);
 }
 
 // ─── Portfolio ───────────────────────────────────────────────
 let holdings = [];
+const PORTFOLIO_REFRESH_BEATS = 5; // holdings (prices, weights) are re-read every 5th refresh
 
 async function loadPortfolio() {
   try {
@@ -383,37 +407,57 @@ function renderHoldings() {
     return;
   }
 
+  // The stories-behind-the-score row, if one is open, is put back after the redraw.
+  const openDrivers = grid.querySelector('.ht-drivers-row');
+  const openFor = openDrivers && openDrivers.previousElementSibling ? openDrivers.previousElementSibling.dataset.ticker : null;
+
   grid.innerHTML = holdings.map(h => {
-    let rowClass = '';
+    let rowClass = h.pending ? 'row-pending' : '';
     if (activeFilter) {
-      rowClass = h.ticker === activeFilter ? 'row-active' : 'row-dimmed';
+      rowClass += h.ticker === activeFilter ? ' row-active' : ' row-dimmed';
     }
     const cls = h.asset_class || 'equity';
     const clsLabel = { equity: 'Equity', crypto: 'Crypto', commodity: 'Commodity' }[cls] || cls;
-    const exposure = h.weight_pct != null
-      ? `${h.weight_pct}%`
-      : h.quantity != null ? `${h.quantity} units` : '—';
-    const priceInline = h.price != null
+    // One figure for "how much of the portfolio is this", the same one the Dashboard, the
+    // news cards and Analytics use. A holding with no quantity or no price has no value of
+    // its own, so it is counted at the average size of the others and marked as an estimate.
+    const estimated = h.weight_pct == null;
+    const exposure = h.exposure_pct != null
+      ? `<span${estimated ? ' class="ht-estimate" title="An estimate: this holding has no quantity or no price, so it is counted at the average size of your other holdings. For an exact share, remove it and add it again with a quantity."' : ''}>${estimated ? '≈' : ''}${h.exposure_pct}%</span>`
+      : '—';
+    const priceInline = h.pending
+      ? '<span class="ht-price muted">adding…</span>'
+      : h.price != null
       ? `<span class="ht-price">${fmtPrice(h.price, h.currency)}${h.change_pct != null
           ? ` <span class="ht-chg ${h.change_pct >= 0 ? 'up' : 'down'}">${h.change_pct >= 0 ? '▲' : '▼'}${Math.abs(h.change_pct).toFixed(2)}%</span>`
           : ''}</span>`
       : '<span class="ht-price muted">—</span>';
+    // Every redraw (a filter, an add, a refresh) starts from the scores already loaded,
+    // so the columns never fall back to dashes while the next refresh is on its way.
+    const s = cachedSentiments[h.ticker];
+    const reading = s ? s.label : 'neutral';
+    const sentiLabel = !s ? '—' : s.label === 'positive' ? 'Bullish' : s.label === 'negative' ? 'Bearish' : 'Neutral';
     return `
-    <tr class="${rowClass}" data-ticker="${escapeHtml(h.ticker)}" onclick="toggleFilter('${escapeHtml(h.ticker)}')">
+    <tr class="${rowClass.trim()}" data-ticker="${escapeHtml(h.ticker)}" onclick="toggleFilter('${escapeHtml(h.ticker)}')">
       <td>
         <div class="ht-ticker">${escapeHtml(h.ticker)} <span class="asset-class-badge ${cls}">${clsLabel}</span>${h.coverage === 'basic' ? ' <span class="coverage-badge" title="Outside SenIQ\'s curated list of companies. News is matched on the name and symbol only, so expect fewer stories and a thinner sentiment score.">Basic coverage</span>' : ''} ${priceInline}</div>
         <div class="ht-name">${escapeHtml(h.company_name || h.ticker)}</div>
       </td>
       <td class="ht-exposure">${exposure}</td>
-      <td><span class="ht-senti-label neutral" id="senti-label-${escapeHtml(h.ticker)}">—</span></td>
-      <td><button class="ht-score-why" type="button" title="See the stories behind this score" onclick="event.stopPropagation(); toggleSentimentDrivers('${escapeHtml(h.ticker)}')"><span class="ht-score neutral" id="score-${escapeHtml(h.ticker)}">—</span><span class="ht-score-caret" aria-hidden="true">▾</span></button></td>
-      <td><span class="ht-headline" id="headline-${escapeHtml(h.ticker)}">—</span></td>
+      <td><span class="ht-senti-label ${reading}" id="senti-label-${escapeHtml(h.ticker)}">${sentiLabel}</span></td>
+      <td><button class="ht-score-why" type="button" title="See the stories behind this score" onclick="event.stopPropagation(); toggleSentimentDrivers('${escapeHtml(h.ticker)}')"><span class="ht-score ${reading}" id="score-${escapeHtml(h.ticker)}">${s ? Math.round(s.score * 100) : '—'}</span><span class="ht-score-caret" aria-hidden="true">▾</span></button></td>
+      <td><span class="ht-headline" id="headline-${escapeHtml(h.ticker)}">${s ? escapeHtml(s.recentHeadline || '—') : '—'}</span></td>
       <td class="ht-actions">
         <button class="ht-info" onclick="event.stopPropagation(); openBriefFor('${escapeHtml(h.ticker)}')" title="Company brief">ℹ</button>
         <button class="ht-remove" onclick="event.stopPropagation(); removeStock('${escapeHtml(h.ticker)}')" title="Remove">×</button>
       </td>
     </tr>
   `}).join('');
+
+  if (openFor) {
+    const row = grid.querySelector(`tr[data-ticker="${CSS.escape(openFor)}"]`);
+    if (row) row.after(openDrivers);
+  }
 }
 
 // ─── Filter Logic ────────────────────────────────────────────
@@ -558,7 +602,6 @@ function selectSearchResult(ticker) {
 }
 
 async function addStock(ticker, opts = {}) {
-  // Optimistic: immediately show the card
   ticker = ticker.toUpperCase().trim();
   if (holdings.some(h => h.ticker === ticker)) {
     showToast(`${ticker} already in portfolio`, 'error');
@@ -568,29 +611,31 @@ async function addStock(ticker, opts = {}) {
   const quantity = opts.quantity ?? null;
   const costBasis = opts.costBasis ?? null;
 
-  holdings.unshift({ ticker, company_name: ticker, asset_class: assetClass, quantity, id: Date.now() });
+  // The row appears at once, marked as being added. "Added" is only said when the server
+  // has accepted it: a refused symbol or quantity must not flash a success first.
+  holdings.unshift({ ticker, company_name: ticker, asset_class: assetClass, quantity, id: Date.now(), pending: true });
   document.getElementById('holdings-count').textContent = holdings.length;
   renderHoldings();
   closeModal();
-  showToast(`${ticker} added to portfolio!`, 'success');
 
-  // Background: persist + load sentiment
   try {
     const res = await api('/api/portfolio', {
       method: 'POST',
       body: JSON.stringify({ ticker, asset_class: assetClass, quantity, cost_basis: costBasis }),
     });
-    // Update with real company name from server
-    const h = holdings.find(h => h.ticker === ticker);
-    if (h && res.holding) { h.company_name = res.holding.company_name; h.asset_class = res.holding.asset_class; }
+    // The server's row carries the real name, class, price and coverage.
+    const at = holdings.findIndex(h => h.ticker === ticker);
+    if (at >= 0 && res.holding) holdings[at] = res.holding;
     renderHoldings();
+    showToast(`${ticker} added to portfolio`, 'success');
+    if (res.warning) showToast(res.warning, 'info');
     // E4 onboarding: pop the company brief returned on add (best-effort).
     if (res.brief) showBrief(res.brief);
-    // Refresh sentiment & news in parallel (non-blocking)
+    // Every holding's share changes when one is added; scores and news follow.
+    loadPortfolio();
     loadPortfolioSentiment();
     loadNewsFeed();
   } catch (err) {
-    // Rollback optimistic add
     holdings = holdings.filter(h => h.ticker !== ticker);
     document.getElementById('holdings-count').textContent = holdings.length;
     renderHoldings();
@@ -604,10 +649,12 @@ async function removeStock(ticker) {
   holdings = holdings.filter(h => h.ticker !== ticker);
   document.getElementById('holdings-count').textContent = holdings.length;
   renderHoldings();
-  showToast(`${ticker} removed`, 'info');
 
   try {
-    await api(`/api/portfolio/${ticker}`, { method: 'DELETE' });
+    await api(`/api/portfolio/${encodeURIComponent(ticker)}`, { method: 'DELETE' });
+    showToast(`${ticker} removed`, 'info');
+    // The remaining holdings' shares change with one gone.
+    loadPortfolio();
     loadPortfolioSentiment();
   } catch (err) {
     // Rollback
@@ -1225,9 +1272,11 @@ function initAnalyzer() {
       resultEl.innerHTML = `
         ${articleTitle ? `<div class="result-article-title">${escapeHtml(articleTitle)}</div>` : ''}
         <div class="result-label ${sentiment.label}">${sentiment.label.toUpperCase()} — ${strength}%</div>
-        <div class="result-score">Confidence: ${Math.round(sentiment.confidence * 100)}% | ${sentiment.details?.positiveWords || 0} positive, ${sentiment.details?.negativeWords || 0} negative words</div>
+        <div class="result-score">${sentiment.model === 'finbert'
+          ? `Read by FinBERT, the model that scores your news · confidence ${Math.round(sentiment.confidence * 100)}%`
+          : `Read by the word list · ${sentiment.details?.positiveWords || 0} positive and ${sentiment.details?.negativeWords || 0} negative signal words found`}</div>
         ${summary ? `<div class="result-summary"><strong>Summary:</strong> ${escapeHtml(summary)}</div>` : ''}
-        <div class="result-explanation">✨ <strong>AI Analysis:</strong> ${escapeHtml(llmExplanation || sentiment.explanation || '')}</div>
+        ${llmExplanation || sentiment.explanation ? `<div class="result-explanation"><strong>${llmExplanation ? 'What it means for your portfolio:' : 'Why:'}</strong> ${escapeHtml(llmExplanation || sentiment.explanation)}</div>` : ''}
         ${visibleTickers.length > 0 ? `<div class="result-tickers">Matched: ${visibleTickers.map(t => `<span class="news-ticker">${escapeHtml(t)}</span>`).join(' ')}</div>` : ''}
       `;
       resultEl.classList.remove('hidden');
@@ -2094,9 +2143,10 @@ function ipoDay(s) {
 }
 
 function ipoPriceBand(i) {
+  const r = (v) => `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
   if (i.price_low == null && i.price_high == null) return '—';
-  if (i.price_low == null || i.price_high == null || i.price_low === i.price_high) return `₹${i.price_high ?? i.price_low}`;
-  return `₹${i.price_low} – ₹${i.price_high}`;
+  if (i.price_low == null || i.price_high == null || i.price_low === i.price_high) return r(i.price_high ?? i.price_low);
+  return `${r(i.price_low)} – ${r(i.price_high)}`;
 }
 
 // Grey market premium: ₹ over the issue price, its share of the top price, and which way it
@@ -2126,9 +2176,14 @@ async function ipoAddToPortfolio(btn) {
   btn.disabled = true;
   try {
     const res = await api('/api/portfolio', { method: 'POST', body: JSON.stringify({ ticker, asset_class: 'equity' }) });
-    if (res.holding) { holdings.push(res.holding); document.getElementById('holdings-count').textContent = holdings.length; renderHoldings(); }
-    showToast(`${ticker} added to portfolio`, 'success');
+    showToast(`${ticker} added to portfolio. It has no quantity yet, so its share is shown as an estimate (≈).`, 'success');
+    if (res.warning) showToast(res.warning, 'info');
     btn.outerHTML = '<span title="In your portfolio">held</span>';
+    // The whole list is re-read: the new holding needs its price, and every other
+    // holding's share changes with one more in the portfolio.
+    await loadPortfolio();
+    loadPortfolioSentiment();
+    loadNewsFeed();
   } catch (err) {
     showToast(err.message || `Could not add ${ticker}`, 'error');
     btn.disabled = false;
@@ -2140,7 +2195,9 @@ function ipoListingNote(i, cur = '₹') {
   if (i.listing_price == null && i.listing_gain_pct == null) return '';
   const g = i.listing_gain_pct;
   const gain = g == null ? '' : ` (${g > 0 ? '+' : g < 0 ? '−' : ''}${Math.abs(g).toFixed(1)}%)`;
-  const price = i.listing_price == null ? 'listed' : `at ${i.listing_price_derived ? `≈${cur}${i.listing_price >= 100 ? Math.round(i.listing_price) : i.listing_price.toFixed(1)}` : `${cur}${i.listing_price}`}`;
+  // A dollar price always shows its cents, like the price column beside it.
+  const exact = (v) => (cur === '$' ? `$${Number(v).toFixed(2)}` : `${cur}${v}`);
+  const price = i.listing_price == null ? 'listed' : `at ${i.listing_price_derived ? `≈${cur}${i.listing_price >= 100 ? Math.round(i.listing_price) : i.listing_price.toFixed(1)}` : exact(i.listing_price)}`;
   const tip = i.listing_price_derived ? 'Gain over the issue price as reported; the price is worked back from it' : 'Listing price and gain over the issue price';
   // Later closes, each as a return over the issue price, as they come due.
   const pct = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(1)}%`;
@@ -2159,10 +2216,36 @@ function ipoSubCell(i) {
     parts.length ? `<span class="ipo-meta">${parts.map(([k, v]) => `${k} ${x(v)}`).join(' · ')}</span>` : ''}`;
 }
 
+// Rows that open an issue's news are reachable from the keyboard as well as the mouse.
+function wireIpoRows(box) {
+  box.querySelectorAll('tr[data-ipo]').forEach(tr => {
+    tr.addEventListener('click', () => toggleIpoStories(tr));
+    tr.addEventListener('keydown', (e) => {
+      if (e.target !== tr || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      toggleIpoStories(tr);
+    });
+  });
+}
+const IPO_ROW_ATTRS = 'class="ipo-row-click" tabindex="0" role="button" aria-expanded="false" title="Show the news on this issue"';
+
+// "Calendar last refreshed 3h ago" — and a plain warning once it is more than a day old.
+function renderIpoAge(data) {
+  const el = document.getElementById('ipo-age');
+  if (!el) return;
+  el.classList.toggle('stale', !!data.stale && !!data.updatedAt);
+  el.textContent = !data.updatedAt ? ''
+    : data.stale ? `Last refreshed ${timeAgo(new Date(data.updatedAt))}. The calendar is refreshed once a day, so dates and stages below may be out of date.`
+    : `Last refreshed ${timeAgo(new Date(data.updatedAt))}.`;
+}
+
+let ipoRequest = 0; // the newest calendar request; an older answer arriving late is dropped
+
 async function loadIpoCalendar() {
   const box = document.getElementById('ipo-calendar');
   if (!box) return;
   const us = ipoMarket === 'us';
+  const request = ++ipoRequest;
   const wire = (id, key, get, set) => document.querySelectorAll(`#${id} .scope-btn`).forEach(b => {
     b.classList.toggle('active', b.dataset[key] === get());
     b.onclick = () => { set(b.dataset[key]); loadIpoCalendar(); };
@@ -2178,9 +2261,13 @@ async function loadIpoCalendar() {
   let data;
   try { data = await api(us ? `/api/ipo-watch/calendar?market=us&spacs=${ipoSpacs}` : `/api/ipo-watch/calendar?market=in&board=${ipoBoard}`); }
   catch (err) {
+    if (request !== ipoRequest) return;
     box.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message || 'Could not load the IPO calendar')}</p></div>`;
     return;
   }
+  // Switching India → US → India quickly sends three requests; only the last one is drawn.
+  if (request !== ipoRequest) return;
+  renderIpoAge(data);
   const issues = data.issues || [];
   ipoIssues = new Map(issues.map(i => [String(i.id), i]));
   const note = document.getElementById('ipo-source-note');
@@ -2196,7 +2283,7 @@ async function loadIpoCalendar() {
     const shown = ipoUsView === 'deals' ? issues.filter(i => ['upcoming', 'closed', 'listed'].includes(i.stage)) : issues;
     if (!shown.length) { box.innerHTML = '<div class="empty-state"><p>No expected or priced US deals right now.</p></div>'; return; }
     box.innerHTML = renderUsIpoTable(shown);
-    box.querySelectorAll('tr[data-ipo]').forEach(tr => tr.addEventListener('click', () => toggleIpoStories(tr)));
+    wireIpoRows(box);
     wireIpoAddButtons(box);
     return;
   }
@@ -2205,7 +2292,7 @@ async function loadIpoCalendar() {
       <table class="holdings-tbl ipo-tbl">
         <thead><tr><th>Company</th><th>Stage</th><th>Opens</th><th>Closes</th><th>Lists</th><th>Price band</th><th title="Grey market premium: unofficial, per share over the issue price">GMP</th><th title="Times the shares on offer were bid for: QIB = institutions, NII = non-institutional (HNI), Retail = individuals">Subscribed</th><th>Issue size</th></tr></thead>
         <tbody>${issues.map(i => `
-          <tr ${i.stories ? `class="ipo-row-click" data-ipo="${i.id}" title="Show the news on this issue"` : ''}>
+          <tr ${i.stories ? `${IPO_ROW_ATTRS} data-ipo="${i.id}"` : ''}>
             <td><span class="ipo-name">${escapeHtml(i.name)}</span>
                 <span class="ipo-meta">${i.board === 'sme' ? 'SME' : 'Mainboard'}${i.exchange ? ` · ${escapeHtml(i.exchange)}` : ''}${i.symbol ? ` · ${escapeHtml(i.symbol)}` : ''}${i.stories ? ` · ${i.stories} ${i.stories === 1 ? 'story' : 'stories'}` : ''}${ipoAddButton(i)}</span></td>
             <td><span class="ipo-stage ${i.stage}">${IPO_STAGE_LABEL[i.stage] || escapeHtml(i.stage)}</span></td>
@@ -2220,7 +2307,7 @@ async function loadIpoCalendar() {
         </tbody>
       </table>
     </div>`;
-  box.querySelectorAll('tr[data-ipo]').forEach(tr => tr.addEventListener('click', () => toggleIpoStories(tr)));
+  wireIpoRows(box);
   wireIpoAddButtons(box);
 }
 
@@ -2243,7 +2330,7 @@ function renderUsIpoTable(issues) {
         <tbody>${issues.map(i => {
           const day = i.first_trade_date || i.listing_date || i.status_date;
           return `
-          <tr ${i.stories ? `class="ipo-row-click" data-ipo="${i.id}" title="Show the news on this issue"` : ''}>
+          <tr ${i.stories ? `${IPO_ROW_ATTRS} data-ipo="${i.id}"` : ''}>
             <td><span class="ipo-name">${escapeHtml(i.name)}</span>
                 <span class="ipo-meta">${[i.exchange, i.symbol, i.is_spac ? 'SPAC' : '', i.stories ? `${i.stories} ${i.stories === 1 ? 'story' : 'stories'}` : ''].filter(Boolean).map(escapeHtml).join(' · ') || '—'}${ipoAddButton(i)}</span></td>
             <td><span class="ipo-stage ${i.stage}">${IPO_US_STAGE_LABEL[i.stage] || escapeHtml(i.stage)}</span></td>
@@ -2262,13 +2349,14 @@ let ipoIssues = new Map();
 
 async function toggleIpoStories(tr) {
   const open = tr.nextElementSibling;
-  if (open && open.classList.contains('ipo-detail')) { open.remove(); tr.classList.remove('row-active'); return; }
+  if (open && open.classList.contains('ipo-detail')) { open.remove(); tr.classList.remove('row-active'); tr.setAttribute('aria-expanded', 'false'); return; }
   const issue = ipoIssues.get(tr.dataset.ipo);
   const detail = document.createElement('tr');
   detail.className = 'ipo-detail';
   detail.innerHTML = `<td colspan="${tr.cells.length}"><div class="loading-skeleton"><div class="skeleton-line"></div></div></td>`;
   tr.after(detail);
   tr.classList.add('row-active');
+  tr.setAttribute('aria-expanded', 'true');
   let data;
   try { data = await api(`/api/ipo-watch/${issue.id}/stories`); }
   catch (err) { detail.firstElementChild.innerHTML = `<div class="empty-state small"><p>${escapeHtml(err.message || 'Could not load the news')}</p></div>`; return; }
@@ -3825,7 +3913,9 @@ async function refreshDailyBrief() {
   try {
     const data = await api('/api/reports/daily/generate', { method: 'POST' });
     renderDailyBrief(data.brief);
-    showToast('Brief refreshed', 'success');
+    // `kept`: today's AI-written brief is already as fresh as the plan allows, so it stays.
+    if (data.brief && data.brief.kept) showToast("Today's brief is already up to date. The next one is written tomorrow morning.", 'info');
+    else showToast('Brief refreshed', 'success');
   } catch (err) {
     showToast(err.message, 'error');
   } finally {
