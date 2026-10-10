@@ -69,6 +69,11 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   local and on GitHub: `crypto-kb`, already merged as pull request #12 and still checked out
   in the worktree `.claude/worktrees/crypto-kb`; nothing on it is missing from `main`.
   Untracked and never pushed: `samples/` and `.github/` (see §11).
+- **Branch `ipo-show-all`** *(2026-10-10)*: local commits on top of `main`, **not pushed, no
+  pull request**. IPO Watch opens an issue's news on its latest 5 stories with a "Show all N
+  stories" button (page only: `public/js/app.js`, one style rule, three offline checks).
+  `npm test` there: 27 files, 671 checks. A change to the shared side, so its tags would be
+  `v1.14` / `v2.15`.
 - **The local engine changed with the QA pass** *(2026-10-10)*: three files in `strategy-service/`
   (gitignored, so not in any commit): `service/signal_runner.py`, `engine/data/base.py`,
   `engine/analytics/walk_forward.py`, plus `tests/test_qa_fixes.py`. The files as they were
@@ -237,7 +242,9 @@ calendar 100 days (`RECENT_LISTED_DAYS`; at 90 it left the day before its 3-mont
 be shown), and the page says when the calendar was last refreshed, with a warning past 30
 hours (`STALE_AFTER_HOURS`) — the poll is daily and never runs on start. With the switch on, the news
 pipeline also fetches company news for up to 10 newly filed or priced US issues and links
-IPO stories at the end of each pass. **`IPO_PLAN.md` is the full record**: decisions, build
+IPO stories at the end of each pass. A click on an issue opens its tone, a tone-by-day chart
+and its stories: the latest 5, with "Show all N stories" for the rest (`IPO_STORIES_SHOWN` in
+`public/js/app.js`). **`IPO_PLAN.md` is the full record**: decisions, build
 status, limits. Before any hosting, InvestorGain's reuse terms must be settled (the same open
 item as NSE's); BSE and NSE refuse automated requests and are not worked around.
 
