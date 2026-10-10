@@ -53,12 +53,13 @@ function fail(msg) {
 function check() {
   const { TOOLS, scopeCheck } = require(path.join(ROOT, 'server/services/qaTools'));
   const { STRATEGY_TOOLS } = require(path.join(ROOT, 'server/services/strategyTools'));
+  const { IPO_TOOLS } = require(path.join(ROOT, 'server/services/ipoTools'));
   const { UNIVERSE } = require(path.join(ROOT, 'server/data/universe'));
   let bad = 0;
   const report = (ok, text) => { if (!ok) bad++; console.log(`  ${ok ? '✓' : '✗'} ${text}`); };
 
   console.log('cases.json:');
-  const problems = lib.validateCases(doc, [...TOOLS, ...STRATEGY_TOOLS].map((t) => t.name));
+  const problems = lib.validateCases(doc, [...TOOLS, ...STRATEGY_TOOLS, ...IPO_TOOLS].map((t) => t.name));
   report(problems.length === 0, `${doc.cases.length} cases valid`);
   problems.forEach((p) => console.log(`      ${p}`));
 
@@ -201,10 +202,17 @@ async function run() {
   const reps = Math.max(1, Math.min(5, Number(opt('reps', 1)) || 1));
   const only = opt('only', '') ? new Set(opt('only', '').split(',')) : null;
   const useJudge = flag('judge');
-  const cases = doc.cases.filter((c) => !only || only.has(c.id));
+  let cases = doc.cases.filter((c) => !only || only.has(c.id));
   if (!cases.length) fail('No cases selected.');
 
   const config = require(path.join(ROOT, 'server/config'));
+  // The IPO cases need the calendar tools, which Ask has only with IPO Watch on. Left out
+  // rather than run: without the tools they would be scored as wrong answers.
+  if (!config.FEATURES.IPO_WATCH && cases.some((c) => c.tags.includes('ipo'))) {
+    cases = cases.filter((c) => !c.tags.includes('ipo'));
+    console.log('  IPO Watch is off (IPO_WATCH=1 turns it on): the cases tagged "ipo" are left out.');
+    if (!cases.length) fail('Only IPO cases were selected, and IPO Watch is off.');
+  }
   // CLAUDE_REPORTS is hard-coded off in config.js. --yes-spend is the explicit decision to
   // spend, so it is switched on for THIS PROCESS ONLY; the app's own setting is untouched.
   config.FEATURES.CLAUDE_REPORTS = true;
@@ -244,7 +252,7 @@ async function run() {
       const trace = r.trace || {};
       const cost = trace.cost_usd || 0;
       spent += cost;
-      const runView = { writer: r.writer, answer: r.answer, tools_used: r.tools_used, grounding: r.grounding, guard: r.guard, evidence: trace.evidence || [], trace };
+      const runView = { writer: r.writer, answer: r.answer, tools_used: r.tools_used, grounding: r.grounding, guard: r.guard, evidence: trace.evidence || [], trace, holdings: doc.fixture.holdings.map((h) => h.ticker) };
 
       const infra = lib.infraFailure(c, runView);
       if (infra) {
@@ -292,6 +300,7 @@ async function run() {
     models: { answers: answerModel, judge: useJudge ? judgeModel : null, via: viaRouter() ? 'router' : 'anthropic' },
     cases_file_version: doc.version,
     strategies_mode: !!config.FEATURES.STRATEGIES,
+    ipo_watch: !!config.FEATURES.IPO_WATCH,
   };
   fs.writeFileSync(path.join(outDir, 'summary.json'), JSON.stringify(summary, null, 2));
   console.log(`\n${JSON.stringify(summary, null, 2)}\n\nwritten to ${path.relative(ROOT, outDir)}`);

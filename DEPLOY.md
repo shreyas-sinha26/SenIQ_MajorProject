@@ -99,5 +99,9 @@ CI/CD is now live: every push to `main` redeploys and re-runs migrations.
   later need to scale HTTP, split the scheduler into a separate Render **worker** first.
 - **Don't enable `FINBERT_CLASSIFY` on Starter.** It pulls ~250MB and is RAM-heavy; the lexicon
   fallback is automatic. Only turn it on after moving to a larger instance.
+- **News retention needs a disk that lasts.** With `RETENTION=1` the app archives old stories
+  to a file before removing them. The default folder is on the web service's own disk, which
+  a deploy wipes: set `RETENTION_ARCHIVE_DIR` to a mounted persistent disk first, or leave
+  retention off.
 - **Neon cold starts:** the free tier scales compute to zero after inactivity; the first request
   after idle has a ~1s wake. The 10-min cron keeps it warm during active hours.

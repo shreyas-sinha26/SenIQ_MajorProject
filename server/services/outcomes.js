@@ -31,7 +31,11 @@ async function logEventFeatures() {
             (SELECT max(impact_score) FROM event_portfolio_impact i WHERE i.event_id = e.id) AS max_impact
        FROM events e
       WHERE e.last_seen > now() - ($1 || ' days')::interval
-        AND e.primary_ticker IS NOT NULL`,
+        AND e.primary_ticker IS NOT NULL
+        -- A curated name or someone's holding, as every event was before the listed names
+        -- nobody holds were tagged: each ticker here costs a quote on every run.
+        AND (EXISTS (SELECT 1 FROM companies c WHERE c.ticker = e.primary_ticker AND c.tier = 'curated')
+             OR EXISTS (SELECT 1 FROM portfolio p WHERE p.ticker = e.primary_ticker))`,
     [win]
   );
   if (rows.length === 0) return 0;

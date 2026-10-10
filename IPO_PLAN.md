@@ -218,6 +218,37 @@ into their own surface.
   - **Still open for the US:** no forward calendar. Finnhub dates nothing past the week, and
     Nasdaq's IPO calendar did not answer an identified request (nor its robots.txt), so it is
     not used. US issues the news never names in a headline still get no tone.
+- **Ask reads the calendar (built 2026-10-10, branch `ipo-ask`, commit `1f0e368`):**
+  `server/services/ipoTools.js`, loaded into Ask only when `IPO_WATCH=1`. Two read-only
+  tools: `get_ipo_calendar` (both markets unless one is named; issues not yet listed unless
+  a stage is given; filters for market, stage and board) and `get_ipo_detail` (one issue by
+  id or name: dates, band, lot, subscription by class, premium by day, listing result,
+  returns, and its news with tone by day and the latest 5 stories).
+  - **Compare, never pick** (decided 2026-10-10). Asked "which IPO looks promising", Ask
+    says SenIQ does not rate or predict issues and sets them side by side. The orderings it
+    may quote are worked out in code, each by one recorded figure: subscription, premium as
+    a share of the price, and listing gain. Listing gains come with the top three, the
+    bottom three, how many listed above and below the issue price, and the median — on the
+    stored calendar (41 Indian listings, 2026-10-10) that reads 26 above, 10 below, 5 at it,
+    median 2.16%, where the top three alone are all near 90%. Nothing combines figures into a score; that is Change 5, and it
+    needs the outcomes still being logged.
+  - **The GMP rules above hold in Ask.** A premium is shown exactly when the page shows it
+    (never stale, never after listing), always called unofficial, always dated, and the
+    prompt forbids working out an expected listing price from it.
+  - **Stale is said.** A calendar last refreshed more than `STALE_AFTER_HOURS` ago is marked
+    in the result and the answer gives the date.
+  - **Ask only** (decided 2026-10-10): not on `/mcp` or `/v1`, because that would hand
+    InvestorGain's figures to API users while its reuse terms are unsettled.
+  - **No holdings needed** (decided 2026-10-10): an account with an empty portfolio can ask
+    the model an IPO question; its other questions still get "add a few holdings".
+  - **A real model has answered the four eval cases** (2026-10-11, Haiku 4.5, runs
+    `eval/ask/runs/2026-10-10T18-26-32` and `…T18-39-21`). "Compare, never pick" held, and
+    no answer gave advice. `ipo-04`, the one that asks whether to apply, timed out on the
+    first run; on the second it listed the next issues without saying it cannot advise.
+    Other faults seen: answers longer than the
+    guide, a stale calendar not always said, "20 more not shown" left out, a past listing
+    date called "expected", and a listing price mixed with the listing-day change. Details
+    in `handoff.md` §3, step P2.
 - **IPO Watch v1 (India) is feature-complete as planned.** Open: the items marked above and the
   source's reuse terms before any hosting.
 

@@ -8,7 +8,7 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://offline:offli
 
 const assert = require('node:assert');
 const { parseWiki, parseNifty, coreName } = require('../scripts/build_listed_universe');
-const { buildResolver, universeRows, namesHolding } = require('../server/services/entityResolver');
+const { buildResolver, universeRows, namesHolding, indianListed, LISTED_NEEDS_CUE } = require('../server/services/entityResolver');
 const LISTED = require('../server/data/listed.json');
 
 const { companies, executives } = universeRows();
@@ -68,7 +68,123 @@ check('a name that is an ordinary word needs a company cue beside it', () => {
   assert.ok(!names('GAP', 'Why Gap Is Falling Today'));
   assert.ok(names('GAP', 'Gap shares jump 8% on strong sales'));
   assert.ok(names('GAP', 'Gap Inc beats estimates'));
-  assert.ok(names('XYZ', "Block's quarter disappoints") && !names('XYZ', 'Block party planned'));
+  assert.ok(names('GAP', "Gap's quarter disappoints") && !names('XYZ', 'Block party planned'));
+});
+check('a name headlines use for something else needs a company word beside it, and a possessive is not one', () => {
+  // The four found on the stored stories (2026-10-10): a quarter, two exchanges, a broker.
+  assert.ok(!names('QTWO', 'Tesla misses Q2 delivery estimates, shares fall premarket'));
+  assert.ok(!names('QTWO', 'Poonawalla Fincorp Q2 profit soars five-fold YoY to Rs 375 crore'));
+  assert.ok(names('QTWO', 'Q2 Holdings raises full-year guidance') && names('QTWO', 'Why Q2 stock jumped today'));
+  assert.ok(!names('BSE', 'BSE Sensex ends 300 points higher') && !names('BSE', "BSE's midcap index hits a record"));
+  assert.ok(!names('BSE', 'Adani Power Ltd eases for fifth straight session on the BSE'));
+  assert.ok(names('BSE', 'BSE shares jump 5% after Sebi relief') && names('BSE', 'BSE Ltd Q2 profit doubles'));
+  assert.ok(!names('NDAQ', 'US stock market today: Nasdaq, S P 500 futures steady') && !names('NDAQ', "Nasdaq's record close lifts tech"));
+  assert.ok(names('NDAQ', 'Nasdaq Inc beats estimates on data revenue') && names('NDAQ', 'Shares of Nasdaq rise after results'));
+  assert.ok(!names('JEF', 'Jefferies initiates coverage on Poonawalla Fincorp with Buy rating'));
+  assert.ok(!names('JEF', 'Maruti Suzuki shares jump 5% after Jefferies upgrades rating to Buy'));
+  assert.ok(names('JEF', 'Jefferies shares slide on First Brands exposure'));
+  assert.ok(names('NDAQ', 'Exchange operator (NASDAQ: NDAQ) reports volumes'));
+  assert.ok(!names('NDAQ', 'Nasdaq stock futures slip before the open') && names('NDAQ', 'Why Nasdaq Stock Jumped Today'));
+  const listed = new Set(LISTED.companies.map((c) => c.ticker));
+  for (const t of LISTED_NEEDS_CUE) assert.ok(listed.has(t), t);
+});
+check('the same for a word, a place, a person and a fund\'s name', () => {
+  assert.ok(!names('CME', 'CME feeder cattle hit 3-month peak after corn price plunge') && names('CME', 'CME Group to Launch Bitcoin Cash and Uniswap Futures'));
+  assert.ok(!names('MSCI', "In Asia, MSCI's broadest index of Asia-Pacific shares fell") && names('MSCI', 'MSCI Inc lifts dividend'));
+  assert.ok(!names('STT', 'the State Street Technology Select Sector SPDR ETF fell 1%') && names('STT', 'State Street shares rise on fee income'));
+  assert.ok(!names('ROG', 'John Rogers Says Look to Smucker\'s') && names('ROG', 'Rogers Corp cuts outlook'));
+  assert.ok(!names('ATUL', 'promoter Atul Garg increased his stake') && !names('ATUL', 'Atul Auto shares jump 5%') && names('ATUL', 'Atul Ltd Q2 profit rises') && names('ATUL', 'ATUL shares gain 3%'));
+  assert.ok(!names('CHCO', "GIFT City's insurance premiums quadruple") && names('CHCO', 'City Holding raises dividend'));
+  assert.ok(!names('PPLI', "The People's Bank of China maintained the rate"));
+  assert.ok(!names('XYZ', "The Block's country profile: inside Korea's crypto market") && names('XYZ', 'Block Inc beats estimates') && names('XYZ', 'Block shares jump 8%'));
+});
+check('a broker or a rating agency giving its view of another company is not the subject', () => {
+  assert.ok(!names('JMFINANCIL', 'Suzlon advances 2% as JM Financial backs FY31 growth plans') && !names('JMFINANCIL', "BlueStone gains 6% as JM Financial reiterates 'Buy'"));
+  assert.ok(names('JMFINANCIL', 'JM Financial shares slip 4% after Q2 results') && names('JMFINANCIL', 'JM Financial Ltd approves fund raising'));
+  assert.ok(!names('CRISIL', "Epigral rises after Crisil Ratings affirms ratings at 'AA/A1+'") && names('CRISIL', 'Crisil shares gain on dividend') && names('CRISIL', 'CRISIL Ltd Q2 profit up 12%'));
+  assert.ok(!names('NUVAMA', 'Metal stocks to buy ahead of Q2 results: Nuvama picks Coal India, Tata Steel') && !names('NUVAMA', 'weak rupee: Nuvama’s Prateek Parekh'));
+  assert.ok(names('NUVAMA', 'Nuvama shares hit record high') && names('NUVAMA', 'Nuvama Wealth Management Ltd declares interim dividend'));
+  assert.ok(!names('ANGELONE', 'Osho Krishan of Angel One suggests buying CDSL') && names('ANGELONE', 'Angel One shares rally 6% on client additions'));
+  assert.ok(!names('MCO', "Moody's assigned Sky a B3 issuer rating") && names('MCO', "Moody's Corp tops estimates"));
+  assert.ok(!names('EVR', 'Evercore ISI’s Bullish iPhone Survey Faces a Reality Check') && names('EVR', 'Evercore shares climb after record advisory quarter'));
+  // The cost of the rule: named bare as the subject, it is not tagged.
+  assert.ok(!names('JMFINANCIL', 'Top losers: TCS, Coforge, JM Financial, Tata Elxsi'));
+});
+check('a listed name a curated company already answers to is another company: matched by its symbol only', () => {
+  // RS is Reliance, Inc., a US steel company; "Reliance" in the news is Reliance Industries.
+  assert.ok(!names('RS', "Jio IPO becomes Reliance's 'most important milestone' of 2026"));
+  assert.ok(!names('RS', 'Reliance shares may be a cheaper way to buy Jio Platforms after its listing'));
+  assert.ok(names('RS', 'Steel distributor (NYSE: RS) lifts its dividend'));
+  assert.deepStrictEqual(tk('Reliance shares may be a cheaper way to buy Jio Platforms', [{ ticker: 'RS' }]), ['RELIANCE']);
+});
+check('a second share class of a curated company is tagged whenever that company is', () => {
+  assert.deepStrictEqual(tk('Will AI talent departures hurt Alphabet\'s long-term growth?', [{ ticker: 'GOOG' }]), ['GOOG', 'GOOGL']);
+  assert.deepStrictEqual(tk('Google unveils new Gemini model', [{ ticker: 'GOOG' }]), ['GOOG', 'GOOGL']);
+  assert.deepStrictEqual(tk('Tesla misses delivery estimates', [{ ticker: 'GOOG' }]), ['TSLA']);
+});
+check('a US name followed by "India" is the Indian company of that name', () => {
+  assert.ok(!names('CL', 'Colgate-Palmolive (India) Ltd eases for fifth straight session'));
+  assert.ok(!names('PTC', 'Top dividend yield stocks: PTC India, Coal India, REC among 10 shares'));
+  assert.ok(!names('CMI', 'Cummins India Q2 profit rises 12%'));
+  assert.ok(names('CL', 'Colgate-Palmolive raises full-year outlook') && names('CMI', 'Cummins to cut 2,000 jobs'));
+  assert.ok(names('PTC', 'Why PTC Shares Are Trading Higher By Around 35%'));
+  // An Indian listed name keeps "India" in it: the rule is for US names only.
+  assert.ok(names('WHIRLPOOL', 'Whirlpool of India zooms 33% in 3 days'));
+});
+check('a headline about a company with a longer name is not about the shorter one, whatever the summary says', () => {
+  const vedl = (title, summary) => resolve(title, summary, [{ ticker: 'VEDL' }]).tickers.includes('VEDL');
+  assert.ok(!vedl('Vedanta Iron Steel shares extend winning streak, surge 10%', 'Vedanta Iron Steel shares jumped. The stock listed at Rs 20 following Vedanta Group’s demerger.'));
+  assert.ok(!vedl('Vedanta Iron & Steel zooms 10%, up 70% since listing', 'One of the companies demerged from Vedanta Limited and listed as a separate entity.'));
+  assert.ok(!vedl('Vedanta Aluminium up 4% after Emkay starts coverage with Buy', 'Vedanta Aluminium was one of the entities that demerged from Vedanta Ltd.'));
+  assert.ok(vedl('Vedanta shares fall 6% after Rs 2,149 crore block deal', 'Vedanta\'s stock experienced a significant drop.'));
+  assert.ok(vedl('Vedanta shares up 4%; Vedanta Aluminium flat', ''));      // named on its own as well
+  assert.ok(vedl('Metal stocks rally', 'Vedanta Ltd led the gains.'));       // no longer name in the headline: as before
+});
+check('"and" in a name may be "&", or dropped as the feeds drop it', () => {
+  for (const t of ['Vedanta Iron and Steel shares rocket 113%', 'Vedanta Iron & Steel zooms 10%', 'Vedanta Iron Steel shares extend winning streak'])
+    assert.ok(names('VISL', t), t);
+  assert.ok(!names('VISL', 'Vedanta Iron ore output rises'));
+});
+check('an initial in a name, with its full stop and space or without', () => {
+  for (const t of ['D.R. Horton (DHI) Stock Sinks As Market Gains', 'D. R. Horton cuts its outlook', 'DR Horton orders fall 4%'])
+    assert.ok(names('DHI', t), t);
+  for (const t of ['JK Cement Q2 profit rises 18%', 'J.K. Cement to add 6 mtpa', 'J K Cement shares gain'])
+    assert.ok(names('JKCEMENT', t), t);
+  assert.ok(names('USB', 'US Bancorp tops estimates') && names('TROW', 'T Rowe Price sees outflows') && names('AJG', 'Arthur J Gallagher buys a broker'));
+  assert.ok(!names('DHI', 'Dr Horton hears a Who'));   // capitals as written
+});
+check('a company named for the part it plays in someone else\'s story is not the subject', () => {
+  // The source of a view.
+  assert.ok(!names('BANKBARODA', 'The rupee’s decline reflects RBI intervention. A Bank of Baroda analysis finds no single dominant driver.'));
+  assert.ok(!names('BANKBARODA', 'The rupee may trade at 94.5-96, according to a Bank of Baroda report.'));
+  assert.ok(!names('BANKBARODA', 'Bank of Baroda economists see the repo rate unchanged'));
+  // A speaker's employer.
+  assert.ok(!names('ABSLAMC', 'In an interaction with ETMarkets, Harish Krishnan, CIO – Equity, Aditya Birla Sun Life AMC, discusses the risks in the broader market.'));
+  assert.ok(!names('ABSLAMC', 'Mahesh Patil, fund manager at Aditya Birla Sun Life AMC, says midcaps look stretched'));
+  // An issue's registrar, as the line is written with every Indian IPO.
+  assert.ok(!names('KFINTECH', 'Allotment can be checked on the portal of the IPO registrar. Kfin Technologies is the CSM Technologies IPO registrar.'));
+  assert.ok(!names('KFINTECH', 'Investors can check the status via Kfin Technologies, the registrar to the issue.'));
+  assert.ok(!names('KFINTECH', 'The registrar of the issue is Kfin Technologies.'));
+  assert.ok(!names('KFINTECH', 'Allotment status is on the website of the IPO registrar - KFintech'));   // the symbol, as a brand
+  // Named as the subject, each is still found.
+  assert.ok(names('BANKBARODA', 'Bank of Baroda eases for fifth straight session'));
+  assert.ok(names('BANKBARODA', 'Bank of Baroda reports 12% rise in Q2 profit'));
+  assert.ok(names('BANKBARODA', 'A Bank of Baroda analysis finds the rupee weak. Bank of Baroda shares rose 2%.'));   // named again, on its own
+  assert.ok(names('ABSLAMC', 'Aditya Birla Sun Life AMC Q2 profit up 14%'));
+  assert.ok(names('KFINTECH', 'Kfin Technologies shares fall 4% as registrar revenue slows'));
+  // A chief executive quoted on his own company is that company's story.
+  assert.ok(names('SUZLON', 'Girish Tanti, vice chairman of Suzlon, says the order book is at a record'));
+});
+check('the Indian listed names, held or not, as the list the pipeline passes when INDIA_LISTED_NEWS is on', () => {
+  const india = indianListed();
+  assert.ok(india.length > 400 && india.every((c) => c.ticker && c.name));
+  assert.ok(india.every((c) => LISTED.companies.find((x) => x.ticker === c.ticker).country === 'IN'));
+  assert.deepStrictEqual(tk('Suzlon Energy shares rise 2% after firm announces foray into solar', india), ['SUZLON']);
+  assert.deepStrictEqual(tk('NHPC OFS sails through as non-retail portion subscribed 1.74 times', india), ['NHPC']);
+  assert.deepStrictEqual(tk('Sensex, Nifty end flat; BSE midcap index slips', india), []);
+  // A curated name keeps its own rules, and a listed name inside the headline does not take them.
+  assert.deepStrictEqual(tk('TCS Q2 results: profit rises 6%', india), ['TCS']);
+  assert.deepStrictEqual(tk('Suzlon Energy shares rise 2%'), []);   // nobody holds it and the switch is off
 });
 check('a short US symbol only in exchange notation', () => {
   assert.ok(!names('THO', 'THO rallies'));

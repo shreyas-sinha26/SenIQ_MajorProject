@@ -7,8 +7,9 @@
 const assert = require('node:assert');
 const { QA } = require('../server/config');
 const { computeAttribution, rankHoldings, tallyBy, findMentionedTickers, scopeCheck, outOfScopeAnswer, runTool, TOOLS, EXECUTORS } = require('../server/services/qaTools');
-const { sanitizeQuestion, sanitizeHistory, runAgent, agentSetup, deterministicAnswer, buildOllamaPrompt, ollamaAnswer, SYSTEM_PROMPT } = require('../server/services/qa');
+const { sanitizeQuestion, sanitizeHistory, runAgent, agentSetup, modelCanAnswer, deterministicAnswer, buildOllamaPrompt, ollamaAnswer, SYSTEM_PROMPT } = require('../server/services/qa');
 const ST = require('../server/services/strategyTools');
+const IT = require('../server/services/ipoTools');
 const { checkGrounding, extractClaims } = require('../server/services/answerCheck');
 const { toVectors, searchTerms, keywordPatterns, storyOf, fuseStories, rankStories } = require('../server/services/newsSearch');
 const { titleFrom, threadDigest } = require('../server/services/askThreads');
@@ -626,7 +627,7 @@ section('\nstrategy tools (v2 only):');
     assert.deepStrictEqual(ST.presetCards(null), []);
   });
   check('v1 mode: no strategy tools or prompt; v2 mode adds both', () => {
-    const v1 = agentSetup(false), v2 = agentSetup(true);
+    const v1 = agentSetup(false, false), v2 = agentSetup(true, false);
     assert.strictEqual(v1.tools.length, TOOLS.length);
     assert.strictEqual(v1.system, SYSTEM_PROMPT);
     assert.strictEqual(v2.tools.length, TOOLS.length + ST.STRATEGY_TOOLS.length);
@@ -636,11 +637,11 @@ section('\nstrategy tools (v2 only):');
     assert.ok(ST.STRATEGY_TOOLS.every((x) => typeof v2.executors[x.name] === 'function'));
   });
   check('v1 mode refuses a strategy tool by name', async () => {
-    const r = await runTool({ id: 's1', name: 'list_my_strategies', input: {} }, { ...ctx, tier: 'pro' }, agentSetup(false).executors);
+    const r = await runTool({ id: 's1', name: 'list_my_strategies', input: {} }, { ...ctx, tier: 'pro' }, agentSetup(false, false).executors);
     assert.ok(r.is_error && /unknown tool/.test(r.content));
   });
   check('tier gates fire before any query: saved strategies need Plus, paper needs Pro', async () => {
-    const ex = agentSetup(true).executors;
+    const ex = agentSetup(true, false).executors;
     const free = await runTool({ id: 's2', name: 'list_my_strategies', input: {} }, { ...ctx, tier: 'free' }, ex);
     assert.ok(free.is_error && /plan_required: Saved strategies is part of the Plus plan/.test(free.content));
     const plus = await runTool({ id: 's3', name: 'get_paper_performance', input: {} }, { ...ctx, tier: 'plus' }, ex);
@@ -649,7 +650,7 @@ section('\nstrategy tools (v2 only):');
     assert.ok(noTier.is_error && /plan_required/.test(noTier.content));
   });
   check('explain_strategy_signal needs a real id (no query runs)', async () => {
-    const r = await runTool({ id: 's5', name: 'explain_strategy_signal', input: { strategy_id: 'x' } }, { ...ctx, tier: 'pro' }, agentSetup(true).executors);
+    const r = await runTool({ id: 's5', name: 'explain_strategy_signal', input: { strategy_id: 'x' } }, { ...ctx, tier: 'pro' }, agentSetup(true, false).executors);
     assert.ok(r.is_error && /strategy_id is required/.test(r.content));
   });
   check('no strategy tool saves, runs or deploys: every name reads, explains or drafts', () => {
@@ -658,11 +659,49 @@ section('\nstrategy tools (v2 only):');
   });
   check('the agent sends the v2 tools and prompt when set up for v2', async () => {
     const client = fakeClient([textTurn('ok')]);
-    await runAgent('q', [], ctx, client, { setup: agentSetup(true) });
+    await runAgent('q', [], ctx, client, { setup: agentSetup(true, false) });
     assert.strictEqual(client.calls[0].tools.length, TOOLS.length + ST.STRATEGY_TOOLS.length);
     assert.ok(client.calls[0].system.includes('Strategies (this account has the strategy features)'));
   });
 }
+
+section('\nIPO Watch tools in the agent:');
+check('IPO Watch off: no calendar tools or prompt; on: both, after everything else', () => {
+  const off = agentSetup(true, false), on = agentSetup(true, true);
+  assert.strictEqual(on.tools.length, off.tools.length + IT.IPO_TOOLS.length);
+  assert.deepStrictEqual(on.tools.slice(0, off.tools.length), off.tools);   // the prefix before it is unchanged
+  assert.ok(on.system.startsWith(off.system) && on.system.endsWith(IT.IPO_PROMPT));
+  assert.strictEqual(new Set(on.tools.map((x) => x.name)).size, on.tools.length);
+  assert.ok(IT.IPO_TOOLS.every((x) => typeof on.executors[x.name] === 'function'));
+  const v1 = agentSetup(false, true);                                       // IPO Watch does not need the strategy features
+  assert.deepStrictEqual(v1.tools.map((x) => x.name), [...TOOLS, ...IT.IPO_TOOLS].map((x) => x.name));
+  assert.strictEqual(v1.system, SYSTEM_PROMPT + IT.IPO_PROMPT);
+});
+check('IPO Watch off refuses a calendar tool by name', async () => {
+  const r = await runTool({ id: 'i1', name: 'get_ipo_calendar', input: {} }, ctx, agentSetup(true, false).executors);
+  assert.ok(r.is_error && /unknown tool/.test(r.content));
+});
+check('the agent sends the calendar tools and rules when IPO Watch is on', async () => {
+  const client = fakeClient([textTurn('ok')]);
+  await runAgent('which IPOs are open?', [], ctx, client, { setup: agentSetup(false, true) });
+  assert.deepStrictEqual(client.calls[0].tools.slice(-2).map((x) => x.name), ['get_ipo_calendar', 'get_ipo_detail']);
+  assert.ok(client.calls[0].system.includes('Compare, never pick.'));
+});
+check('an empty portfolio: only an IPO question has something for the model to work from', () => {
+  assert.strictEqual(modelCanAnswer([], false), false);                          // "why is my portfolio down?" with nothing in it
+  assert.strictEqual(modelCanAnswer([], true), true);                            // the calendar needs no holdings
+  assert.strictEqual(modelCanAnswer([{ ticker: 'AAPL' }], false), true);
+  assert.strictEqual(modelCanAnswer([{ ticker: 'AAPL' }], true), true);
+  assert.strictEqual(modelCanAnswer([], undefined), false);                      // IPO Watch off: never an IPO question
+});
+check('the model is told when the portfolio is empty', async () => {
+  const client = fakeClient([textTurn('ok')]);
+  await runAgent('which IPOs are open?', [], { ...ctx, holdings: [], heldSet: new Set() }, client, { setup: agentSetup(false, true) });
+  assert.ok(client.calls[0].messages[0].content.includes('My holdings: none\n'));
+  const held = fakeClient([textTurn('ok')]);
+  await runAgent('q', [], ctx, held, { setup: agentSetup(false, false) });
+  assert.ok(held.calls[0].messages[0].content.includes('My holdings: AAPL, RELIANCE\n'));   // unchanged for everyone else
+});
 
 section('\nsaved threads:');
 check('thread title = first question, one line, clamped', () => {

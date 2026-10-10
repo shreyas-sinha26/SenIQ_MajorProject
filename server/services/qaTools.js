@@ -8,6 +8,11 @@
  * SCOPE IS ENFORCED HERE, not in the prompt: every ticker argument is checked against the
  * user's holdings (ctx.heldSet) before any query runs. A prompt-injected or confused model
  * asking for a stock the user doesn't own gets a not_in_portfolio error, never data.
+ * The exceptions are get_stock_snapshot and get_price_history: the price, the sentiment
+ * reading and the past year's prices of any company in the reference, held or not, and
+ * nothing more (stockSnapshot.js, priceHistory.js). The four tools that read the app's other
+ * pages (pageTools.js) take no ticker at all: a fund, a politician, an investor, or the
+ * user's own alerts and brief.
  */
 
 const { QA, SENTIMENT } = require('../config');
@@ -15,6 +20,9 @@ const { scoreTicker, explainSentiment, labelFor } = require('./sentimentScoring'
 const { getImpactFeed } = require('./impactScoring');
 const { searchNews, getStory } = require('./newsSearch');
 const { listDisclosures, getDisclosure } = require('./disclosures');
+const { findCompany, snapshot } = require('./stockSnapshot');
+const { priceHistory } = require('./priceHistory');
+const pages = require('./pageTools');
 
 const round = (n, d = 2) => (n == null ? null : Math.round(n * 10 ** d) / 10 ** d);
 const day = (t) => (t ? new Date(t).toISOString().slice(0, 10) : null);
@@ -139,13 +147,16 @@ const PORTFOLIO_WORDS = /\b(my|portfolio|holdings?|i own|i hold)\b/i;
 /**
  * Pre-check before any Claude call: a question only about stocks the user doesn't hold is
  * answered with a fixed refusal (no model call, no quota). Mixed or portfolio-level
- * questions go through — the tools still refuse the outside tickers. Pure.
+ * questions go through — the tools still refuse the outside tickers — and so does a question
+ * for the Institutions or Congress pages. Pure.
  */
 function scopeCheck(question, universe, heldSet) {
   const mentioned = findMentionedTickers(question, universe);
   const outside = mentioned.filter((t) => !heldSet.has(t));
   const inside = mentioned.filter((t) => heldSet.has(t));
-  const refuse = outside.length > 0 && inside.length === 0 && !PORTFOLIO_WORDS.test(question);
+  // A fund's filing, a politician's trades or an investor's deals are a page of their own
+  // (pageTools.js), whatever company the question names on the way.
+  const refuse = outside.length > 0 && inside.length === 0 && !PORTFOLIO_WORDS.test(question) && !pages.isPageQuestion(question);
   return { mentioned, outside, inside, refuse };
 }
 
@@ -231,6 +242,42 @@ const TOOLS = [
     description: 'The articles behind ONE story returned by search_news (pass its id, e.g. "e12"): each article\'s title, longer summary, source and date. Use only when a story card is not enough to answer.',
     input_schema: { type: 'object', properties: { id: { type: 'string', description: 'A story id from search_news results.' } }, required: ['id'] },
   },
+  {
+    name: 'get_stock_snapshot',
+    description: 'Price and sentiment for ONE company the user does NOT hold, by name or ticker: live price, day change %, the latest session\'s high and low, and SenIQ\'s sentiment label and score with the number of stories behind it. This is everything SenIQ can say about a stock outside the portfolio: no news detail, smart money or impact. Use it when a question sets a held stock beside one that is not held. If several companies match the name, the result lists them: ask the user which one. For a held stock use the holding tools instead.',
+    input_schema: { type: 'object', properties: { name: { type: 'string', description: 'The company\'s name or ticker as the user wrote it, e.g. "AMD" or "Hero MotoCorp".' } }, required: ['name'] },
+  },
+  {
+    name: 'get_price_history',
+    description: 'What ONE price did over the past year, for a holding or any company, coin or commodity in SenIQ\'s reference, by name or ticker: the change over 1 week, 1 month, 3 months, 6 months, 1 year and the calendar year to date (each with the date and close it is measured from), the highest and lowest price traded and the highest and lowest close with their dates and how far the last close is from each, the latest session\'s high and low, average daily volume, the latest daily closes and the month-end closes. Use for "how has X done this year / this month", "what was X\'s high today", "what is X\'s high for the year", "how far is X off its peak". It does not explain why the price moved (use the news tools for a holding).',
+    input_schema: { type: 'object', properties: { name: { type: 'string', description: 'The name or ticker as the user wrote it, e.g. "NVDA", "Bitcoin" or "Hero MotoCorp".' } }, required: ['name'] },
+  },
+  {
+    name: 'get_fund_holdings',
+    description: 'The Institutions page: the funds SenIQ tracks from their 13F filings (the ones the user follows first), or, with a fund named, that fund\'s largest positions in its latest filing and how it changed from the quarter before (positions new, added to, reduced). Use for "what does Berkshire hold", "what did Burry buy last quarter", "which funds do you track". For which funds traded ONE of the user\'s holdings use get_smart_money instead.',
+    input_schema: { type: 'object', properties: { fund: { type: 'string', description: 'Optional: the fund or its manager as the user wrote it, e.g. "Berkshire Hathaway" or "Michael Burry". Leave out to list the tracked funds.' } } },
+  },
+  {
+    name: 'get_politician_trades',
+    description: 'The Congress page: disclosed stock trades by members of the US Congress. With no arguments, the trades in the user\'s holdings and by the politicians they follow. With a politician named, that politician\'s trades in any stock. With scope "all", the newest disclosures across Congress — only when the question asks about Congress as a whole.',
+    input_schema: { type: 'object', properties: {
+      politician: { type: 'string', description: 'Optional: the politician\'s name as the user wrote it.' },
+      scope: { type: 'string', enum: ['mine', 'all'], description: 'Optional: "mine" (default) or "all" for the whole of Congress.' },
+    } },
+  },
+  {
+    name: 'get_india_deals',
+    description: 'The India side of the Institutions and Congress pages: NSE bulk and block deals, and insider (promoter, director) trades. With no arguments, those in the user\'s Indian holdings and deals by the Indian investors they follow. With an investor named (LIC, SBI Mutual Fund, Rekha Jhunjhunwala…), that investor\'s deals in any stock. With scope "all", the newest deals and insider trades across the market — only when the question asks about the market as a whole.',
+    input_schema: { type: 'object', properties: {
+      investor: { type: 'string', description: 'Optional: the investor\'s name as the user wrote it.' },
+      scope: { type: 'string', enum: ['mine', 'all'], description: 'Optional: "mine" (default) or "all" for the whole market.' },
+    } },
+  },
+  {
+    name: 'get_alerts_and_brief',
+    description: 'The user\'s own alerts (what SenIQ flagged for them, newest first, with how many are unread) and their latest daily brief (its date, headline and text). Use for "what alerts did I get", "did I miss anything", "what did today\'s brief say", "summarise my brief".',
+    input_schema: { type: 'object', properties: { what: { type: 'string', enum: ['alerts', 'brief', 'both'], description: 'Optional: "alerts", "brief" or "both" (default).' } } },
+  },
 ];
 
 // ── Executors ──
@@ -241,6 +288,27 @@ function requireHeld(ctx, raw) {
   if (!t) throw new ScopeError('ticker is required');
   if (!ctx.heldSet.has(t)) throw new ScopeError(`not_in_portfolio: ${t} is not in the user's portfolio, so no data is available for it. Tell the user it isn't tracked and that they can add it to their portfolio.`);
   return t;
+}
+
+// The company a typed name or ticker means, for the two tools that read outside the
+// portfolio: { company }, or the result to hand back when several match. A holding that is
+// not in the reference (a ticker the user typed in) is still theirs to ask about.
+async function namedCompany(name, ctx, kind) {
+  const typed = String(name || '').trim().slice(0, 40);
+  if (!typed) throw new ScopeError('name is required');
+  const found = await findCompany(typed);
+  if (found.company) return found;
+  if (found.matches) return { kind, matches: found.matches, note: 'Several companies match that name. Ask the user which one they mean; do not pick one.' };
+  const held = (ctx.holdings || []).find((h) => h.ticker === typed.toUpperCase().replace(/^\$/, ''));
+  if (held) return { company: { ticker: held.ticker, name: held.company_name || held.ticker, asset_class: held.asset_class, exchange: held.exchange, tier: 'held' } };
+  throw new ScopeError(`not_found: SenIQ's company reference has nothing called "${typed}", so there is nothing to show for it. Say so; do not describe it from memory.`);
+}
+
+// A read of one of the app's other pages; its { error } is a refusal the model can read.
+async function pageRead(fn, args, ctx) {
+  const r = await fn(args || {}, ctx);
+  if (r && r.error) throw new ScopeError(r.error);
+  return r;
 }
 
 const EXECUTORS = {
@@ -268,6 +336,21 @@ const EXECUTORS = {
       note: 'Holdings are listed largest first; rank 1 is the largest exposure. exposure_pct is the holding\'s share of the portfolio, as the Portfolio page shows it. A holding marked exposure_estimated has no live price or no quantity, so its share is an estimate (it is counted at the average size of the priced holdings); say "about". A holding in "unpriced" has no live price, so its day change is unknown.',
     };
   },
+
+  async get_stock_snapshot({ name } = {}, ctx) {
+    const found = await namedCompany(name, ctx, 'stock_snapshot');
+    return found.company ? snapshot(found.company, { held: ctx.heldSet.has(found.company.ticker) }) : found;
+  },
+
+  async get_price_history({ name } = {}, ctx) {
+    const found = await namedCompany(name, ctx, 'price_history');
+    return found.company ? priceHistory(found.company, { held: ctx.heldSet.has(found.company.ticker) }) : found;
+  },
+
+  get_fund_holdings: (args, ctx) => pageRead(pages.fundHoldings, args, ctx),
+  get_politician_trades: (args, ctx) => pageRead(pages.politicianTrades, args, ctx),
+  get_india_deals: (args, ctx) => pageRead(pages.indiaDeals, args, ctx),
+  get_alerts_and_brief: (args, ctx) => pageRead(pages.alertsAndBrief, args, ctx),
 
   async get_attribution(_args, ctx) {
     return { as_of: new Date().toISOString(), ...computeAttribution(ctx.holdings) };
@@ -392,7 +475,7 @@ const EXECUTORS = {
       india_insider_trades: insiderRows,
     } : {};
     return {
-      note: 'Disclosures lag the actual trades (13F up to 45 days after quarter end; congress up to 45 days after the trade). Each row\'s "action"/"change" is exactly what was disclosed — repeat it as written.',
+      note: 'Disclosures lag the actual trades (13F up to 45 days after quarter end; congress up to 45 days after the trade). Each row\'s "action"/"change" is exactly what was disclosed — repeat it as written. For a fund, shares and value_usd are the SIZE OF ITS POSITION at the quarter end, not the amount it bought or sold; a 13F does not give that amount.',
       congress_summary: tallyBy(congressRows, 'action'),
       congress: congressRows,
       institutions_summary: tallyBy(institutionRows, 'change'),
