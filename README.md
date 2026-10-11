@@ -24,7 +24,7 @@ return 404 and the v2 pages are hidden.
 | **v2** | v1 + Strategy Builder, Your Strategies, Backtest, Paper Trade, MCP server, public REST API (`/v1`), API keys |
 
 Releases are tagged in pairs on the same commit: `v1.N` is that commit run with strategies
-off, `v2.N` with them on. The latest is `v1.15` / `v2.16`: Ask reads IPO Watch, answers on a stock you do not hold and reads the app's other pages; news for the listed names nobody holds in India and the US, and news retention, each behind a switch that is off; and one model for every Claude call, Claude Haiku 5.5. Before it, `v1.14` / `v2.15` opened an issue's news in IPO Watch on its latest five stories, and `v1.13` / `v2.14` was a round of fixes to both sides with no new feature. The numbers differ because `v2.13` (the paper ledger) was strategies-only work and took no v1 tag.
+off, `v2.N` with them on. The latest is `v1.16` / `v2.17`: Ask's instant answer on a stock you do not hold gives just what was asked, and the US news rotation checks the curated names more often than the rest. Before it, `v1.15` / `v2.16`: Ask reads IPO Watch, answers on a stock you do not hold and reads the app's other pages; news for the listed names nobody holds in India and the US, and news retention, each behind a switch that is off; and one model for every Claude call, Claude Haiku 5.5. Earlier, `v1.14` / `v2.15` opened an issue's news in IPO Watch on its latest five stories, and `v1.13` / `v2.14` was a round of fixes to both sides with no new feature. The numbers differ because `v2.13` (the paper ledger) was strategies-only work and took no v1 tag.
 
 ---
 
@@ -182,7 +182,7 @@ gracefully; `.env.example` documents every variable. The main ones:
 | `CLAUDE_REPORTS=1` + `ANTHROPIC_API_KEY` or `AIROUTER_API_KEY` | Claude writes the brief, Ask answers and alert explanations | Code-written text |
 | `INDIA_SMART_MONEY=1` + `NSE_USER_AGENT` | India deals and insider trades | US smart money only |
 | `INDIA_LISTED_NEWS=1` | News is matched for the Indian listed names nobody holds (nothing more is fetched) | Listed names are matched only while someone holds them |
-| `US_LISTED_NEWS=1` + `FINNHUB_API_KEY` | Company news is fetched for the US shares nobody holds, 30 names a run in rotation | Only held tickers get a company-news fetch |
+| `US_LISTED_NEWS=1` + `FINNHUB_API_KEY` | Company news is fetched for the US shares nobody holds, 30 names a run in rotation: 5 from the curated names (each about every 3 hours) and 25 from the rest (each about every 9) | Only held tickers get a company-news fetch |
 | `CONGRESS_TRADES_URL` | Live congressional trades | Bundled sample data |
 | `SEC_USER_AGENT` | Contact address for SEC EDGAR requests | Default user agent |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | "Sign in with Google" (callback `<APP_URL>/api/auth/oauth/google/callback`) | Button hidden |

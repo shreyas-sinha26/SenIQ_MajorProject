@@ -277,6 +277,7 @@ async function run() {
         evidence: runView.evidence,
         model: trace.model, stop_reason: trace.stop_reason, rounds: trace.rounds, usage: trace.usage, cost_usd: cost,
         wall_ms: Date.now() - started,
+        timing: trace.timing || null,   // each model call and each round of tool calls, in ms
       };
       if (useJudge && r.writer === 'claude') {
         row.judge = await judgeOne(judgeClient, c, runView);

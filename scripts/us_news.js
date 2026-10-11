@@ -3,8 +3,9 @@
  * US coverage from the command line (server/services/usNews.js).
  *
  *   node scripts/us_news.js [status]
- *       Where the rotation stands: how many US shares nobody holds, how many have never been
- *       checked, the oldest and newest check. Reads only. Needs migration 0044.
+ *       Where the rotation stands: how many US shares nobody holds and how many of them are
+ *       curated, how many have never been checked, the oldest and newest check, and how often
+ *       each of the two queues comes round. Reads only. Needs migration 0044.
  *
  *   node scripts/us_news.js try [N] [--from TICKER]
  *       Fetch the company news of N names (default 5, at most US_NEWS.PER_RUN) as a run would,
@@ -31,9 +32,14 @@ async function status() {
   const s = await usNews.status(held);
   const perRun = usNews.batchSize(held.length);
   console.log(`US_LISTED_NEWS is ${FEATURES.US_LISTED_NEWS ? 'on' : 'off'}; FINNHUB_API_KEY is ${process.env.FINNHUB_API_KEY ? 'set' : 'not set'}`);
-  console.log(`${s.names} US shares nobody holds; ${s.never} never checked`);
+  console.log(`${s.names} US shares nobody holds, ${s.curated} of them curated; ${s.never} never checked`);
   console.log(`oldest check ${day(s.oldest)}, newest ${day(s.newest)} (UTC)`);
-  console.log(`${held.length} held ticker(s), so a run takes ${perRun} name(s)` + (perRun ? `: each about every ${(s.names / perRun / 6).toFixed(1)} hours` : ` (the run's ${US_NEWS.CALLS_PER_RUN} calls are used up)`));
+  // As nextBatch splits a run: the curated queue's share, and its spare places to the rest.
+  const curated = Math.min(usNews.curatedShare(perRun), s.curated);
+  const queue = (label, names, places) => `${places} ${label}` + (places && names ? ` (each about every ${(names / places / 6).toFixed(1)} hours)` : '');
+  console.log(`${held.length} held ticker(s), so a run takes ${perRun} name(s)` + (perRun
+    ? `: ${queue('curated', s.curated, curated)} and ${queue('of the rest', s.names - s.curated, perRun - curated)}`
+    : ` (the run's ${US_NEWS.CALLS_PER_RUN} calls are used up)`));
 }
 
 async function tryBatch(flags) {

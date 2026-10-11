@@ -215,9 +215,11 @@ async function runAgent(question, history, ctx, client, { digest = '', setup = a
   const usage = { input: 0, billable_input: 0, output: 0, cache_read: 0, cost_usd: 0 };
   const toolsUsed = [];
   const evidence = [];
+  // Where a question's time goes: each model call, and each round of tool calls, in ms.
+  const timing = { model_ms: [], tools_ms: [] };
 
   try {
-    return await agentLoop(messages, ctx, client, usage, toolsUsed, evidence, setup);
+    return { ...(await agentLoop(messages, ctx, client, usage, toolsUsed, evidence, setup, timing)), timing };
   } catch (err) {
     err.usage = usage; // tokens already spent still count toward the global kill-switch
     throw err;
@@ -229,7 +231,7 @@ async function runAgent(question, history, ctx, client, { digest = '', setup = a
 // a tool_choice change invalidates the messages cache.
 const BUDGET_NOTE = 'Tool budget for this question is used up. Answer now from the results above; do not call more tools. If something is missing, say what you could not check.';
 
-async function agentLoop(messages, ctx, client, usage, toolsUsed, evidence, setup) {
+async function agentLoop(messages, ctx, client, usage, toolsUsed, evidence, setup, timing = { model_ms: [], tools_ms: [] }) {
   let nudged = false;
   let forceNone = false;
   for (let round = 0; ; round++) {
@@ -238,6 +240,7 @@ async function agentLoop(messages, ctx, client, usage, toolsUsed, evidence, setu
       messages[messages.length - 1].content.push({ type: 'text', text: BUDGET_NOTE });
       nudged = true;
     }
+    const asked = Date.now();
     const resp = await client.messages.create({
       model: QA.MODEL,
       max_tokens: QA.MAX_OUTPUT_TOKENS,
@@ -246,11 +249,13 @@ async function agentLoop(messages, ctx, client, usage, toolsUsed, evidence, setu
       // question qualifies. This marker reaches Anthropic directly; the router path
       // (llmClient.toChatRequest) does not carry one yet, and nothing is cached there.
       cache_control: { type: 'ephemeral' },
+      ...(QA.EFFORT ? { output_config: { effort: QA.EFFORT } } : {}),
       system: setup.system,
       tools: setup.tools,
       tool_choice: forceNone ? { type: 'none' } : { type: 'auto' },
       messages,
     });
+    timing.model_ms.push(Date.now() - asked);
     const u = resp.usage || {};
     usage.input += (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
     usage.billable_input += (u.input_tokens || 0) + 1.25 * (u.cache_creation_input_tokens || 0) + 0.1 * (u.cache_read_input_tokens || 0);
@@ -263,7 +268,9 @@ async function agentLoop(messages, ctx, client, usage, toolsUsed, evidence, setu
       if (!budgetHit) {
         messages.push({ role: 'assistant', content: resp.content });
         // Parallel calls run concurrently; all results go back in ONE user message.
+        const called = Date.now();
         const results = await Promise.all(toolUses.map((b) => runTool(b, ctx, setup.executors)));
+        timing.tools_ms.push(Date.now() - called);
         toolsUsed.push(...toolUses.map((b) => b.name));
         evidence.push(...results.filter((r) => !r.is_error).map((r) => r.content));
         messages.push({ role: 'user', content: results });
@@ -434,7 +441,7 @@ async function answerQuestion(userId, rawQuestion, rawHistory = [], { client, da
       toolsUsed = r.toolsUsed;
       evidence = r.evidence;
       const cost = estimateCost({ input: r.usage.billable_input, output: r.usage.output, cost_usd: r.usage.cost_usd });
-      Object.assign(traced, { usage: r.usage, cost_usd: cost, model: r.model, stop_reason: r.stopReason, rounds: r.rounds });
+      Object.assign(traced, { usage: r.usage, cost_usd: cost, model: r.model, stop_reason: r.stopReason, rounds: r.rounds, timing: r.timing });
       await execute(
         'UPDATE claude_calls SET input_tokens = $1, output_tokens = $2, cost_usd = $3 WHERE id = $4',
         [r.usage.input, r.usage.output, cost, reservedId]
