@@ -28,9 +28,10 @@ const { DISCLAIMER, STRATEGY_SERVICE } = require('../config');
 // Auth + rate limits shared with the public REST API (/v1): one budget per key
 // across both transports.
 const { resolveApiKey, heavyLimiter, lightLimiter } = require('../services/apiKeyGate');
-const { callService, engineFailure, cleanSymbols, parseCapital, replayPaper, MAX_WATCH_SYMBOLS } = require('../services/strategyClient');
+const { callService, engineFailure, shapeCatalog, cleanSymbols, replayPaper, MAX_WATCH_SYMBOLS } = require('../services/strategyClient');
+const { runBacktest, runWalkForward } = require('../services/strategyRuns');
 const { isId } = require('../middleware/idParam');
-const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
+const { seniqDataForWatchlist } = require('../services/signalHistory');
 const { DATA_TOOLS, runDataTool } = require('../services/dataTools');
 const { saveStrategy, deployPaper, stopPaper, strategyToJson, deploymentToJson } = require('../services/strategyStore');
 const { readLedger } = require('../services/paperLedger');
@@ -90,8 +91,11 @@ function buildMcpServer(ctx) {
   server.registerTool('list_strategies', {
     description: 'Strategy catalog: built-in strategies with param schemas, plus the Builder vocabulary (indicators, seniq metrics, operators, risk, sizing) a custom spec may use.',
   }, async () => {
-    return rateLimited(lightLimiter, ctx.keyId)
-      || serviceResult(await callService('/api/strategies', { timeoutMs: STRATEGY_SERVICE.CATALOG_TIMEOUT_MS }));
+    const limited = rateLimited(lightLimiter, ctx.keyId);
+    if (limited) return limited;
+    const out = await callService('/api/strategies', { timeoutMs: STRATEGY_SERVICE.CATALOG_TIMEOUT_MS });
+    if (out.status === 200) out.data = shapeCatalog(out.data);
+    return serviceResult(out);
   });
 
   server.registerTool('validate_strategy', {
@@ -110,26 +114,8 @@ function buildMcpServer(ctx) {
   }, async (args) => {
     const limited = rateLimited(heavyLimiter, ctx.keyId);
     if (limited) return limited;
-    if ((!args.strategy && !args.custom) || !args.symbol || !args.start_date || !args.end_date) {
-      return fail('strategy (or custom), symbol, start_date and end_date are required');
-    }
-    const capital = parseCapital(args.initial_cash);
-    if (!capital.ok) return fail(capital.error);
-    const seniqData = args.custom ? await seniqDataIfNeeded(args.custom, args.symbol) : null;
-    return serviceResult(await callService('/api/backtest', {
-      method: 'POST',
-      body: {
-        strategy: args.strategy || null,
-        custom: args.custom || null,
-        params: args.params || {},
-        symbol: args.symbol,
-        exchange: args.exchange || 'US',
-        start_date: args.start_date,
-        end_date: args.end_date,
-        initial_cash: capital.value,
-        seniq_data: seniqData,
-      },
-    }));
+    const out = await runBacktest(args);
+    return out.ok ? ok(out.data) : fail(out.error);
   });
 
   server.registerTool('list_seniq_presets', {
@@ -173,19 +159,8 @@ function buildMcpServer(ctx) {
   }, async (args) => {
     const limited = rateLimited(heavyLimiter, ctx.keyId);
     if (limited) return limited;
-    if ((!args.strategy && !args.custom) || !args.symbol || !args.start_date || !args.end_date) {
-      return fail('strategy (or custom), symbol, start_date and end_date are required');
-    }
-    return serviceResult(await callService('/api/walk-forward', {
-      method: 'POST',
-      body: {
-        strategy: args.strategy || null, custom: args.custom || null, params: args.params || {},
-        symbol: args.symbol, exchange: args.exchange || 'US',
-        start_date: args.start_date, end_date: args.end_date,
-        n_splits: args.n_splits || 4, scheme: args.scheme || 'anchored',
-        seniq_data: args.custom ? await seniqDataIfNeeded(args.custom, args.symbol) : null,
-      },
-    }));
+    const out = await runWalkForward(args);
+    return out.ok ? ok(out.data) : fail(out.error);
   });
 
   server.registerTool('get_signals', {

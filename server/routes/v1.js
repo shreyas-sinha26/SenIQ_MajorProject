@@ -14,18 +14,20 @@ const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne } = require('../db');
 const { DISCLAIMER, STRATEGY_SERVICE } = require('../config');
 const { resolveApiKey, heavyLimiter, lightLimiter } = require('../services/apiKeyGate');
-const { callService, engineFailure, cleanSymbols, parseCapital, replayPaper, MAX_WATCH_SYMBOLS } = require('../services/strategyClient');
-const { idParam } = require('../middleware/idParam');
-const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
+const { callService, engineFailure, shapeCatalog, cleanSymbols, replayPaper, MAX_WATCH_SYMBOLS } = require('../services/strategyClient');
+const { isId } = require('../middleware/idParam');
+const { seniqDataForWatchlist } = require('../services/signalHistory');
+const { runBacktest, runWalkForward } = require('../services/strategyRuns');
 const { DATA_TOOLS, runDataTool } = require('../services/dataTools');
 const { saveStrategy, deployPaper, stopPaper, strategyToJson, deploymentToJson } = require('../services/strategyStore');
 const { readLedger } = require('../services/paperLedger');
 const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../services/strategySignals');
 
 const router = asyncRouter();
-// A paper deployment's id. (Runs after the key check: params are resolved when a route is
-// matched, and the auth below is the first thing in the stack.) Presets use :presetId.
-router.param('id', idParam('deployment not found'));
+// A paper deployment's id, checked on the paper routes only. As a router-wide param check
+// it also caught GET /v1/news/stories/:id, whose ids look like "e56685": every story
+// answered 404 "deployment not found".
+const paperId = (req, res, next) => (isId(req.params.id) ? next() : res.status(404).json({ error: 'deployment not found' }));
 
 // ─── Auth (every /v1 route) ──────────────────────────────────
 router.use(async (req, res, next) => {
@@ -48,6 +50,10 @@ function gate(limiter) {
     next();
   };
 }
+
+// A store or run result ({ ok, data } | { ok: false, status, error }) as the HTTP response.
+const sendStore = (res, out, okStatus = 200) =>
+  (out.ok ? res.status(okStatus).json(out.data) : res.status(out.status).json({ error: out.error }));
 
 // Map a strategy-service reply straight onto the HTTP response.
 function passthrough(res, out) {
@@ -92,7 +98,9 @@ router.get('/', gate(lightLimiter), (req, res) => {
 
 // ─── GET /v1/strategies — catalog + Builder vocabulary ───────
 router.get('/strategies', gate(lightLimiter), async (req, res) => {
-  passthrough(res, await callService('/api/strategies', { timeoutMs: STRATEGY_SERVICE.CATALOG_TIMEOUT_MS }));
+  const out = await callService('/api/strategies', { timeoutMs: STRATEGY_SERVICE.CATALOG_TIMEOUT_MS });
+  if (out.status === 200) out.data = shapeCatalog(out.data);
+  passthrough(res, out);
 });
 
 // ─── POST /v1/strategies/validate — check a Builder spec ─────
@@ -107,27 +115,7 @@ router.post('/strategies/validate', gate(lightLimiter), async (req, res) => {
 // ─── POST /v1/backtest — run one backtest ────────────────────
 // Body: {strategy|custom, params?, symbol, exchange?, start_date, end_date, initial_cash?}
 router.post('/backtest', gate(heavyLimiter), async (req, res) => {
-  const { strategy, custom, params, symbol, exchange, start_date, end_date, initial_cash } = req.body || {};
-  if ((!strategy && !custom) || !symbol || !start_date || !end_date) {
-    return res.status(400).json({ error: 'strategy (or custom), symbol, start_date and end_date are required' });
-  }
-  const capital = parseCapital(initial_cash);
-  if (!capital.ok) return res.status(400).json({ error: capital.error });
-  const seniqData = custom ? await seniqDataIfNeeded(custom, symbol) : null;
-  passthrough(res, await callService('/api/backtest', {
-    method: 'POST',
-    body: {
-      strategy: strategy || null,
-      custom: custom || null,
-      params: params || {},
-      symbol,
-      exchange: exchange || 'US',
-      start_date,
-      end_date,
-      initial_cash: capital.value,
-      seniq_data: seniqData,
-    },
-  }));
+  sendStore(res, await runBacktest(req.body || {}));
 });
 
 // ─── SenIQ presets + the with/without-SenIQ comparison ───────
@@ -153,7 +141,12 @@ router.post('/signals', gate(heavyLimiter), async (req, res) => {
   if (!strategy && !custom) {
     return res.status(400).json({ error: 'provide either strategy (registry name) or custom (Builder spec)' });
   }
-  const symbols = cleanSymbols((req.body || {}).symbols);
+  // More than the limit is refused, as on /mcp: the list used to be cut to five without a word.
+  const asked = (req.body || {}).symbols;
+  if (Array.isArray(asked) && asked.length > MAX_WATCH_SYMBOLS) {
+    return res.status(400).json({ error: `At most ${MAX_WATCH_SYMBOLS} symbols a call; this one has ${asked.length}.` });
+  }
+  const symbols = cleanSymbols(asked);
   if (!symbols.length) {
     return res.status(400).json({ error: `symbols is required — up to ${MAX_WATCH_SYMBOLS} of [{"symbol":"NVDA","exchange":"US"}]` });
   }
@@ -184,7 +177,7 @@ router.get('/paper', gate(lightLimiter), async (req, res) => {
 });
 
 // ─── GET /v1/paper/:id/state — replay deploy→now (read-only) ─
-router.get('/paper/:id/state', gate(heavyLimiter), async (req, res) => {
+router.get('/paper/:id/state', paperId, gate(heavyLimiter), async (req, res) => {
   const row = await queryOne(
     'SELECT * FROM paper_deployments WHERE id = $1 AND user_id = $2', [req.params.id, req.apiCtx.userId]);
   if (!row) return res.status(404).json({ error: 'deployment not found' });
@@ -196,7 +189,7 @@ router.get('/paper/:id/state', gate(heavyLimiter), async (req, res) => {
 });
 
 // ─── GET /v1/paper/:id/ledger — recorded fills and daily values (no engine call) ─
-router.get('/paper/:id/ledger', gate(lightLimiter), async (req, res) => {
+router.get('/paper/:id/ledger', paperId, gate(lightLimiter), async (req, res) => {
   const row = await queryOne(
     'SELECT * FROM paper_deployments WHERE id = $1 AND user_id = $2', [req.params.id, req.apiCtx.userId]);
   if (!row) return res.status(404).json({ error: 'deployment not found' });
@@ -206,19 +199,7 @@ router.get('/paper/:id/ledger', gate(lightLimiter), async (req, res) => {
 // ─── POST /v1/walk-forward — out-of-sample robustness check ──
 // Body: the /v1/backtest body plus n_splits? (2–12, default 4) and scheme? (anchored | rolling).
 router.post('/walk-forward', gate(heavyLimiter), async (req, res) => {
-  const b = req.body || {};
-  if ((!b.strategy && !b.custom) || !b.symbol || !b.start_date || !b.end_date) {
-    return res.status(400).json({ error: 'strategy (or custom), symbol, start_date and end_date are required' });
-  }
-  passthrough(res, await callService('/api/walk-forward', {
-    method: 'POST',
-    body: {
-      strategy: b.strategy || null, custom: b.custom || null, params: b.params || {},
-      symbol: b.symbol, exchange: b.exchange || 'US', start_date: b.start_date, end_date: b.end_date,
-      n_splits: Number(b.n_splits) || 4, scheme: b.scheme || 'anchored',
-      seniq_data: b.custom ? await seniqDataIfNeeded(b.custom, b.symbol) : null,
-    },
-  }));
+  sendStore(res, await runWalkForward(req.body || {}));
 });
 
 // ─── Writes — only for keys created with the write permission ──
@@ -227,8 +208,6 @@ function requireWrite(req, res, next) {
   if (req.apiCtx.canWrite) return next();
   res.status(403).json({ error: 'This API key is read-only — create a key with write access in Profile → API Access.' });
 }
-const sendStore = (res, out, okStatus = 200) =>
-  (out.ok ? res.status(okStatus).json(out.data) : res.status(out.status).json({ error: out.error }));
 
 router.post('/strategies/saved', gate(lightLimiter), requireWrite, async (req, res) => {
   sendStore(res, await saveStrategy(req.apiCtx.userId, req.body || {}), 201);
@@ -236,7 +215,7 @@ router.post('/strategies/saved', gate(lightLimiter), requireWrite, async (req, r
 router.post('/paper', gate(lightLimiter), requireWrite, async (req, res) => {
   sendStore(res, await deployPaper(req.apiCtx.userId, req.body || {}), 201);
 });
-router.post('/paper/:id/stop', gate(lightLimiter), requireWrite, async (req, res) => {
+router.post('/paper/:id/stop', paperId, gate(lightLimiter), requireWrite, async (req, res) => {
   sendStore(res, await stopPaper(req.apiCtx.userId, req.params.id));
 });
 

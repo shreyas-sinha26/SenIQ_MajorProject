@@ -40,6 +40,24 @@ function flattenDetail(data) {
     : data.detail;
 }
 
+/**
+ * The engine's catalog as SenIQ gives it out. Each built-in strategy keeps what describes it
+ * and what runs it; the engine's marketplace fields (capital bands, a provider block with
+ * "deployed_by" and "algos_in_market") describe a product SenIQ is not and are left out.
+ * With `settings: false` (a plan that gets the list and descriptions only) the settings and
+ * backtest defaults go too. The Builder's vocabulary is passed on as it is. Pure.
+ */
+const CATALOG_FIELDS = ['name', 'version', 'label', 'description', 'category', 'style', 'trading_style', 'tags'];
+function shapeCatalog(data, { settings = true } = {}) {
+  const strategies = ((data && data.strategies) || []).map((e) => {
+    const out = {};
+    for (const key of CATALOG_FIELDS) if (e[key] !== undefined) out[key] = e[key];
+    if (settings) { out.params = e.params || []; out.backtest_defaults = e.backtest_defaults || {}; }
+    return out;
+  });
+  return { ...(data || {}), strategies, ...(settings ? {} : { settings_hidden: true }) };
+}
+
 // The markets the engine can price. NASDAQ / NYSE / AMEX are accepted as other names for US.
 const EXCHANGES = ['US', 'NASDAQ', 'NYSE', 'AMEX', 'NSE', 'BSE', 'CRYPTO', 'COMMODITY'];
 const EXCHANGES_SHOWN = 'US, NSE, BSE, CRYPTO or COMMODITY';
@@ -74,6 +92,20 @@ function plainEngineError(detail) {
     return `The price data for ${m[1]} has a faulty bar on ${m[2]}. Try a range that ends before that date.`;
   }
   if (/too short for \d+ splits/.test(d)) return 'That date range is too short for the robustness check. Use a longer one.';
+  if ((m = /invalid literal for int\(\) with base 10: '([^']*)'/.exec(d))) return `A setting that must be a whole number was given "${m[1].slice(0, 30)}".`;
+  if ((m = /could not convert string to float: '([^']*)'/.exec(d))) return `A setting that must be a number was given "${m[1].slice(0, 30)}".`;
+  if ((m = /^(start_date|end_date|trade_from): Input should be a valid date/.exec(d))) return `${m[1]} must be a date written YYYY-MM-DD.`;
+  if ((m = /^n_splits: /.exec(d))) return 'n_splits must be a whole number from 2 to 12.';
+  if (/fast( period)? must be < slow/i.test(d)) return 'The fast period must be shorter than the slow period.';
+  if (/slow period must be < trend period/.test(d)) return 'The slow period must be shorter than the trend period.';
+  if (/require 0 < lower < upper < 100/.test(d)) return 'The lower level must be below the upper level, and both between 0 and 100.';
+  // A Builder spec the engine turned down: its own field paths, in the Builder's words.
+  if (/^invalid strategy spec: /.test(d)) {
+    return 'This strategy cannot run yet: ' + d.replace(/^invalid strategy spec: /, '')
+      .replace(/\bentry\.all: must be a non-empty list\b/g, 'the entry rule has no conditions')
+      .replace(/\bexit\.any: must be a non-empty list\b/g, 'the exit rule has no conditions')
+      .replace(/\bfactors: must be a non-empty list\b/g, 'it has no indicators');
+  }
   if ((m = /^interval '([^']*)' not supported/.exec(d))) return `The interval "${m[1]}" is not supported.`;
   return d;
 }
@@ -133,13 +165,47 @@ function checkSymbols(raw) {
   if (raw.length > MAX_WATCH_SYMBOLS) return { ok: false, error: `A watchlist holds at most ${MAX_WATCH_SYMBOLS} symbols; this one has ${raw.length}.` };
   const symbols = [];
   for (const entry of raw) {
-    const symbol = String((entry && entry.symbol) || '').trim().toUpperCase();
-    const exchange = String((entry && entry.exchange) || 'US').trim().toUpperCase();
+    // An entry may be written the way the page shows it: "NVDA" or "RELIANCE:NSE".
+    const [typedSymbol, typedMarket] = typeof entry === 'string' ? entry.split(':') : [entry && entry.symbol, entry && entry.exchange];
+    const symbol = String(typedSymbol || '').trim().toUpperCase();
+    const exchange = String(typedMarket || 'US').trim().toUpperCase();
     if (!SYMBOL.test(symbol)) return { ok: false, error: `"${symbol.slice(0, 30) || '(empty)'}" does not look like a symbol.` };
     if (!isExchange(exchange)) return { ok: false, error: `Unknown market "${exchange.slice(0, 20)}" for ${symbol}. Use ${EXCHANGES_SHOWN}.` };
+    if (symbols.some((s) => s.symbol === symbol && s.exchange === exchange)) return { ok: false, error: `${symbol} is on the watchlist twice.` };
     symbols.push({ symbol, exchange });
   }
   return { ok: true, symbols };
+}
+
+/**
+ * What a one-off run (backtest, robustness check, comparison) is asked to run on, checked
+ * before the engine is: a symbol, a known market, and two dates. `<img src=x>` used to go to
+ * the price lookup, and a bad date came back in the engine's own words. Pure.
+ * → { ok: true, symbol, exchange } | { ok: false, error }
+ */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const isIsoDate = (x) => typeof x === 'string' && ISO_DATE.test(x) && !Number.isNaN(Date.parse(x)) && new Date(x).toISOString().slice(0, 10) === x;
+function checkRun({ symbol, exchange, start_date, end_date } = {}) {
+  const sym = typeof symbol === 'string' ? symbol.trim().toUpperCase() : '';
+  if (!SYMBOL.test(sym)) return { ok: false, error: `"${String(symbol ?? '').slice(0, 30) || '(empty)'}" does not look like a symbol.` };
+  const market = exchange == null || exchange === '' ? 'US' : String(exchange).trim().toUpperCase();
+  if (!isExchange(market)) return { ok: false, error: `Unknown market "${market.slice(0, 20)}". Use ${EXCHANGES_SHOWN}.` };
+  for (const [name, value] of [['start_date', start_date], ['end_date', end_date]]) {
+    if (!isIsoDate(value)) return { ok: false, error: `${name} must be a date written YYYY-MM-DD.` };
+  }
+  if (end_date < start_date) return { ok: false, error: 'The end date is before the start date.' };
+  return { ok: true, symbol: sym, exchange: market };
+}
+
+/**
+ * The robustness check's number of folds: absent → 4; otherwise a whole number from 2 to 12.
+ * 0 and "abc" used to become 4 without a word. Pure. → { ok, value } | { ok: false, error }
+ */
+function parseSplits(raw) {
+  if (raw == null || raw === '') return { ok: true, value: 4 };
+  const n = typeof raw === 'number' ? raw : (typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN);
+  if (!Number.isInteger(n) || n < 2 || n > 12) return { ok: false, error: 'n_splits must be a whole number from 2 to 12.' };
+  return { ok: true, value: n };
 }
 
 // pg DATE columns come back as JS Dates at LOCAL midnight; format in local
@@ -197,7 +263,7 @@ async function replayPaper(row) {
 }
 
 module.exports = {
-  callService, flattenDetail, engineFailure, plainEngineError, ENGINE_OFFLINE, ENGINE_FAILED,
-  cleanSymbols, checkSymbols, isExchange, EXCHANGES, EXCHANGES_SHOWN, SYMBOL,
+  callService, flattenDetail, shapeCatalog, engineFailure, plainEngineError, ENGINE_OFFLINE, ENGINE_FAILED,
+  cleanSymbols, checkSymbols, checkRun, parseSplits, isIsoDate, isExchange, EXCHANGES, EXCHANGES_SHOWN, SYMBOL,
   parseCapital, CAPITAL, iso, replayPaper, settleEmptyReplay, MAX_WATCH_SYMBOLS, WARMUP_DAYS,
 };
