@@ -1854,3 +1854,39 @@ body input::placeholder, body textarea::placeholder { color: #94A3B8; }
 .ipo-add { background: none; border: 1px solid var(--glass-brd); border-radius: 999px; padding: 1px 8px; font-size: .68rem; font-weight: 600; color: var(--royal); cursor: pointer; font-family: inherit; }
 .ipo-add:hover { background: rgba(30,64,175,.08); }
 .ipo-add:disabled { opacity: .5; cursor: default; }
+
+/* ═══ Portfolio table and dialogs: what the QA pass on v1.17 found ═══ */
+/* What the user holds, under the holding's name. */
+.ht-position { font-size: .68rem; color: var(--muted); margin-top: 2px; white-space: nowrap; font-family: var(--mono); }
+.ht-position .muted { color: var(--text-muted); }
+/* A dialog's own refusal, shown inside it. */
+.form-error { font-size: .78rem; color: var(--red); margin: 10px 0 0; line-height: 1.4; }
+/* Three boxes in a row keep their labels on one line, so the boxes stay level. */
+.form-row { align-items: flex-end; }
+.form-row .form-group label { white-space: nowrap; }
+/* The row's buttons appear on hover. A screen with no hover never showed them, and neither
+   did the keyboard: there they are always drawn. */
+@media (hover: none) { .ht-remove, .ht-info { opacity: 1; } }
+.ht-remove:focus-visible, .ht-info:focus-visible { opacity: 1; outline: 2px solid var(--electric); }
+@media (max-width: 720px) {
+  /* The buttons stay at the right edge of the screen while the table scrolls under them. */
+  .holdings-tbl .ht-actions { position: sticky; right: 0; background: var(--bg-card); box-shadow: -8px 0 8px -8px rgba(10,37,64,.18); }
+  .holdings-tbl tr.row-active .ht-actions { background: #F3F6FC; }
+  /* The widest column gives way; its story is one tap away behind the score. */
+  .holdings-tbl th:nth-child(5), .holdings-tbl td:nth-child(5):not([colspan]) { display: none; }
+  .holdings-tbl th, .holdings-tbl td { padding-left: 10px; padding-right: 10px; }
+  /* The title keeps its line; the search box and the Add button take the next one. */
+  .portfolio-section .section-header { flex-wrap: wrap; gap: 10px; }
+  .portfolio-controls { width: 100%; }
+  .portfolio-controls .ticker-search { flex: 1; min-width: 0; }
+}
+@media (max-width: 1023px) {
+  /* The tab strip scrolls sideways with its scrollbar hidden: a fade at the right edge says
+     there is more, and the last tab can still be scrolled clear of it. */
+  .main-nav { padding-right: 28px; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+}
+/* A reading kept on screen after a fresh one failed: dimmed, with a line saying so. */
+.stale-reading { opacity: .5; }
+.stale-note { color: var(--amber); }
+#bt-notes .bt-coverage { margin-bottom: 10px; }
+#bt-notes .pos { color: var(--positive); } #bt-notes .neg { color: var(--negative); }

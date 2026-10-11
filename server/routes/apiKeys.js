@@ -33,10 +33,15 @@ function rowToJson(r) {
   };
 }
 
-// GET /api/keys — the user's keys (active + revoked, newest first).
+// GET /api/keys — the user's keys, newest first: the active ones, and those revoked in the
+// last REVOKED_SHOWN_DAYS. A revoked key used to stay in the list for good; the row itself
+// is kept (it is the record of the key), only the list stops showing it.
+const REVOKED_SHOWN_DAYS = 30;
 router.get('/', async (req, res) => {
   const rows = await query(
-    'SELECT * FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
+    `SELECT * FROM api_keys WHERE user_id = $1
+        AND (revoked_at IS NULL OR revoked_at > now() - ($2 || ' days')::interval)
+      ORDER BY created_at DESC`, [req.user.id, String(REVOKED_SHOWN_DAYS)]);
   res.json({ keys: rows.map(rowToJson), max_active: MAX_ACTIVE_KEYS });
 });
 

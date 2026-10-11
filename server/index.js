@@ -147,6 +147,9 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// Browsers and feed readers ask for /favicon.ico without being told to; the icon is an SVG.
+app.get('/favicon.ico', (req, res) => res.redirect(301, '/favicon.svg'));
+
 // ─── Marketing Landing Page ─────────────────────────────────
 // Root serves the public marketing page; the app itself lives at /app.
 app.get('/', (req, res) => {

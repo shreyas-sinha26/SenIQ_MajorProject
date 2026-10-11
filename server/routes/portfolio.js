@@ -225,6 +225,37 @@ router.get('/:ticker/brief', async (req, res) => {
   }
 });
 
+// ─── PUT /api/portfolio/:ticker ──────────────────────────────
+// Change a holding's quantity and cost per unit, the two figures typed when it was added.
+// Body: { quantity?, cost_basis? }; a field that is sent is set (null or '' clears it), one
+// that is left out is kept. Before this the only way to correct either was to remove the
+// holding and add it again, which also restarts its monitoring.
+router.put('/:ticker', async (req, res) => {
+  try {
+    const ticker = req.params.ticker.toUpperCase();
+    const body = req.body || {};
+    const has = (key) => Object.hasOwn(body, key);
+    if (!has('quantity') && !has('cost_basis')) return res.status(400).json({ error: 'Send quantity, cost_basis or both' });
+    const quantity = has('quantity') ? parseOptionalNumber(body.quantity) : undefined;
+    const costBasis = has('cost_basis') ? parseOptionalNumber(body.cost_basis) : undefined;
+    if (quantity === INVALID) return res.status(400).json({ error: 'Quantity must be a number from 0 to 1,000,000,000,000' });
+    if (costBasis === INVALID) return res.status(400).json({ error: 'Cost basis must be a number from 0 to 1,000,000,000,000' });
+    const row = await queryOne(
+      `UPDATE portfolio
+          SET quantity = CASE WHEN $3 THEN $4::numeric ELSE quantity END,
+              cost_basis = CASE WHEN $5 THEN $6::numeric ELSE cost_basis END
+        WHERE user_id = $1 AND ticker = $2
+        RETURNING ticker, quantity, cost_basis`,
+      [req.user.id, ticker, has('quantity'), quantity ?? null, has('cost_basis'), costBasis ?? null]
+    );
+    if (!row) return res.status(404).json({ error: 'Asset not in portfolio' });
+    res.json({ holding: { ticker: row.ticker, quantity: row.quantity == null ? null : Number(row.quantity), cost_basis: row.cost_basis == null ? null : Number(row.cost_basis) } });
+  } catch (err) {
+    console.error('Update asset error:', err);
+    res.status(500).json({ error: 'Failed to update asset' });
+  }
+});
+
 // ─── DELETE /api/portfolio/:ticker ───────────────────────────
 router.delete('/:ticker', async (req, res) => {
   try {
