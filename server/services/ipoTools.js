@@ -20,6 +20,7 @@
 
 const { QA, IPO_WATCH } = require('../config');
 const { ScopeError } = require('./qaTools');
+const { shortDay, daySpan } = require('./answerText');
 
 // Lazy, like qaTools' queries: the calendar modules open the database when loaded.
 const watch = () => require('./ipoWatch');
@@ -40,6 +41,33 @@ const lean = (obj) => Object.fromEntries(Object.entries(obj).filter(([, v]) => v
 
 // ── Pure helpers ──
 
+/**
+ * Where an issue is in its dates, in the words an answer uses, so every answer gives the
+ * same ones and no more: the bidding days for what is coming, the listing day for what has
+ * listed. Pure.
+ */
+function datesText(r, today = null) {
+  const d = (iso) => shortDay(iso, today);
+  if (r.market === 'US') {
+    if (r.stage === 'listed') return d(r.first_trade_date || r.listing_date) ? `listed ${d(r.first_trade_date || r.listing_date)}` : null;
+    if (r.stage === 'announced') return d(r.status_date) ? `filed ${d(r.status_date)}` : null;
+    if (!d(r.listing_date)) return null;
+    return `${today && r.stage === 'upcoming' && r.listing_date < today ? 'was expected' : 'expected'} ${d(r.listing_date)}`;
+  }
+  if (r.stage === 'open') return d(r.close_date) ? `bidding open until ${d(r.close_date)}` : 'bidding open';
+  if (r.stage === 'upcoming') return r.open_date ? `bidding ${daySpan(r.open_date, r.close_date, today)}` : null;
+  if (r.stage === 'closed') return [d(r.close_date) && `bidding closed ${d(r.close_date)}`, d(r.listing_date) && `lists ${d(r.listing_date)}`].filter(Boolean).join(', ') || null;
+  if (r.stage === 'listed') return d(r.listing_date) ? `listed ${d(r.listing_date)}` : null;
+  return null;
+}
+
+// Money as an answer says it: rupees and crore for India, dollars and millions for the US.
+// Written out here so every answer gives a price and a size the same way. Pure.
+const priceText = (v, us) => (v == null ? null : `${us ? '$' : '₹'}${num(v)}`);
+const sizeText = (r) => (r.market === 'US'
+  ? (r.issue_size_usd == null ? null : `$${num(r.issue_size_usd / 1e6, 1)} million`)
+  : (r.issue_size_cr == null ? null : `₹${num(r.issue_size_cr)} crore`));
+
 // A question about public issues, whatever companies it names. Such a question skips the
 // holdings pre-check in qa.js: "the Jio IPO" is not a question about Reliance shares.
 const IPO_WORDS = /\b(ipos?|gmp|grey[- ]market|public (issue|offer)\w*)\b/i;
@@ -52,15 +80,21 @@ const BOARDS = ['mainboard', 'sme'];
 // In the order a reader wants them: what can be bid for now, then what is coming.
 const STAGES = ['open', 'upcoming', 'closed', 'announced', 'listed', 'withdrawn'];
 const NOT_YET_LISTED = ['open', 'upcoming', 'closed', 'announced'];
+// What get_ipo_calendar shows when no stage is asked for: what can be bid for, and what is next.
+const AHEAD = ['open', 'upcoming'];
+// The stages at which an issue can carry a subscription figure or a grey market premium.
+const WITH_DEMAND = ['open', 'upcoming', 'closed'];
 const GAIN_ENDS = 3;   // listing gains: this many from the top, and from the bottom
 
 /**
- * One calendar row → the card Ask sees. Money is in the unit a reader says it in (₹ crore,
- * $ million), so an answer never has to convert. `tone` is the issue's news tone when it has
- * been read; `full` adds what only the one-issue view needs, and leaves the news to its own
- * block there. Pure.
+ * One calendar row → the card Ask sees. Money is text in the unit a reader says it in
+ * ("₹271", "₹712.31 crore", "$183.3 million"), so an answer never converts and every answer
+ * writes it the same way. `tone` is the issue's news tone when it has been read; `full` adds
+ * what only the one-issue view needs (each date on its own, the price band), and leaves the
+ * news to its own block there. `today` marks a US issue still called expected after its
+ * date, and lets a date of this year go without the year. Pure.
  */
-function issueCard(r, { tone = null, full = false } = {}) {
+function issueCard(r, { tone = null, full = false, today = null } = {}) {
   const us = r.market === 'US';
   const returns = lean({ listing_day: r.ret_listing_day_pct, week_1: r.ret_1w_pct, month_1: r.ret_1m_pct, month_3: r.ret_3m_pct });
   return lean({
@@ -68,12 +102,11 @@ function issueCard(r, { tone = null, full = false } = {}) {
     us_status: us ? r.source_status : null,          // filed | expected | priced | withdrawn, as the source states it
     spac: r.is_spac || null,
     symbol: r.symbol,
-    open_date: r.open_date, close_date: r.close_date, listing_date: r.listing_date,
-    first_trade_date: r.first_trade_date, status_date: r.status_date,
-    currency: us ? 'USD' : 'INR',
-    price: r.price_high, price_low: r.price_low,
-    size_cr: us ? null : r.issue_size_cr,
-    size_usd_m: us && r.issue_size_usd != null ? num(r.issue_size_usd / 1e6, 1) : null,
+    dates: datesText(r, today),
+    // The source still says "expected" and the calendar has not been refreshed since.
+    listing_date_passed: Boolean(today && r.stage === 'upcoming' && r.listing_date && r.listing_date < today),
+    price: priceText(r.price_high, us),
+    size: sizeText(r),
     subscription: r.sub_total == null ? null
       : lean({ total_x: r.sub_total, qib_x: r.sub_qib, nii_x: r.sub_nii, retail_x: r.sub_retail, as_of: r.sub_on }),
     // Already null when the reading is stale or the issue has listed (gmpView): Ask shows
@@ -85,6 +118,9 @@ function issueCard(r, { tone = null, full = false } = {}) {
     returns_pct: Object.keys(returns).length ? returns : null,
     news: r.stories && !full ? lean({ stories: r.stories, tone: tone && tone.label, tone_score: tone && tone.score, stories_read: tone && tone.stories }) : null,
     ...(full ? lean({
+      open_date: r.open_date, close_date: r.close_date, listing_date: r.listing_date,
+      first_trade_date: r.first_trade_date, status_date: r.status_date,
+      price_band: r.price_low != null && r.price_low !== r.price_high ? `${priceText(r.price_low, us)} to ${priceText(r.price_high, us)}` : null,
       exchange: r.exchange, allotment_date: r.allotment_date, lot_size: r.lot_size,
       fresh_issue_cr: r.fresh_issue_cr, offer_for_sale_cr: r.ofs_cr, shares: r.shares,
     }) : {}),
@@ -112,20 +148,33 @@ function orderIssues(rows) {
  * The comparisons spelled out, each by ONE recorded figure, so "most subscribed" is read
  * from the result and not worked out — and so nothing ranks issues "overall". Listing gains
  * come with both ends and a count of how many issues gained: the best few alone would read
- * as "IPOs go up". Pure.
+ * as "IPOs go up". `demand` = the issues the subscription and premium orderings read, when
+ * that is more than the ones shown (bidding that has closed is still the latest figure).
+ * Size is ordered within a market, never across two currencies. Pure.
  */
-function orderings(rows, top = QA.IPO_RANK_TOP) {
-  const label = (r) => `${r.name}${r.board === 'sme' ? ' (SME)' : ''}`;
-  const sorted = (field) => rows.filter((r) => r[field] != null).sort((a, b) => b[field] - a[field]);
+function orderings(rows, { top = QA.IPO_RANK_TOP, demand = rows, today = null } = {}) {
+  const marks = (r) => [r.board === 'sme' ? 'SME' : null, r.stage === 'closed' ? 'bidding closed' : null].filter(Boolean);
+  const label = (r) => `${r.name}${marks(r).length ? ` (${marks(r).join(', ')})` : ''}`;
+  const sortedOf = (list, field) => list.filter((r) => r[field] != null).sort((a, b) => b[field] - a[field]);
+  const sorted = (field) => sortedOf(rows, field);
   const line = (list, text) => (list.length ? list.map((r, i) => `${i + 1}. ${label(r)} ${text(r)}`).join('; ') : null);
+  const bySize = (market, field) => line(sortedOf(rows.filter((r) => r.market === market && AHEAD.includes(r.stage)), field).slice(0, top), sizeText);
+  // What comes first: an Indian issue by the day bidding opens, a US one by its expected listing.
+  const next = (r) => (r.market === 'US' ? r.listing_date : r.open_date);
+  const coming = rows.filter((r) => r.stage === 'upcoming' && next(r) && !(today && next(r) < today))
+    .sort((a, b) => next(a).localeCompare(next(b)));
   const gains = sorted('listing_gain_pct');
-  const gainText = (r) => `${r.listing_gain_pct}%, listed ${r.first_trade_date || r.listing_date}`;
+  const d = (iso) => shortDay(iso, today);
+  const gainText = (r) => `${r.listing_gain_pct}%, listed ${d(r.first_trade_date || r.listing_date)}`;
   const count = (test) => gains.filter((r) => test(r.listing_gain_pct)).length;
   const mid = gains.length >> 1;
   const median = gains.length % 2 ? gains[mid].listing_gain_pct : gains.length ? (gains[mid - 1].listing_gain_pct + gains[mid].listing_gain_pct) / 2 : null;
   return lean({
-    by_subscription: line(sorted('sub_total').slice(0, top), (r) => `${r.sub_total}x, as of ${r.sub_on}`),
-    by_gmp_pct: line(sorted('gmp_pct').slice(0, top), (r) => `${r.gmp_pct}% of the issue price, unofficial, as of ${dayOf(r.gmp_at)}`),
+    by_subscription: line(sortedOf(demand, 'sub_total').slice(0, top), (r) => `${r.sub_total}x, as of ${d(r.sub_on)}`),
+    by_gmp_pct: line(sortedOf(demand, 'gmp_pct').slice(0, top), (r) => `${r.gmp_pct}% of the issue price, unofficial, as of ${d(dayOf(r.gmp_at))}`),
+    by_size_india: bySize('IN', 'issue_size_cr'),
+    by_size_us: bySize('US', 'issue_size_usd'),
+    soonest: line(coming.slice(0, top), (r) => (r.market === 'US' ? `expected to list ${d(next(r))}` : `bidding opens ${d(next(r))}`)),
     listing_gains: gains.length ? `${gains.length} with a listing result: ${count((g) => g > 0)} above the issue price, ${count((g) => g < 0)} below, ${count((g) => g === 0)} at it; median ${num(median)}%` : null,
     highest_listing_gain: line(gains.slice(0, GAIN_ENDS), gainText),
     // Lowest first. Left out when the list above already holds every issue.
@@ -203,40 +252,48 @@ function newsBlock(news) {
 }
 
 const MARKET_NAMES = { IN: 'India', US: 'the US' };
+const MARKET_HEADS = { IN: 'India', US: 'US' };
+
+// One issue as a line of the no-model answer: what is on record, in the order Ask gives it. Pure.
+const digestRow = (i) => [i.name, i.market === 'IN' ? i.board : null, i.dates, i.price, i.size].filter(Boolean).join(' · ');
 
 /**
- * The no-model answer to an IPO question: counts by stage and the orderings, from a
- * get_ipo_calendar result. A data digest, not a reasoned answer. Pure.
+ * The no-model answer to an IPO question, from a get_ipo_calendar result: for each market what
+ * is open or coming up, one issue to a line, then the orderings. A data digest, not a reasoned
+ * answer. Pure.
  */
 function ipoDigest(cal) {
   const lines = [];
   for (const m of cal.markets) {
     const c = cal.counts[m] || {};
-    const ahead = NOT_YET_LISTED.filter((s) => c[s]).map((s) => `${c[s]} ${s}`);
-    lines.push(`IPO Watch, ${MARKET_NAMES[m] || m}: ${ahead.length ? ahead.join(', ') : 'nothing ahead of listing'}${c.listed ? `, ${c.listed} recently listed` : ''} (calendar refreshed ${cal.refreshed[m] || 'never'}).`);
+    const ahead = AHEAD.filter((s) => c[s]).map((s) => `${c[s]} ${s}`);
+    lines.push(`${MARKET_HEADS[m] || m}: ${ahead.length ? ahead.join(', ') : 'nothing open or coming up'} (calendar refreshed ${shortDay(cal.refreshed[m], cal.as_of) || 'never'}).`);
+    for (const i of cal.issues.filter((x) => x.market === m)) lines.push(digestRow(i));
   }
-  const next = cal.issues.find((i) => i.stage === 'open') || cal.issues.find((i) => i.stage === 'upcoming');
-  if (next) {
-    const dates = next.stage === 'open' ? `open until ${next.close_date || 'a date not on record'}` : `expected ${next.open_date || next.listing_date || 'on a date not on record'}`;
-    lines.push(`First in line: ${next.name} (${MARKET_NAMES[next.market] || next.market}), ${dates}.`);
-  }
+  if (cal.not_shown) lines.push(cal.not_shown.replace(/;.*$/, '.'));
   const o = cal.orderings || {};
-  if (o.by_subscription) lines.push(`By subscription: ${o.by_subscription}.`);
-  if (o.by_gmp_pct) lines.push(`By grey market premium: ${o.by_gmp_pct}.`);
-  lines.push('(Auto-generated from IPO Watch — turn on the AI writer for a fuller answer.) Educational only, not investment advice.');
-  return lines.join(' ');
+  const first = (ordering) => ordering.split('; ')[0].replace(/^1\. /, '');   // the rows above already list the rest
+  const compare = [
+    o.by_subscription && `Most subscribed: ${o.by_subscription}.`,
+    o.by_gmp_pct && `Grey market premium: ${o.by_gmp_pct}.`,
+    o.by_size_india && `Largest in India: ${first(o.by_size_india)}.`,
+    o.by_size_us && `Largest in the US: ${first(o.by_size_us)}.`,
+  ].filter(Boolean);
+  if (compare.length) lines.push('', ...compare);
+  lines.push('', '(Auto-generated from IPO Watch — turn on the AI writer for a fuller answer.) Educational only, not investment advice.');
+  return lines.join('\n');
 }
 
 // ── Tool definitions (appended to Ask's tools when IPO Watch is on — keep order stable for caching) ──
 const IPO_TOOLS = [
   {
     name: 'get_ipo_calendar',
-    description: 'Public issues (IPOs) on SenIQ\'s IPO Watch page — India (mainboard and SME) and the US. These are companies the user does NOT hold. Each issue has its stage (announced, upcoming, open, closed = bidding over and not yet listed, listed, withdrawn), dates, price and size, and where recorded: subscription (times bid for, with its date), grey market premium (unofficial, India only, with its date), how many news stories are linked and their tone, and for listed issues the listing gain and returns since. Also counts by stage and orderings by one figure each. With no stage it returns the issues not yet listed. Use for "which IPOs are open / coming up", "how do they compare", "which is most subscribed", "how did recent listings do".',
+    description: 'Public issues (IPOs) on SenIQ\'s IPO Watch page — India (mainboard and SME) and the US. These are companies the user does NOT hold. Each issue has its stage (announced, upcoming, open, closed = bidding over and not yet listed, listed, withdrawn), dates, price and size, and where recorded: subscription (times bid for, with its date), grey market premium (unofficial, India only, with its date), how many news stories are linked and their tone, and for listed issues the listing gain and returns since. Also counts by stage and orderings by one figure each (subscription, grey market premium, size within a market, what comes soonest). With no stage it returns the issues open for bidding and coming up; pass a stage for the others (closed, announced, listed, withdrawn). The subscription and premium orderings also read issues whose bidding has closed. price is the top of the price band. Use for "which IPOs are open / coming up", "how do they compare", "which is most subscribed", "how did recent listings do".',
     input_schema: {
       type: 'object',
       properties: {
         market: { type: 'string', enum: MARKETS, description: 'Optional: IN (India) or US. Default: both.' },
-        stage: { type: 'string', enum: STAGES, description: 'Optional: one stage. Default: every issue not yet listed.' },
+        stage: { type: 'string', enum: STAGES, description: 'Optional: one stage. Default: open and upcoming.' },
         board: { type: 'string', enum: BOARDS, description: 'Optional, India only: mainboard or sme. Default: both.' },
       },
     },
@@ -254,7 +311,18 @@ const IPO_TOOLS = [
   },
 ];
 
-const CALENDAR_NOTE = 'price = top of the price band. subscription = times the shares on offer were bid for (qib institutions, nii high-net-worth), as of its date; a daily reading, not live. gmp = grey market premium per share: unofficial, not a forecast. gain_pct and returns_pct are over the issue price. tone_score: 0 to 1, 0.5 neutral. Each ordering uses one recorded figure; none is a rating. A market in `stale` was last refreshed over a day ago.';
+const CALENDAR_NOTE = 'subscription = times the shares on offer were bid for (qib institutions, nii high-net-worth), as of its date; a daily reading, not live. gmp = grey market premium per share: unofficial, not a forecast. gain_pct and returns_pct are over the issue price. tone_score: 0 to 1, 0.5 neutral. Each ordering uses one recorded figure; none is a rating. A market in `stale` was last refreshed over a day ago.';
+
+// How an answer from each tool is laid out, and how much it holds. Sent with the result, so
+// the rule arrives with the data it is for. No figures in either: a tool result is evidence
+// to the grounding check.
+const CALENDAR_SHAPE = 'Answer only what was asked. Asked for one figure (most subscribed, highest premium, largest, next to open): one or two sentences from the orderings, naming the issue, the figure and its date; when several issues tie, give them as rows. Asked which issues are open or coming up, or how they compare: a short heading for each market with its count, then one issue to a line as "name · board · dates · price · size", each field as the card gives it (five lines at most, in the order given; board for India only; nothing in brackets). Only if the question asks how they compare or which is better, add one line starting "Compare:" read from the orderings, about the issues shown, saying in a few words when none of them has a subscription figure yet. Asked how listings did: the listing_gains count in one sentence, then at most three issues from each end, one to a line as "name · gain · listing date". When stale_line is present, give it as written, once, on a line of its own after the rows. Leave out: news tone, unless it is positive or negative or the question is about news; issues at a stage the question did not ask about; what a term means; how to see more.';
+const DETAIL_SHAPE = 'Answer only what was asked. Asked about the issue in general: at most four short lines, each starting with its label: "Dates:" (bidding and listing), "Price and size:", "Demand:" (subscription with its date, the premium called unofficial with its date, or that none is recorded yet), "News:" (the tone and how many stories were read, and nothing more). Asked about its news: the tone and how many stories were read in one sentence, then the two latest headlines, one to a line as "outlet, date · headline". Asked for one fact (when it lists, the lot size): one sentence. When stale_line is present, give it as written, once, on a line of its own at the end. Leave out the allotment date, the lot size, the stage, the user\'s own holdings and anything not recorded, unless asked.';
+
+// "India calendar last refreshed 9 Oct." for each market whose calendar is over a day old. Pure.
+const staleLine = (markets, refreshedOn, today) => (markets.length
+  ? markets.map((m) => `${MARKET_HEADS[m] || m} calendar last refreshed ${shortDay(refreshedOn[m], today) || 'at a time not on record'}.`).join(' ')
+  : null);
 
 // ── Executors ──
 
@@ -282,22 +350,25 @@ const IPO_EXECUTORS = {
     const b = oneOf(board, BOARDS, 'board', (x) => x.toLowerCase());
     const markets = m ? [m] : b ? ['IN'] : MARKETS;   // a board is India's
     const { today, rows } = await loadIssues(markets, { board: b || 'all' });
-    const matching = orderIssues(rows.filter((r) => (s ? r.stage === s : NOT_YET_LISTED.includes(r.stage))));
+    const matching = orderIssues(rows.filter((r) => (s ? r.stage === s : AHEAD.includes(r.stage))));
     const issues = await Promise.all(matching.slice(0, QA.IPO_MAX_ISSUES).map(async (r) => {
       const news = r.stories ? await arc().storiesFor(r.id) : null;   // the tone the page shows for it
-      return issueCard(r, { tone: news && news.tone });
+      return issueCard(r, { tone: news && news.tone, today });
     }));
     const ages = await Promise.all(markets.map((x) => watch().calendarAge(x)));
     const stale = markets.filter((_, i) => ages[i].stale);
+    const refreshed = Object.fromEntries(markets.map((x, i) => [x, dayOf(ages[i].updatedAt)]));
     return fitIssues({
       as_of: today,
       markets,
-      showing: s || 'not yet listed',
+      showing: s || 'open and upcoming',
       counts: stageCounts(rows),
-      refreshed: Object.fromEntries(markets.map((x, i) => [x, dayOf(ages[i].updatedAt)])),
-      ...(stale.length ? { stale } : {}),
-      orderings: orderings(matching),
+      refreshed,
+      ...(stale.length ? { stale, stale_line: staleLine(stale, refreshed, today) } : {}),
+      // With no stage asked for, demand is read across everything that has taken bids or is about to.
+      orderings: orderings(matching, { today, demand: s ? matching : rows.filter((r) => WITH_DEMAND.includes(r.stage)) }),
       note: CALENDAR_NOTE,
+      answer_shape: CALENDAR_SHAPE,
       issues,
     }, matching.length);
   },
@@ -328,11 +399,12 @@ const IPO_EXECUTORS = {
     return {
       as_of: today,
       refreshed: dayOf(age.updatedAt),
-      ...(age.stale ? { stale: true } : {}),
-      issue: issueCard(r, { full: true }),
+      ...(age.stale ? { stale: true, stale_line: staleLine([r.market], { [r.market]: dayOf(age.updatedAt) }, today) } : {}),
+      issue: issueCard(r, { full: true, today }),
       ...(gmpDays.length > 1 ? { gmp_by_day: gmpDays } : {}),
       news: newsBlock(news),
       note: `${CALENDAR_NOTE} News tone is a reading of headlines about the issue, not a rating of the company.`,
+      answer_shape: DETAIL_SHAPE,
     };
   },
 };
@@ -355,11 +427,12 @@ IPO Watch (this account has the IPO Watch section):
 - Grey market premium (GMP) is an unofficial figure from one aggregator, for Indian issues only. Each time you give one, call it unofficial and give its date. It is not a forecast: never work out an expected listing price or gain from it.
 - News tone is a reading of the headlines about an issue, not a rating of the company; say how many stories it rests on. US issues have no subscription or GMP figures.
 - A listing gain or a return after listing is what happened to that issue. Never present it as what another issue will do.
-- If a result marks a market as stale, say so and give the date its calendar was last refreshed; an issue whose listing date has already passed is not "expected" or "upcoming" — say the calendar has not been refreshed since. If a result says issues were not shown, say how many.
-- A comparison may run to eight sentences. Name at most four issues and say how many others there are. The user cannot apply for an issue or add it to the portfolio before it lists; the full table is on the IPO Watch page.
+- If a result has a stale_line, give it once, as written, and do not say the same in your own words: that calendar is over a day old. An issue marked listing_date_passed is not "expected" or "upcoming": say its date has passed. If a result says issues were not shown, say how many in a few words.
+- The user cannot apply for an issue or add it to the portfolio before it lists; the full table is on the IPO Watch page.
 - End every answer that uses these tools, and no other answer, with: "Educational only, not investment advice."`;
 
 module.exports = {
   IPO_TOOLS, IPO_EXECUTORS, IPO_PROMPT, MARKETS, BOARDS, STAGES,
   isIpoQuestion, issueCard, orderIssues, orderings, stageCounts, fitIssues, matchIssues, newsBlock, ipoDigest, ipoFallbackAnswer,
+  CALENDAR_SHAPE, DETAIL_SHAPE, shortDay, daySpan, datesText, staleLine,
 };

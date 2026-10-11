@@ -7,11 +7,17 @@
  *       (the one routing decision made before any model call), and self-tests the grader on
  *       a known-good and a known-bad answer. No database, no network, no model.
  *
- *   node eval/ask/run.js --run --yes-spend --max-usd 2 [--judge] [--reps 1] [--only id,id]
+ *   node eval/ask/run.js --report <run dir> [<earlier run dir>]
+ *       FREE, offline. Grades a stored run again with today's cases.json and prints each
+ *       answer's words and rows against the shape its case names; with a second run, the
+ *       earlier figures beside them. No database, no network, no model.
+ *
+ *   node eval/ask/run.js --run --yes-spend --max-usd 2 [--judge] [--reps 1] [--only id,id] [--tag tag,tag]
  *       PAID. Sends each case through the app's real entry point (answerQuestion) with the
  *       real model, grades it, and writes eval/ask/runs/<timestamp>/. Refuses to start
  *       without --yes-spend and stops once --max-usd is reached.
  *       --judge adds the rubric judge (a second, paid model call per case).
+ *       --tag keeps the cases carrying one of those tags (one tool's questions, say).
  *       Needs DATABASE_URL and a model key — AIROUTER_API_KEY (answers and judge go through
  *       the router) or ANTHROPIC_API_KEY (direct). Creates the fixture user
  *       (fixture.user_email in cases.json) and its holdings if they do not exist.
@@ -53,7 +59,7 @@ function fail(msg) {
 function check() {
   const { TOOLS, scopeCheck } = require(path.join(ROOT, 'server/services/qaTools'));
   const { STRATEGY_TOOLS } = require(path.join(ROOT, 'server/services/strategyTools'));
-  const { IPO_TOOLS } = require(path.join(ROOT, 'server/services/ipoTools'));
+  const { IPO_TOOLS, isIpoQuestion } = require(path.join(ROOT, 'server/services/ipoTools'));
   const { UNIVERSE } = require(path.join(ROOT, 'server/data/universe'));
   let bad = 0;
   const report = (ok, text) => { if (!ok) bad++; console.log(`  ${ok ? '✓' : '✗'} ${text}`); };
@@ -72,7 +78,9 @@ function check() {
   const held = new Set(doc.fixture.holdings.map((h) => h.ticker));
   const wrong = [];
   for (const c of doc.cases) {
-    const refused = scopeCheck(c.question, universe, held).refuse;
+    // As qa.js decides it: with IPO Watch on, a question about a public issue is passed on
+    // whatever company it names ("the HD Fire Protect IPO" is not about Home Depot's shares).
+    const refused = scopeCheck(c.question, universe, held).refuse && !isIpoQuestion(c.question);
     if (refused !== (c.expect.writer === 'scope')) wrong.push(`${c.id} (expected ${c.expect.writer}, pre-check ${refused ? 'refused' : 'passed it on'})`);
   }
   report(wrong.length === 0, `${doc.cases.length - wrong.length}/${doc.cases.length} route as expected`);
@@ -92,6 +100,9 @@ function check() {
   report(lib.gradeDeterministic(c, good).pass, 'known-good answer passes');
   for (const [name, run] of nulls) report(!lib.gradeDeterministic(c, run).pass, `known-bad fails: ${name}`);
   const scopeCase = doc.cases.find((x) => x.expect.writer === 'scope');
+  const shaped = { ...c, expect: { ...c.expect, shape: 's' } };
+  report(lib.gradeDeterministic(shaped, good, { s: { max_words: 40 } }).pass, 'an answer inside its shape passes');
+  report(!lib.gradeDeterministic(shaped, good, { s: { max_words: 5 } }).pass, 'known-bad fails: more words than its shape allows');
   report(lib.gradeDeterministic(scopeCase, { writer: 'scope', answer: 'not tracked', tools_used: [], grounding: null, evidence: [] }).pass, 'a correct scope refusal passes');
   report(lib.infraFailure(c, { writer: 'deterministic', guard: 'no_api_key' }) !== null, 'a degraded run is an infra error, not a wrong answer');
 
@@ -192,6 +203,26 @@ async function ensureFixture() {
   // The fixture's holdings are inserted directly, so its feed is computed here — otherwise a
   // new fixture has no ranked events and every "top events" case fails for the wrong reason.
   await require(path.join(ROOT, 'server/services/impactScoring')).recomputeImpactsForUser(Number(user.id));
+  // v2 only: the fixture's saved strategies and paper deployments, put in as the app stores
+  // them (a deployment holds a snapshot of its strategy). Nothing is added in v1 mode.
+  if (require(path.join(ROOT, 'server/config')).FEATURES.STRATEGIES) {
+    const stored = (s) => [s.custom ? 'custom' : 'registry', s.custom ? JSON.stringify(s.custom) : null, s.custom ? null : s.strategy, s.custom ? null : JSON.stringify(s.params || {})];
+    for (const s of f.strategies || []) {
+      await execute(
+        `INSERT INTO user_strategies (user_id, name, kind, spec, strategy_name, params, symbols)
+         SELECT $1, $2, $3, $4, $5, $6, $7 WHERE NOT EXISTS (SELECT 1 FROM user_strategies WHERE user_id = $1 AND name = $2)`,
+        [user.id, s.name, ...stored(s), JSON.stringify(s.symbols || [])]);
+    }
+    for (const dep of f.deployments || []) {
+      const s = (f.strategies || []).find((x) => x.name === dep.strategy);
+      if (!s) continue;
+      await execute(
+        `INSERT INTO paper_deployments (user_id, name, kind, spec, strategy_name, params, symbol, exchange, deployed_at, status, stopped_at)
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11::date
+          WHERE NOT EXISTS (SELECT 1 FROM paper_deployments WHERE user_id = $1 AND name = $2 AND symbol = $7 AND deployed_at = $9::date)`,
+        [user.id, s.name, ...stored(s), dep.symbol, dep.exchange || 'US', dep.deployed_at, dep.status || 'active', dep.stopped_at || null]);
+    }
+  }
   return Number(user.id);
 }
 
@@ -201,8 +232,9 @@ async function run() {
   if (!(maxUsd > 0)) fail('Set a spending ceiling: --max-usd N (for example --max-usd 2).');
   const reps = Math.max(1, Math.min(5, Number(opt('reps', 1)) || 1));
   const only = opt('only', '') ? new Set(opt('only', '').split(',')) : null;
+  const tagged = opt('tag', '') ? opt('tag', '').split(',') : null;
   const useJudge = flag('judge');
-  let cases = doc.cases.filter((c) => !only || only.has(c.id));
+  let cases = doc.cases.filter((c) => (!only || only.has(c.id)) && (!tagged || tagged.some((t) => c.tags.includes(t))));
   if (!cases.length) fail('No cases selected.');
 
   const config = require(path.join(ROOT, 'server/config'));
@@ -212,6 +244,13 @@ async function run() {
     cases = cases.filter((c) => !c.tags.includes('ipo'));
     console.log('  IPO Watch is off (IPO_WATCH=1 turns it on): the cases tagged "ipo" are left out.');
     if (!cases.length) fail('Only IPO cases were selected, and IPO Watch is off.');
+  }
+  // The strategy cases need the strategy tools, which Ask has only in v2 mode. Left out in v1
+  // for the same reason.
+  if (!config.FEATURES.STRATEGIES && cases.some((c) => c.tags.includes('strategy'))) {
+    cases = cases.filter((c) => !c.tags.includes('strategy'));
+    console.log('  Strategies are off (FEATURES_STRATEGIES=1 turns v2 mode on): the cases tagged "strategy" are left out.');
+    if (!cases.length) fail('Only strategy cases were selected, and strategies are off.');
   }
   // CLAUDE_REPORTS is hard-coded off in config.js. --yes-spend is the explicit decision to
   // spend, so it is switched on for THIS PROCESS ONLY; the app's own setting is untouched.
@@ -272,7 +311,8 @@ async function run() {
         id: c.id, rep, tags: c.tags, question: c.question,
         status: trace.stop_reason === 'max_tokens' ? 'truncated' : 'ok',
         writer: r.writer, tools_used: r.tools_used, answer: r.answer,
-        deterministic: lib.gradeDeterministic(c, runView),
+        deterministic: lib.gradeDeterministic(c, runView, doc.shapes),
+        words: lib.countWords(r.answer), rows: lib.countRows(r.answer),
         grounding: r.grounding,
         evidence: runView.evidence,
         model: trace.model, stop_reason: trace.stop_reason, rounds: trace.rounds, usage: trace.usage, cost_usd: cost,
@@ -333,6 +373,39 @@ async function judgeSelfTest() {
   process.exit(bad ? 1 : 0);
 }
 
-if (flag('run')) run().catch((e) => fail(e.stack || e.message));
+// ── --report (free, offline) ──
+const readRun = (dir) => {
+  const file = path.join(path.resolve(dir), 'results.jsonl');
+  if (!fs.existsSync(file)) fail(`No results.jsonl in ${dir}`);
+  return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+};
+
+function report() {
+  const i = args.indexOf('--report');
+  const dirs = args.slice(i + 1).filter((a) => !a.startsWith('--')).slice(0, 2);
+  if (!dirs.length) fail('Name a run directory: --report eval/ask/runs/<timestamp> [<earlier run>]');
+  const byId = new Map(doc.cases.map((c) => [c.id, c]));
+  const before = new Map(dirs[1] ? readRun(dirs[1]).filter((r) => r.rep === 1).map((r) => [r.id, r]) : []);
+  const size = (r) => `${lib.countWords(r.answer)}w/${lib.countRows(r.answer)}r`;
+  let shaped = 0;
+  let passed = 0;
+  let cost = 0;
+  for (const r of readRun(dirs[0])) {
+    cost += r.cost_usd || 0;
+    const c = byId.get(r.id);
+    if (!c || r.writer !== 'claude') continue;
+    const g = lib.gradeDeterministic(c, r, doc.shapes);
+    const shape = doc.shapes && doc.shapes[c.expect.shape];
+    if (shape) { shaped++; if (g.checks.shape) passed++; }
+    const was = before.get(r.id);
+    const limit = shape ? ` of ${shape.max_words}w${shape.max_rows ? `/${shape.max_rows}r` : ''}` : '';
+    const faults = Object.entries(g.checks).filter(([, v]) => v === false).map(([k]) => (g.detail[k] ? `${k}: ${[].concat(g.detail[k]).map((x) => (typeof x === 'string' ? x : x.text || JSON.stringify(x))).join(', ')}` : k));
+    console.log(`  ${g.pass ? '✓' : '✗'} ${r.id.padEnd(13)} ${(was ? `${size(was)} → ` : '') + size(r)}${limit}${faults.length ? `   ${faults.join('; ')}` : ''}`);
+  }
+  console.log(`\n${passed} of ${shaped} shaped answers inside their shape; the run cost $${cost.toFixed(4)} — nothing was spent now`);
+}
+
+if (flag('report')) report();
+else if (flag('run')) run().catch((e) => fail(e.stack || e.message));
 else if (flag('judge-selftest')) judgeSelfTest().catch((e) => fail(e.stack || e.message));
 else check();

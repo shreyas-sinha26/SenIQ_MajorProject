@@ -483,6 +483,13 @@ section('\ngrounding post-check:');
     assert.deepStrictEqual(bad('Reported on October 9.'), ['October 9']);
     assert.deepStrictEqual(bad('Disclosed in March 2025.'), ['March 2025']);
   });
+  check('dates: one a tool wrote out ("13 to 15 Oct") supports the same day, and this year\'s, in an answer', () => {
+    const ev = [EVIDENCE[0], JSON.stringify({ dates: 'bidding 13 to 15 Oct', soonest: '1. A bidding opens 13 Oct', stale_line: 'India calendar last refreshed 9 Oct.' })];
+    const off = (answer) => checkGrounding(answer, ev).unsupported.map((u) => u.text);
+    assert.deepStrictEqual(off('A · bidding 13 to 15 Oct. Bidding opens 13 Oct 2026. India calendar last refreshed 9 Oct.'), []);
+    assert.deepStrictEqual(off('Bidding closes 16 Oct.'), ['16 Oct.']);
+    assert.deepStrictEqual(off('Bidding opened 13 Oct 2024.'), ['13 Oct 2024']);   // a year the evidence never names
+  });
   check('scaled units match (39.8B vs 39800000000; $40B from a headline)', () => {
     assert.deepStrictEqual(bad('The fund holds $39.8B; the story mentions a $40B bet.'), []);
   });
@@ -625,6 +632,28 @@ section('\nstrategy tools (v2 only):');
     assert.deepStrictEqual(cards[0].params, 'fast=12, slow=26');
     assert.ok(cards[0].description.length <= 180);
     assert.deepStrictEqual(ST.presetCards(null), []);
+  });
+  check('the closing line is put on by code: on answers from the tools that call for it, and on no other', () => {
+    const { withClosingLine, CLOSING_LINE } = require('../server/services/qa');
+    const ipo = agentSetup(false, true).closing, v2 = agentSetup(true, false).closing;
+    assert.deepStrictEqual(agentSetup(false, false).closing, []);                       // v1 with no IPO Watch: never
+    assert.deepStrictEqual(ipo, ['get_ipo_calendar', 'get_ipo_detail']);
+    assert.deepStrictEqual(v2, ['list_strategy_presets', 'draft_strategy']);              // not the read-only strategy tools
+    assert.strictEqual(withClosingLine('Two issues are upcoming.', ['get_ipo_calendar'], ipo), `Two issues are upcoming.\n\n${CLOSING_LINE}`);
+    assert.strictEqual(withClosingLine(`Two issues.\n\n${CLOSING_LINE}`, ['get_ipo_calendar'], ipo), `Two issues.\n\n${CLOSING_LINE}`);   // once
+    assert.strictEqual(withClosingLine(`No deals on record. ${CLOSING_LINE}`, ['get_india_deals'], ipo), 'No deals on record.');
+    assert.strictEqual(withClosingLine('Your paper return is 2%.', ['get_paper_performance'], v2), 'Your paper return is 2%.');
+    assert.strictEqual(withClosingLine('', ['get_ipo_calendar'], ipo), '');
+  });
+  check('rules for a list: each factor written where it is used, short enough to give whole', () => {
+    const trend = { kind: 'custom', spec: {
+      factors: [{ id: 'sma_fast', fn: 'sma', params: { period: 20 } }, { id: 'sma_slow', fn: 'sma', params: { period: 50 } }, { id: 'sz', source: 'seniq', metric: 'sentiment_zscore' }],
+      entry: { all: [{ crossover: ['sma_fast', 'sma_slow'] }, { gt: ['sz', 0.5] }] },
+      exit: { any: [{ crossunder: ['sma_fast', 'sma_slow'] }, { stop_loss_pct: 8 }] },
+    } };
+    assert.strictEqual(ST.plainRules(trend), 'Enter when sma(20) crosses above sma(50) and SenIQ sentiment_zscore > 0.5. Exit when sma(20) crosses below sma(50) or stop loss 8%');
+    assert.strictEqual(ST.plainRules({ kind: 'registry', strategy_name: 'EMACrossover', params: { fast: 10, slow: 30 } }), 'Preset EMACrossover (fast=10, slow=30)');
+    assert.strictEqual(ST.plainRules({ kind: 'custom', spec: null }), '');
   });
   check('v1 mode: no strategy tools or prompt; v2 mode adds both', () => {
     const v1 = agentSetup(false, false), v2 = agentSetup(true, false);

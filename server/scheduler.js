@@ -25,8 +25,9 @@ const { recomputeImpacts } = require('./services/impactScoring');
 const { logEventFeatures, resolveOutcomes } = require('./services/outcomes');
 const { pollSmartMoney } = require('./services/smartMoney');
 const { pollIndiaSmartMoney } = require('./services/smartMoney/india');
-const { pollCalendar } = require('./services/ipoWatch');
-const { linkArticles, linkSymbols, monitoredTickers, graduate } = require('./services/ipoWatch/registry');
+const { pollCalendar, calendarAge } = require('./services/ipoWatch');
+const { calendar: usIpoCalendar } = require('./services/ipoWatch/sources/finnhub');
+const { linkArticles, linkSymbols, monitoredTickers, markNewsChecked, graduate } = require('./services/ipoWatch/registry');
 const { resolveReturns, resolveUsOutcomes } = require('./services/ipoWatch/returns');
 const { readPendingStories } = require('./services/ipoWatch/arc');
 const { syncDisclosures } = require('./services/disclosures');
@@ -37,6 +38,7 @@ const retention = require('./services/retention');
 const { runReportEmails } = require('./services/reportEmails');
 const { runPaperMarks } = require('./services/paperLedger');
 const { captureException } = require('./observability');
+const finnhubGate = require('./services/finnhubGate');
 const { REPORTS, QA, REPORT_EMAIL, RETENTION } = require('./config');
 
 let isRunning = false;
@@ -213,12 +215,17 @@ async function runNewsPipeline() {
     // US coverage: this run's few of the US shares nobody holds. A failure to pick them, or
     // to record the visit, must not stop the pipeline.
     const rotation = await usNews.nextBatch([...tickers, ...ipoTickers]).catch((err) => { console.warn('   ⚠️  US rotation not picked:', err.message); return []; });
-    const { articles: fetched, counts, rotation: rotated } = await gatherArticles(tickers, ipoTickers, rotation);
+    const { articles: fetched, counts, companyNews } = await gatherArticles(tickers, ipoTickers, rotation);
     console.log(`   📰 Fetched ${fetched.length} articles ${JSON.stringify(counts)}`);
+    const { checked, stopped } = companyNews;
+    // An IPO Watch ticker someone holds was asked for as a held one.
+    const ipoChecked = ipoTickers.filter((t) => checked.ipo.includes(t) || checked.held.includes(t));
+    if (ipoChecked.length) await markNewsChecked(ipoChecked).catch((err) => console.warn('   ⚠️  IPO Watch news not recorded:', err.message));
     if (rotation.length) {
-      await usNews.markChecked(rotated.checked).catch((err) => console.warn('   ⚠️  US rotation not recorded:', err.message));
-      console.log(`   🇺🇸 US rotation: ${rotated.checked.length} of ${rotation.length} name(s) checked${rotated.stopped ? ` (stopped: ${rotated.stopped})` : ''}`);
+      await usNews.markChecked(checked.rotation).catch((err) => console.warn('   ⚠️  US rotation not recorded:', err.message));
+      console.log(`   🇺🇸 US rotation: ${checked.rotation.length} of ${rotation.length} name(s) checked${stopped ? ` (stopped: ${stopped})` : ''}`);
     }
+    if (stopped) console.warn(`   ⚠️  Finnhub company news stopped (${stopped}): ${checked.held.length} of ${tickers.length} held, ${ipoChecked.length} of ${ipoTickers.length} IPO Watch, ${checked.rotation.length} of ${rotation.length} rotation ticker(s) asked for; the rest go first next run`);
     // Retention: once old stories have been pruned, one from before the pruning horizon is
     // not stored again. A failure to check must not stop the pipeline.
     const raw = retention.dropTooOld(fetched, await retention.ingestCutoff().catch(() => null));
@@ -286,6 +293,8 @@ async function runNewsPipeline() {
     console.error('Pipeline error:', err);
     captureException(err);
   } finally {
+    // Every Finnhub call since the last run's line, pages and clicks included.
+    if (process.env.FINNHUB_API_KEY) console.log(`   🚦 Finnhub calls: ${finnhubGate.summary(finnhubGate.takeCounts())}`);
     isRunning = false;
   }
 }
@@ -363,6 +372,27 @@ async function runIpoCalendarPoll() {
   }
 }
 
+// IPO Watch at start: the daily poll fires only while the server is up, so the US calendar is
+// refreshed here when it is over a day old. One call to Finnhub; India's sources are
+// unofficial pages and wait for the daily poll.
+async function runIpoCatchUp() {
+  if (!FEATURES.IPO_WATCH || !process.env.FINNHUB_API_KEY) return;
+  try {
+    const { updatedAt } = await calendarAge('US');
+    if (updatedAt && Date.now() - updatedAt < IPO_WATCH.CATCH_UP_AFTER_HOURS * 3600e3) return;
+    const r = await pollCalendar({ sources: [usIpoCalendar] });
+    console.log(`\n📅 IPO calendar (US, catch-up at start): ${r.stored} issue(s) stored`);
+    for (const f of r.failed) console.warn(`   ⚠️  ${f.source}: ${f.error}`);
+    if (r.failed.length) return;
+    const links = await linkArticles({ days: IPO_WATCH.LINK_BACKFILL_DAYS });
+    await readPendingStories();
+    console.log(`   ${links.linked} story link(s) added`);
+  } catch (err) {
+    console.error('IPO calendar catch-up error:', err);
+    captureException(err);
+  }
+}
+
 // Ask thread retention — drop conversations untouched for QA.THREAD_RETENTION_DAYS.
 async function runThreadPurge() {
   try {
@@ -411,48 +441,52 @@ async function runPaperMarkJob() {
 function startScheduler() {
   // Collect the cron tasks so graceful shutdown can stop them (SIGTERM on deploy).
   const tasks = [];
+  // A scheduled job's Finnhub calls take the gate's background lane (finnhubGate.js); a
+  // call made anywhere else is someone's page or click.
+  const job = (fn) => () => finnhubGate.background(fn);
 
-  setTimeout(runNewsPipeline, 2000);
-  tasks.push(cron.schedule('*/10 * * * *', runNewsPipeline));
+  setTimeout(job(runNewsPipeline), 2000);
+  tasks.push(cron.schedule('*/10 * * * *', job(runNewsPipeline)));
   console.log('⏰ Scheduler started — news every 10 minutes');
 
   if (FEATURES.SMART_MONEY) {
-    setTimeout(runSmartMoneyPoll, 8000); // stagger after the news pipeline kicks off
-    tasks.push(cron.schedule(SMART_MONEY.POLL_CRON, runSmartMoneyPoll));
+    setTimeout(job(runSmartMoneyPoll), 8000); // stagger after the news pipeline kicks off
+    tasks.push(cron.schedule(SMART_MONEY.POLL_CRON, job(runSmartMoneyPoll)));
     console.log(`⏰ Smart-money poller started — ${SMART_MONEY.POLL_CRON}`);
   }
 
   // India smart money: once a day after the NSE close, never on boot — the routes are
   // unofficial, so a restart loop must not turn into a burst of requests.
   if (FEATURES.INDIA_SMART_MONEY) {
-    tasks.push(cron.schedule(INDIA_SMART_MONEY.CRON, runIndiaSmartMoneyPoll, { timezone: INDIA_SMART_MONEY.TIMEZONE }));
+    tasks.push(cron.schedule(INDIA_SMART_MONEY.CRON, job(runIndiaSmartMoneyPoll), { timezone: INDIA_SMART_MONEY.TIMEZONE }));
     console.log(`⏰ India smart-money poller started — ${INDIA_SMART_MONEY.CRON} ${INDIA_SMART_MONEY.TIMEZONE}`);
   }
 
   if (FEATURES.IPO_WATCH) {
-    tasks.push(cron.schedule(IPO_WATCH.CRON, runIpoCalendarPoll, { timezone: IPO_WATCH.TIMEZONE }));
-    console.log(`⏰ IPO calendar poller started — ${IPO_WATCH.CRON} ${IPO_WATCH.TIMEZONE}`);
+    setTimeout(job(runIpoCatchUp), 5000);
+    tasks.push(cron.schedule(IPO_WATCH.CRON, job(runIpoCalendarPoll), { timezone: IPO_WATCH.TIMEZONE }));
+    console.log(`⏰ IPO calendar poller started — ${IPO_WATCH.CRON} ${IPO_WATCH.TIMEZONE}, and the US calendar at start when over ${IPO_WATCH.CATCH_UP_AFTER_HOURS}h old`);
   }
 
   // Paper ledger: once a day after every market has closed, and once after start — the
   // engine is our own process, and the app is not always up at the scheduled minute.
   if (FEATURES.STRATEGIES) {
-    setTimeout(runPaperMarkJob, PAPER.BOOT_DELAY_MS);
-    tasks.push(cron.schedule(PAPER.MARK_CRON, runPaperMarkJob, { timezone: PAPER.MARK_TIMEZONE }));
+    setTimeout(job(runPaperMarkJob), PAPER.BOOT_DELAY_MS);
+    tasks.push(cron.schedule(PAPER.MARK_CRON, job(runPaperMarkJob), { timezone: PAPER.MARK_TIMEZONE }));
     console.log(`⏰ Paper ledger started — ${PAPER.MARK_CRON} ${PAPER.MARK_TIMEZONE}`);
   }
 
-  tasks.push(cron.schedule(REPORTS.CRON, runDailyBriefs));
+  tasks.push(cron.schedule(REPORTS.CRON, job(runDailyBriefs)));
   console.log(`⏰ Daily-brief generator started — ${REPORTS.CRON}, each user at ${String(REPORTS.LOCAL_TIME.HOUR).padStart(2, '0')}:${String(REPORTS.LOCAL_TIME.MINUTE).padStart(2, '0')} their time`);
 
-  tasks.push(cron.schedule(QA.THREAD_PURGE_CRON, runThreadPurge));
+  tasks.push(cron.schedule(QA.THREAD_PURGE_CRON, job(runThreadPurge)));
 
   if (FEATURES.RETENTION) {
-    tasks.push(cron.schedule(RETENTION.CRON, runRetention));
+    tasks.push(cron.schedule(RETENTION.CRON, job(runRetention)));
     console.log(`⏰ News retention started — ${RETENTION.CRON}: unused stories ${RETENTION.UNUSED_DAYS} days, the rest ${RETENTION.USED_DAYS}`);
   }
 
-  tasks.push(cron.schedule(REPORT_EMAIL.CRON, runReportEmailJob));
+  tasks.push(cron.schedule(REPORT_EMAIL.CRON, job(runReportEmailJob)));
   console.log(`⏰ Report emails started — ${REPORT_EMAIL.CRON}`);
 
   return tasks;

@@ -17,15 +17,15 @@
  *     this a market or world keyword in its headline would put it in every user's feed.
  */
 
-const { FEATURES, US_NEWS } = require('../config');
+const { FEATURES, US_NEWS, FINNHUB } = require('../config');
 const { isUsListed } = require('./entityResolver');
 const { subjectTickers } = require('./newsRelevance');
 
 const enabled = () => FEATURES.US_LISTED_NEWS && !!process.env.FINNHUB_API_KEY;
 
-// How many names this run's rotation takes: what is left of the run's news calls once the
-// held and IPO Watch tickers have theirs. Pure.
-function batchSize(ownCalls, limits = US_NEWS) {
+// How many names this run's rotation takes: what is left of the news calls a run may plan
+// (FINNHUB.NEWS_CALLS_PER_RUN) once the held and IPO Watch tickers have theirs. Pure.
+function batchSize(ownCalls, limits = { ...US_NEWS, CALLS_PER_RUN: FINNHUB.NEWS_CALLS_PER_RUN }) {
   return Math.max(0, Math.min(limits.PER_RUN, limits.CALLS_PER_RUN - ownCalls));
 }
 
