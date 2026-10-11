@@ -5,7 +5,8 @@
  * Two graders, kept apart on purpose:
  *   deterministic (free)  — did it route to the expected writer, call one of the expected
  *                           tools, stay away from out-of-scope tickers, pass the grounding
- *                           audit, stay concise, avoid advice wording. Exact and repeatable.
+ *                           audit, stay concise, avoid advice wording, and keep to the
+ *                           shape its kind of answer is given (words, rows). Exact and repeatable.
  *   judge (paid, opt-in)  — a different model reads the answer against the tool results and
  *                           scores each rubric line. Needed for the lines a regex can't see
  *                           ("corrects a false premise", "says what it could not check").
@@ -26,6 +27,13 @@ function validateCases(doc, knownTools = []) {
   if (!doc.fixture || !Array.isArray(doc.fixture.holdings) || !doc.fixture.holdings.length) errors.push('fixture.holdings is required');
   if (!Array.isArray(doc.global_rubric)) errors.push('global_rubric must be an array');
   const tools = new Set(knownTools);
+  const shapes = doc.shapes || {};
+  for (const [name, shape] of Object.entries(shapes)) {
+    for (const [k, v] of Object.entries(shape || {})) {
+      if (!SHAPE_KEYS.includes(k)) errors.push(`shape ${name}: unknown key ${k}`);
+      else if (k === 'must_not' ? !Array.isArray(v) : !(Number.isInteger(v) && v > 0)) errors.push(`shape ${name}: ${k} must be ${k === 'must_not' ? 'a list' : 'a whole number above 0'}`);
+    }
+  }
   const ids = new Set();
   for (const c of doc.cases) {
     const at = `case ${c && c.id ? c.id : '?'}`;
@@ -39,6 +47,7 @@ function validateCases(doc, knownTools = []) {
     if (!WRITERS.includes(e.writer)) errors.push(`${at}: expect.writer must be one of ${WRITERS.join(', ')}`);
     for (const t of e.tools_any || []) if (tools.size && !tools.has(t)) errors.push(`${at}: unknown tool ${t} in tools_any`);
     if (e.writer === 'scope' && (e.tools_any || []).length) errors.push(`${at}: a scope refusal calls no tools`);
+    if (e.shape != null && !Object.hasOwn(shapes, e.shape)) errors.push(`${at}: unknown shape ${e.shape}`);
     if (c.history) {
       const ok = Array.isArray(c.history) && c.history.length % 2 === 0 &&
         c.history.every((m, i) => m && m.role === (i % 2 === 0 ? 'user' : 'assistant') && typeof m.content === 'string');
@@ -63,6 +72,31 @@ function conciseCheck(answer, maxSentences = 8) {
   return { pass: problems.length === 0, problems };
 }
 
+// ── Shape: how much an answer of one kind may hold ──
+// A case names a shape from the case file's `shapes` (expect.shape): the most words, the
+// most and fewest rows, and wording that must not appear. A row is a line whose fields are
+// set apart by " · ", the layout Ask is asked to give a list in.
+const SHAPE_KEYS = ['max_words', 'max_rows', 'min_rows', 'must_not'];
+const ROW_MARK = ' · ';
+const CLOSING_LINE = /Educational only, not investment advice\.?/g;   // required wording, not counted
+const countWords = (text) => String(text || '').replace(CLOSING_LINE, ' ').split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+const countRows = (text) => String(text || '').split('\n').filter((line) => line.includes(ROW_MARK)).length;
+
+/** An answer against a shape. Returns { pass, problems, words, rows }. Pure. */
+function shapeCheck(answer, shape = {}) {
+  const words = countWords(answer);
+  const rows = countRows(answer);
+  const problems = [];
+  if (shape.max_words && words > shape.max_words) problems.push(`${words} words (at most ${shape.max_words})`);
+  if (shape.max_rows && rows > shape.max_rows) problems.push(`${rows} rows (at most ${shape.max_rows})`);
+  if (shape.min_rows && rows < shape.min_rows) problems.push(`${rows} rows (at least ${shape.min_rows})`);
+  for (const source of shape.must_not || []) {
+    const hit = String(answer || '').match(new RegExp(source, 'i'));
+    if (hit) problems.push(`says "${hit[0]}"`);
+  }
+  return { pass: problems.length === 0, problems, words, rows };
+}
+
 // Wording that reads as a recommendation or forecast. A proxy: it catches the blunt cases;
 // the judge's no_advice line covers the subtle ones.
 const ADVICE = [
@@ -84,9 +118,9 @@ const mentions = (text, ticker) => new RegExp(`(^|[^A-Za-z0-9])${ticker.replace(
 /**
  * Grade one run with the free checks. `run` = { writer, answer, tools_used, grounding,
  * evidence:[text] }. Each check is true / false / null (null = does not apply to this case).
- * Pure.
+ * `shapes` = the case file's shapes; a case that names none is not checked for one. Pure.
  */
-function gradeDeterministic(c, run) {
+function gradeDeterministic(c, run, shapes = {}) {
   const e = c.expect || {};
   const used = new Set(run.tools_used || []);
   const modelWritten = run.writer === 'claude' || run.writer === 'ollama';
@@ -96,6 +130,7 @@ function gradeDeterministic(c, run) {
   const leaked = (e.no_data_for || []).filter((t) => (run.evidence || []).some((ev) => !isSnapshot(ev) && mentions(ev, t)));
   const concise = modelWritten ? conciseCheck(run.answer) : null;
   const advice = modelWritten ? adviceCheck(run.answer) : null;
+  const shape = modelWritten && e.shape && shapes[e.shape] ? shapeCheck(run.answer, shapes[e.shape]) : null;
   const checks = {
     writer: run.writer === e.writer,
     tools: e.tools_any && e.tools_any.length ? e.tools_any.some((t) => used.has(t)) : null,
@@ -103,6 +138,7 @@ function gradeDeterministic(c, run) {
     grounded: run.grounding ? run.grounding.grounded : null,
     concise: concise ? concise.pass : null,
     advice_free: advice ? advice.pass : null,
+    shape: shape ? shape.pass : null,
   };
   const applicable = Object.values(checks).filter((v) => v !== null);
   return {
@@ -113,6 +149,7 @@ function gradeDeterministic(c, run) {
       ...(run.grounding && !run.grounding.grounded ? { unsupported: run.grounding.unsupported } : {}),
       ...(concise && !concise.pass ? { concise: concise.problems } : {}),
       ...(advice && !advice.pass ? { advice: advice.hits } : {}),
+      ...(shape && !shape.pass ? { shape: shape.problems } : {}),
     },
   };
 }
@@ -235,7 +272,7 @@ const rate = (rows, pick) => {
  * failures (excluded from every rate). Pure.
  */
 function summarize(rows, errors = [], { reps = 1 } = {}) {
-  const checkNames = ['writer', 'tools', 'no_data_leak', 'grounded', 'concise', 'advice_free'];
+  const checkNames = ['writer', 'tools', 'no_data_leak', 'grounded', 'concise', 'advice_free', 'shape'];
   const judged = rows.filter((r) => r.judge && r.judge.verdicts);
   const lineRate = (scope) => {
     const vs = judged.flatMap((r) => r.judge.verdicts.filter((v) => v.scope === scope && v.verdict !== 'not_applicable'));
@@ -270,6 +307,6 @@ function summarize(rows, errors = [], { reps = 1 } = {}) {
 }
 
 module.exports = {
-  validateCases, conciseCheck, adviceCheck, gradeDeterministic, infraFailure,
+  validateCases, conciseCheck, adviceCheck, shapeCheck, countWords, countRows, gradeDeterministic, infraFailure,
   JUDGE_SYSTEM, judgeSchema, rubricLines, judgePrompt, readVerdicts, costUsd, summarize,
 };
