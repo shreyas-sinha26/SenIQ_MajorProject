@@ -471,7 +471,13 @@ way, is in §10 ("Planned on 2026-10-10, and built").
   - **The rotation:** with `US_LISTED_NEWS=1` and a Finnhub key, each run of the pipeline
     asks Finnhub for the company news of 30 US shares nobody holds, the ones checked
     longest ago (`companies.news_checked_at`), one call a second. 1,501 names on the dev
-    database, so each comes round about every 8.3 hours.
+    database, so each came round about every 8.3 hours as first built.
+  - **Two queues** *(2026-10-11, at Annas's word; branch `us-curated-rotation`,
+    uncommitted; `npm test` passes)*: 5 of a run's 30 places are for the curated US shares
+    nobody holds (98 on the dev database, each about every 3.3 hours) and 25 for the rest
+    (1,403: the listed tier and 5 graduated IPOs, each about every 9.4 hours). Picked on
+    the dev database with the switch set for that one process, reads only, no Finnhub
+    call: 5 curated and 25 listed. Not run in a pipeline.
   - **The own-feed rule:** a US listed name is tagged only on a story fetched from its own
     ticker's feed, and only if the story names it. It is on whenever a Finnhub key is set.
   - **The drop:** a story only the rotation brought in is stored only if it is about a
@@ -1447,8 +1453,8 @@ machine before the date fix that day had lookahead; do not reuse older figures.
     costs nothing when it goes before its tone is read; one dropped after (every name in
     it a passing mention, by the per-company reading) is read again each time.
   - A run's news calls are capped at 50 (`US_NEWS.CALLS_PER_RUN`): held tickers and IPO
-    Watch's come first and the rotation takes what is left, at most 30. With 50 or more
-    held tickers the rotation stops. The held fetch itself has no gap between calls and
+    Watch's come first and the rotation takes what is left, at most 30, a sixth of it
+    for the curated names. With 50 or more held tickers the rotation stops. The held fetch itself has no gap between calls and
     no cap, as before.
   - A refusal for the rate limit, or a request that fails, ends that run's rotation and
     the names not reached go first next time. Any other refusal counts as checked. The
@@ -1832,6 +1838,12 @@ hand-labelled sheets of (story, company) pairs (§8).
   - *The order.* `companies.news_checked_at` (migration `0044`): never-checked names
     first in ticker order, then the longest unchecked. It is in the table so a restart
     carries on where the last run stopped.
+  - *Two queues* (`curatedShare` and `nextBatch` in `usNews.js`,
+    `US_NEWS.CURATED_PER_RUN`): the curated names have 5 of a run's 30 places and the
+    rest 25, each queue in the order above. The curated ones are asked for first, so a
+    run cut short by the rate limit has still reached them. When holdings leave fewer
+    than 30 places the curated share shrinks with it (3 of 15, 1 of 3, none of 2), and
+    a place the curated queue cannot fill goes to the rest.
   - *The pace.* 30 a run, one call a second, after the held fetch and never beside it.
     Held, IPO and rotation calls together stay within 50 a run, leaving room in
     Finnhub's 60 a minute for quotes.
