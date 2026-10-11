@@ -3,6 +3,7 @@ const { query, execute } = require('../db');
 const { authMiddleware } = require('./auth');
 const { analyzeSentiment } = require('../services/sentiment');
 const { matchTickers } = require('../services/tickerMatcher');
+const { resolve: resolveEntities } = require('../services/entityResolver');
 const { summarizeArticle } = require('../services/summarizer');
 const { isUrl, scrapeArticle } = require('../services/articleScraper');
 const { explainForPortfolio } = require('../services/ollamaExplainer');
@@ -302,7 +303,17 @@ router.post('/analyze', userRateLimit(LIMITS.ANALYZE), async (req, res) => {
     const read = await classifyBatch([inputText]).catch(() => null);
     if (read && read[0]) sentiment = { label: read[0].label, score: read[0].score, confidence: read[0].confidence, model: read[0].model || 'finbert', details: byWords.details };
   }
-  const tickers = matchTickers(inputText);
+  // The same matcher the news pipeline tags stories with, so a headline is read here as it
+  // would be in the feed: the old word-list matcher tagged "Plan V is ready" as Visa. It
+  // stands in only if the company reference cannot be read.
+  let tickers;
+  try {
+    const found = await resolveEntities(articleTitle || inputText, articleTitle ? inputText : '');
+    tickers = (found.tickers || []).filter((t) => t !== '__MARKET__');
+  } catch (err) {
+    console.warn('Analyzer: company reference unavailable, using the word list:', err.message);
+    tickers = matchTickers(inputText);
+  }
 
   // Step 3: LLM explanation with portfolio context (graceful fallback if Ollama is down)
   let llmExplanation = null;

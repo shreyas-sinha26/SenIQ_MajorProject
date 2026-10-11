@@ -151,6 +151,7 @@ check('deterministic "down" answer leads with attribution when priced', () => {
   };
   const a = deterministicAnswer('why is my portfolio down?', ctx);
   assert.ok(/moved -0.8%/.test(a) && /AAPL \(-2% × 60% of priced holdings = -1.2 pts\)/.test(a));
+  assert.ok(/^Over their last session your priced holdings moved/.test(a) && !/today/i.test(a)); // "today" was wrong on a weekend
 });
 check('a holding\'s size is its exposure figure; the priced-only weight is named as the multiplier', () => {
   // AAPL is 52.3% of the two priced holdings but 41.8% of the portfolio once the holding

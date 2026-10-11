@@ -66,7 +66,7 @@ const reading = (count, score = 0.5, z = null, points = 12) => ({ label: score >
     const s = S.buildSnapshot(HERO, { price: 4895.5, currency: 'INR', changePct: 0.8, dayHigh: 4953, dayLow: 4825 }, reading(2), { now: NOW });
     assert.deepStrictEqual([s.session_high, s.session_low], [4953, 4825]);
     // Given when the question asks for them, and not otherwise.
-    assert.ok(S.snapshotLine(s).includes('Price ₹4,895.50, up 0.80% today. News sentiment') && !/latest session/.test(S.snapshotLine(s)));
+    assert.ok(S.snapshotLine(s).includes('Price ₹4,895.50, up 0.80% in its last session. News sentiment') && !/latest session/.test(S.snapshotLine(s)));
     assert.strictEqual(S.snapshotLine(s, S.asksFor('high and low today?')), "Hero MotoCorp (HEROMOTOCO): Its latest session's high was ₹4,953.00 and its low ₹4,825.00.");
     const none = S.buildSnapshot(HERO, { price: 4895.5, currency: 'INR', changePct: 0.8, dayHigh: null, dayLow: null }, reading(2), { now: NOW });
     assert.ok(!('session_high' in none));
@@ -101,7 +101,7 @@ const reading = (count, score = 0.5, z = null, points = 12) => ({ label: score >
   console.log('the code-written answer:');
   check('one name: price, move, reading with its story count, and how to get the rest', () => {
     const a = S.snapshotAnswer([S.buildSnapshot(HERO, { price: 4895.5, currency: 'INR', changePct: 0.8 }, reading(2), { now: NOW })]);
-    assert.ok(a.startsWith('Hero MotoCorp (HEROMOTOCO): Price ₹4,895.50, up 0.80% today.'));
+    assert.ok(a.startsWith('Hero MotoCorp (HEROMOTOCO): Price ₹4,895.50, up 0.80% in its last session.'));
     assert.ok(!/has only/.test(a), 'no line saying what SenIQ has "only": the answer then went on to give more');
     assert.ok(a.includes('News sentiment neutral (0.50 on a 0 to 1 scale, 0.5 is neutral) from 2 stories in the last 72 hours; too little history to compare with its usual level.'));
     assert.ok(a.endsWith('\nHEROMOTOCO isn\'t in your portfolio. Add it on the Portfolio page ("Add Asset") to see its stories, smart money and impact on your holdings.'));
@@ -109,7 +109,7 @@ const reading = (count, score = 0.5, z = null, points = 12) => ({ label: score >
   });
   check('a fall, one story, a z-score; no price; no stories', () => {
     const fall = S.snapshotLine(S.buildSnapshot(HERO, { price: 100, currency: 'USD', changePct: -1.234 }, reading(1, 0.3, -1.8), { now: NOW }));
-    assert.ok(fall.includes('Price $100.00, down 1.23% today.') && fall.includes('from 1 story in') && fall.includes('z-score -1.8 against its own 90-day normal'));
+    assert.ok(fall.includes('Price $100.00, down 1.23% in its last session.') && fall.includes('from 1 story in') && fall.includes('z-score -1.8 against its own 90-day normal'));
     const bare = S.snapshotLine(S.buildSnapshot(HERO, null, reading(0), { now: NOW }));
     assert.ok(bare.includes('There is no live price for it right now.') && bare.includes('No sentiment reading: SenIQ has no stories on it from the last 72 hours.'));
     assert.ok(!/neutral/.test(bare));
@@ -118,7 +118,7 @@ const reading = (count, score = 0.5, z = null, points = 12) => ({ label: score >
   check('several names, and the ones past the cap are named as not shown', () => {
     const snaps = ['TSLA', 'MSFT'].map((t) => S.buildSnapshot({ ticker: t, name: t, tier: 'curated' }, { price: 1, currency: 'USD', changePct: 0 }, reading(1), { now: NOW }));
     const a = S.snapshotAnswer(snaps, ['AMD']);
-    assert.ok(a.startsWith('TSLA: Price $1.00, unchanged today.'));
+    assert.ok(a.startsWith('TSLA: Price $1.00, unchanged in its last session.'));
     assert.ok(a.includes('Not shown here: AMD. Ask about it separately.') && a.endsWith('TSLA, MSFT, AMD aren\'t in your portfolio. Add them on the Portfolio page ("Add Asset") to see their stories, smart money and impact on your holdings.'));
     assert.strictEqual(S.snapshotAnswer([]), null);
   });
@@ -154,7 +154,7 @@ const reading = (count, score = 0.5, z = null, points = 12) => ({ label: score >
     const snap = S.buildSnapshot(HERO, { price: 4895.5, currency: 'INR', changePct: 0.8 }, reading(2), { now: NOW });
     const a = S.snapshotAnswer([snap], [], { histories: { HEROMOTOCO: h } }).split('\n');
     // The price and what it did; no sentiment reading and no closing line with it.
-    assert.deepStrictEqual(a, ['Hero MotoCorp (HEROMOTOCO): Price ₹4,895.50, up 0.80% today.', line]);
+    assert.deepStrictEqual(a, ['Hero MotoCorp (HEROMOTOCO): Price ₹4,895.50, up 0.80% in its last session.', line]);
     // Asked for the year's high, the answer is the high.
     const traded = { ...h, highest_price: { date: '2025-12-04', price: 6388 }, lowest_price: { date: '2026-06-08', price: 4731.2 } };
     assert.strictEqual(S.snapshotAnswer([snap], [], { histories: { HEROMOTOCO: traded }, parts: S.asksFor('What is the 52-week high of Hero MotoCorp?') }),
@@ -168,12 +168,12 @@ const reading = (count, score = 0.5, z = null, points = 12) => ({ label: score >
     assert.strictEqual(answer("What was Tesla's high today?"), "Tesla (TSLA): Its latest session's high was $388.56.");
     assert.strictEqual(answer("What was Tesla's low today?"), "Tesla (TSLA): Its latest session's low was $379.71.");
     assert.strictEqual(answer("Tesla's day range?"), "Tesla (TSLA): Its latest session's high was $388.56 and its low $379.71.");
-    assert.strictEqual(answer('What is the price of Tesla?'), 'Tesla (TSLA): Price $382.70, up 2.05% today.');
-    assert.strictEqual(answer('How much is Tesla trading at?'), 'Tesla (TSLA): Price $382.70, up 2.05% today.');
+    assert.strictEqual(answer('What is the price of Tesla?'), 'Tesla (TSLA): Price $382.70, up 2.05% in its last session.');
+    assert.strictEqual(answer('How much is Tesla trading at?'), 'Tesla (TSLA): Price $382.70, up 2.05% in its last session.');
     assert.ok(/^Tesla \(TSLA\): News sentiment neutral \(0\.47 [^\n]*90-day normal\.$/.test(answer("How is Tesla's sentiment looking?")));
   });
   check('two things asked, two given; nothing in particular asked, the price and the reading', () => {
-    assert.ok(/^Tesla \(TSLA\): Price \$382\.70, up 2\.05% today\. News sentiment [^\n]*$/.test(answer('Tesla price and sentiment')));
+    assert.ok(/^Tesla \(TSLA\): Price \$382\.70, up 2\.05% in its last session\. News sentiment [^\n]*$/.test(answer('Tesla price and sentiment')));
     for (const q of ['How is Tesla doing?', 'Any news on Tesla?', 'Tell me about Tesla']) {
       assert.strictEqual(S.asksFor(q), null, q);
       assert.ok(answer(q).includes('Price $382.70') && answer(q).includes('News sentiment') && answer(q).includes("TSLA isn't in your portfolio."), q);
@@ -181,7 +181,7 @@ const reading = (count, score = 0.5, z = null, points = 12) => ({ label: score >
   });
   check('advice asked: the line that SenIQ does not advise still comes first', () => {
     assert.ok(answer('Should I buy Tesla?').startsWith("SenIQ doesn't give buy, sell or hold advice"));
-    assert.strictEqual(answer('Is Tesla a good buy at this price?'), "SenIQ doesn't give buy, sell or hold advice, or predictions. Here is what it has.\nTesla (TSLA): Price $382.70, up 2.05% today.");
+    assert.strictEqual(answer('Is Tesla a good buy at this price?'), "SenIQ doesn't give buy, sell or hold advice, or predictions. Here is what it has.\nTesla (TSLA): Price $382.70, up 2.05% in its last session.");
   });
 
   console.log('the tool:');

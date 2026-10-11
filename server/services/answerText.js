@@ -24,4 +24,13 @@ function daySpan(from, to, today = null) {
   return String(from).slice(0, 7) === String(to).slice(0, 7) ? `${Number(String(from).slice(8, 10))} to ${b}` : `${a} to ${b}`;
 }
 
-module.exports = { shortDay, daySpan, todayIso };
+// How much of the portfolio a story reaches, as a code-written text says it. A market-wide
+// story (`market_wide`) reaches holdings through their market, not by naming them, so its
+// figure is a weighted reach and not a plain share: "31.6% of your exposure" beside a
+// hardware-wallet story, for a portfolio whose only crypto is 15.9% Bitcoin, read as a
+// mistake. Pure.
+function reachText(e) {
+  return e && e.market_wide ? `market-wide, weighted reach ${e.exposure_pct}%` : `${e.exposure_pct}% of your exposure`;
+}
+
+module.exports = { shortDay, daySpan, todayIso, reachText };

@@ -4372,7 +4372,7 @@ function renderAskThread(pending) {
         <div class="ask-q">${escapeHtml(t.question)}</div>
         <div class="ask-answer-text">${escapeHtml(t.answer)}</div>
         ${askDraftCard(t.draft, i)}
-        ${t.writer ? `<div class="ask-answer-meta"><span class="ask-writer">${ASK_WRITER_TAG[t.writer] || t.writer}</span>${askGroundingBadge(t.grounding)}<span class="ask-disclaimer">Informational only — not advice.</span></div>` : ''}
+        ${t.writer ? `<div class="ask-answer-meta"><span class="ask-writer">${ASK_WRITER_TAG[t.writer] || t.writer}${t.writer === 'deterministic' && t.guard === 'user_quota_exceeded' ? ' · today\'s AI answers are used up' : ''}</span>${askGroundingBadge(t.grounding)}<span class="ask-disclaimer">Informational only — not advice.</span></div>` : ''}
       </div>`).join('');
   const pendingHtml = pending ? `<div class="ask-turn"><div class="ask-q">${escapeHtml(pending)}</div><div class="ask-thinking">Thinking…</div></div>` : '';
   answerEl.innerHTML = turns + pendingHtml;
@@ -4440,7 +4440,7 @@ async function askPortfolio(question) {
   try {
     const data = await api('/api/reports/ask', { method: 'POST', body: JSON.stringify({ question: q, thread_id: askThreadId }) });
     askThreadId = data.thread_id;
-    askThread.push({ question: data.question || q, answer: data.answer, writer: data.writer, draft: data.draft || null, grounding: data.grounding || null });
+    askThread.push({ question: data.question || q, answer: data.answer, writer: data.writer, guard: data.guard, draft: data.draft || null, grounding: data.grounding || null });
     renderAskThread();
     renderAskQuota(data.quota);
     loadAskThreads();

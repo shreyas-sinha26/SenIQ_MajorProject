@@ -291,12 +291,32 @@ check('digest: the no-model answer lists what is ahead, one issue to a line, the
     'Most subscribed: 1. A (SME, bidding closed) 3x, as of 7 Oct.',
     'Grey market premium: 1. B 20% of the issue price, unofficial, as of 9 Oct.',
     'Largest in India: HD Fire Protect ₹712.31 crore.',
-    '',
-    '(Auto-generated from IPO Watch — turn on the AI writer for a fuller answer.) Educational only, not investment advice.',
   ]);
+  assert.ok(!/turn on the AI writer/.test(text)); // a user cannot, and the page marks the answer itself
   assert.ok(!/promising|recommend|should|best/i.test(text));
   const open = T.ipoDigest({ markets: ['IN'], counts: {}, refreshed: {}, orderings: {}, issues: [{ name: 'X', market: 'IN', board: 'mainboard', stage: 'open', dates: 'bidding open until 15 Oct' }] });
   assert.deepStrictEqual(open.split('\n').slice(0, 2), ['India: nothing open or coming up (calendar refreshed never).', 'X · mainboard · bidding open until 15 Oct']);
+});
+check('digest: the question is read for its market and for what it asks, so questions get different answers', () => {
+  assert.deepStrictEqual(T.ipoAsk('Tell me about the upcoming IPOs in the US'), { market: 'US', open: false, gmp: false, subscription: false, advice: false });
+  assert.deepStrictEqual(T.ipoAsk('Which IPO has the highest GMP?'), { market: 'IN', open: false, gmp: true, subscription: false, advice: false });
+  assert.deepStrictEqual(T.ipoAsk('What IPOs are open right now?'), { market: null, open: true, gmp: false, subscription: false, advice: false });
+  assert.deepStrictEqual([T.ipoAsk('Is the Jio IPO worth applying for?').advice, T.ipoAsk('Which IPO is most subscribed in India?').subscription, T.ipoAsk('IPOs in India and the US').market], [true, true, null]);
+  const cal = { as_of: '2026-10-11', markets: ['IN'], counts: { IN: { upcoming: 2 } }, refreshed: { IN: '2026-10-11' },
+    orderings: { by_gmp_pct: '1. B 20% of the issue price, unofficial, as of 9 Oct', by_subscription: '1. A 3x, as of 7 Oct' },
+    issues: [{ name: 'B', market: 'IN', board: 'sme', stage: 'upcoming' }] };
+  // Asked what is open when nothing is: it says so, then what is coming.
+  assert.strictEqual(T.ipoDigest(cal, T.ipoAsk('What IPOs are open right now?')).split('\n')[0], 'India: 2 upcoming (calendar refreshed 11 Oct). No issue is open for bidding right now.');
+  // Asked about the premium: that ordering leads, with what it is, and is not given twice.
+  const gmp = T.ipoDigest(cal, T.ipoAsk('Which IPO has the highest GMP?'));
+  assert.strictEqual(gmp.split('\n')[0], 'Grey market premium, highest first: 1. B 20% of the issue price, unofficial, as of 9 Oct. It is an unofficial figure, not a forecast.');
+  assert.strictEqual(gmp.match(/Grey market premium/g).length, 1);
+  // Asked whether to apply: the refusal comes first, and no issue is picked.
+  const advice = T.ipoDigest(cal, T.ipoAsk('Is the B IPO worth applying for?'));
+  assert.ok(advice.startsWith('SenIQ does not rate issues or say whether to apply for one.') && !/recommend|you should|promising/i.test(advice));
+  assert.notStrictEqual(gmp, advice);
+  // No figure on record is said, not skipped.
+  assert.strictEqual(T.ipoDigest({ ...cal, orderings: {} }, { gmp: true }).split('\n')[0], 'No grey market premium is on record for any issue right now.');
 });
 
 check('a wrong market, stage or board is refused before any query', async () => {

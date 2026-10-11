@@ -128,7 +128,10 @@ function snapshotLine(s, parts = null, withHistory = false) {
     if (s.price == null) out.push('There is no live price for it right now.');
     else {
       const c = s.day_change_pct;
-      const move = c == null ? 'day change not available' : c === 0 ? 'unchanged today' : `${c > 0 ? 'up' : 'down'} ${Math.abs(c).toFixed(2)}% today`;
+      // The change is the last session's against the one before (24 hours for a coin).
+      // "Today" was wrong on a weekend: "up 2.38% today" on a Sunday.
+      const span = s.asset_class === 'crypto' ? 'over the last 24 hours' : 'in its last session';
+      const move = c == null ? 'day change not available' : c === 0 ? `unchanged ${span}` : `${c > 0 ? 'up' : 'down'} ${Math.abs(c).toFixed(2)}% ${span}`;
       out.push(`Price ${priceText(s.price, s.currency)}, ${move}.`);
     }
   }
