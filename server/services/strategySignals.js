@@ -14,7 +14,7 @@
  */
 
 const PRESETS_DOC = require('../data/seniqPresets.json');
-const { callService, engineFailure, parseCapital } = require('./strategyClient');
+const { callService, engineFailure, parseCapital, checkRun } = require('./strategyClient');
 const { seniqDataIfNeeded } = require('./signalHistory');
 
 const COMBINATORS = new Set(['all', 'any']);
@@ -137,6 +137,8 @@ function comparisonNotes(withRun, withoutRun, coverage) {
  */
 async function compareWithoutSeniq({ custom, symbol, exchange, start_date, end_date, initial_cash } = {}, { engine = callService, seniqData = seniqDataIfNeeded } = {}) {
   if (!custom || !symbol || !start_date || !end_date) return { ok: false, status: 400, error: 'custom (Builder spec), symbol, start_date and end_date are required' };
+  const target = checkRun({ symbol, exchange, start_date, end_date });
+  if (!target.ok) return { ok: false, status: 400, error: target.error };
   const stripped = stripSeniq(custom);
   if (!stripped.ok) return { ok: false, status: 400, error: stripped.error };
 

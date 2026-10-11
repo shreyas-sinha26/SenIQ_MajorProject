@@ -73,6 +73,16 @@ async function tx(fn) {
   }
 }
 
+// Run fn as ONE step per key: a transaction that holds an advisory lock on `key` until it
+// ends. For "count the rows, then insert if under the limit": done as two statements,
+// several requests sent together all read the same count and all insert. fn gets the client.
+async function locked(key, fn) {
+  return tx(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);
+    return fn(client);
+  });
+}
+
 // ─── Migration runner ────────────────────────────────────────
 // Applies every server/migrations/*.sql not yet recorded in schema_migrations,
 // each in its own transaction, in filename order.
@@ -124,4 +134,4 @@ async function closePool() {
   await pool.end();
 }
 
-module.exports = { pool, query, queryOne, execute, tx, hideRowData, runMigrations, healthCheck, closePool };
+module.exports = { pool, query, queryOne, execute, tx, locked, hideRowData, runMigrations, healthCheck, closePool };

@@ -5,6 +5,7 @@
  */
 
 const { QA } = require('../config');
+const { isId } = require('../middleware/idParam');
 
 // pg returns BIGINT as a string; ids are small, so hand the API plain numbers.
 const withNumId = (row) => (row ? { ...row, id: Number(row.id) } : row);
@@ -25,8 +26,10 @@ async function createThread(userId, firstQuestion) {
 
 async function getThread(userId, threadId) {
   const { queryOne } = require('../db');
+  // A plain positive whole number that fits the column. "9999999999999999999999" is a whole
+  // number to JavaScript and an out-of-range error to Postgres: a 500 for what is a 404.
+  if (!isId(typeof threadId === 'number' ? threadId : String(threadId))) return null;
   const id = Number(threadId);
-  if (!Number.isInteger(id) || id <= 0) return null;
   return withNumId(await queryOne('SELECT id, title, created_at, updated_at FROM ask_threads WHERE id = $1 AND user_id = $2', [id, userId]));
 }
 
@@ -115,9 +118,8 @@ async function appendTurn(threadId, question, answer, writer, grounding = null, 
 
 async function deleteThread(userId, threadId) {
   const { execute } = require('../db');
-  const id = Number(threadId);
-  if (!Number.isInteger(id) || id <= 0) return false;
-  const r = await execute('DELETE FROM ask_threads WHERE id = $1 AND user_id = $2', [id, userId]);
+  if (!isId(typeof threadId === 'number' ? threadId : String(threadId))) return false;
+  const r = await execute('DELETE FROM ask_threads WHERE id = $1 AND user_id = $2', [Number(threadId), userId]);
   return r.rowCount > 0;
 }
 

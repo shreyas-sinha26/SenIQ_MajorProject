@@ -7,7 +7,7 @@
  * once, from POST — after that only the display prefix exists.
  */
 const { asyncRouter } = require('../middleware/asyncRouter');
-const { query, queryOne } = require('../db');
+const { query, queryOne, locked } = require('../db');
 const { authMiddleware } = require('./auth');
 const { requireRecentAuth } = require('../services/sessions');
 const { attachTier, requireTier } = require('../middleware/tier');
@@ -33,10 +33,15 @@ function rowToJson(r) {
   };
 }
 
-// GET /api/keys — the user's keys (active + revoked, newest first).
+// GET /api/keys — the user's keys, newest first: the active ones, and those revoked in the
+// last REVOKED_SHOWN_DAYS. A revoked key used to stay in the list for good; the row itself
+// is kept (it is the record of the key), only the list stops showing it.
+const REVOKED_SHOWN_DAYS = 30;
 router.get('/', async (req, res) => {
   const rows = await query(
-    'SELECT * FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
+    `SELECT * FROM api_keys WHERE user_id = $1
+        AND (revoked_at IS NULL OR revoked_at > now() - ($2 || ' days')::interval)
+      ORDER BY created_at DESC`, [req.user.id, String(REVOKED_SHOWN_DAYS)]);
   res.json({ keys: rows.map(rowToJson), max_active: MAX_ACTIVE_KEYS });
 });
 
@@ -45,19 +50,24 @@ router.post('/', requireTier('pro'), (req, res, next) => (
   // A key that can place orders and change holdings needs the password proven recently.
   (req.body || {}).can_write === true ? requireRecentAuth(req, res, next) : next()
 ), async (req, res) => {
-  const name = String((req.body || {}).name || '').trim().slice(0, 60) || 'MCP key';
+  const rawName = (req.body || {}).name;
+  if (rawName != null && typeof rawName !== 'string') return res.status(400).json({ error: 'name must be text' });
+  const name = String(rawName || '').trim().slice(0, 60) || 'MCP key';
 
-  const active = await queryOne(
-    'SELECT COUNT(*)::int AS n FROM api_keys WHERE user_id = $1 AND revoked_at IS NULL', [req.user.id]);
-  if (active.n >= MAX_ACTIVE_KEYS) {
-    return res.status(400).json({ error: `Limit reached (${MAX_ACTIVE_KEYS} active keys) — revoke one first.` });
-  }
-
+  // The count and the insert are one step per user: several creates sent together used to
+  // read the same count and all go in, past the limit.
   const { key, hash, prefix } = generateKey();
-  const row = await queryOne(
-    `INSERT INTO api_keys (user_id, name, key_hash, key_prefix, can_write)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [req.user.id, name, hash, prefix, (req.body || {}).can_write === true]);
+  const row = await locked(`api_keys:${req.user.id}`, async (client) => {
+    const active = await client.query(
+      'SELECT COUNT(*)::int AS n FROM api_keys WHERE user_id = $1 AND revoked_at IS NULL', [req.user.id]);
+    if (active.rows[0].n >= MAX_ACTIVE_KEYS) return null;
+    const made = await client.query(
+      `INSERT INTO api_keys (user_id, name, key_hash, key_prefix, can_write)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [req.user.id, name, hash, prefix, (req.body || {}).can_write === true]);
+    return made.rows[0];
+  });
+  if (!row) return res.status(400).json({ error: `Limit reached (${MAX_ACTIVE_KEYS} active keys) — revoke one first.` });
   res.status(201).json({ ...rowToJson(row), key });
 });
 

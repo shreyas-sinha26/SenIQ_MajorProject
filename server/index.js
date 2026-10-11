@@ -22,7 +22,9 @@ const paperRouter = require('./routes/paper');
 const apiKeysRouter = require('./routes/apiKeys');
 const mcpRouter = require('./routes/mcp');
 const v1Router = require('./routes/v1');
+const { clientErrors } = require('./middleware/errors');
 const { startScheduler } = require('./scheduler');
+const legalPages = require('./services/legalPages');
 const { initSentry, sentryErrorHandler, captureException } = require('./observability');
 
 const app = express();
@@ -77,6 +79,8 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // The app uses none of the browser's device features; say so, so nothing embedded can ask.
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), usb=()');
   res.setHeader('Content-Security-Policy', CONTENT_SECURITY_POLICY);
   next();
 });
@@ -88,6 +92,9 @@ app.use(['/v1', '/mcp'], cors());
 app.use(express.json());
 // Sign-in rides a cookie, so anything under /api that changes state must come from this site.
 app.use('/api', require('./services/sessions').sameOriginGuard);
+// The API's documentation belongs to v2: with strategies off, its file is not served either
+// (the /docs route below it is already a 404 then).
+if (!FEATURES.STRATEGIES) app.get('/docs.html', (req, res) => res.status(404).type('text/plain').send('Not found'));
 // index: false so "/" is handled explicitly below (landing page, not the app).
 app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 
@@ -141,6 +148,9 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// Browsers and feed readers ask for /favicon.ico without being told to; the icon is an SVG.
+app.get('/favicon.ico', (req, res) => res.redirect(301, '/favicon.svg'));
+
 // ─── Marketing Landing Page ─────────────────────────────────
 // Root serves the public marketing page; the app itself lives at /app.
 app.get('/', (req, res) => {
@@ -151,6 +161,16 @@ app.get('/', (req, res) => {
 app.get('/docs', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'docs.html'));
 });
+
+// ─── Terms of Use and Privacy Policy (public) ───────────────
+for (const name of legalPages.NAMES) {
+  app.get(`/${name}`, (req, res) => res.type('html').send(legalPages.legalPage(name)));
+}
+
+const NOT_FOUND_PAGE = '<!doctype html><meta charset="utf-8"><title>Not found · SenIQ</title>'
+  + '<body style="font-family:system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem;color:#111">'
+  + '<h1 style="font-size:1.3rem">This page does not exist</h1>'
+  + '<p><a href="/">SenIQ home</a> · <a href="/app">Open the app</a></p></body>';
 
 // ─── Not found ──────────────────────────────────────────────
 // An /api path no router answered is a 404 in JSON, whatever the method — a script calling
@@ -163,23 +183,19 @@ app.get('*', (req, res, next) => {
   next();
 });
 
-// ─── SPA Fallback (the app: auth + dashboard) ───────────────
-// Everything else (e.g. /app, /app?auth=signup, deep links) loads index.html.
-app.get('*', (req, res) => {
+// ─── The app (auth + dashboard) ─────────────────────────────
+// /app, /app?auth=signup and anything under /app load index.html. Every link and redirect
+// into the app goes there. Any other path is not a page: before /terms and /privacy had pages
+// of their own they answered with the sign-in screen and a 200.
+app.get(['/app', '/app/*'], (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
+app.get('*', (req, res) => res.status(404).type('text/html').send(NOT_FOUND_PAGE));
 
 // ─── Error handling ─────────────────────────────────────────
-// A body the JSON parser refused is the caller's mistake, not ours: answer 400 or 413 and
-// log nothing — the parser attaches the raw body to its error, and on a sign-in request
-// that body holds a password.
-app.use((err, req, res, next) => {
-  if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'That request is too large' });
-  if (err && (err.type === 'entity.parse.failed' || err.type === 'encoding.unsupported' || err.type === 'charset.unsupported')) {
-    return res.status(400).json({ error: 'The request body is not valid JSON' });
-  }
-  next(err);
-});
+// A request Express could not read (a body that is not JSON, a path with a broken
+// %-escape) is the caller's mistake, not ours: a 4xx, and nothing logged.
+app.use(clientErrors);
 // Sentry first (reports the error), then a generic JSON 500 (never leak stacks).
 app.use(sentryErrorHandler());
 app.use((err, req, res, _next) => {

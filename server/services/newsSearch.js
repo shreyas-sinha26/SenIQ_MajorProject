@@ -327,9 +327,12 @@ async function searchNews({ query: q, tickers, userId = null, includeMarket = tr
       if (err.code !== '42703') console.warn('   ⚠️  full-text news search failed, using keyword fallback:', err.message);
     }
   }
-  if (!lists.length) lists.push({ name: 'keyword', rows: await keywordCandidates(base) });
+  // With no word to look for ("%%%___", "a") the keyword stand-in matched every story and
+  // handed back the top ones as if they were hits. Nothing searchable is nothing found; a
+  // short query that is still a word ("AI", "EV") is left to the meaning search below.
+  if (!lists.length && terms.length) lists.push({ name: 'keyword', rows: await keywordCandidates(base) });
 
-  if (embeddingsEnabled() && (await ensureVectorStore().catch(() => false))) {
+  if (/[a-z0-9]{2,}/i.test(String(q || '')) && embeddingsEnabled() && (await ensureVectorStore().catch(() => false))) {
     try {
       lists.push({ name: 'meaning', rows: await vectorCandidates(base) });
     } catch (err) {
@@ -337,6 +340,7 @@ async function searchNews({ query: q, tickers, userId = null, includeMarket = tr
     }
   }
 
+  if (!lists.length) return { mode: 'none', results: [] };
   const names = lists.map((l) => l.name);
   const mode = names.includes('meaning') ? (names.includes('text') ? 'hybrid' : 'semantic') : names[0];
   // A keyword list is only a stand-in for full-text; once the vector list exists it is the

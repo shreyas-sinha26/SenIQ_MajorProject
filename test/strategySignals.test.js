@@ -182,7 +182,7 @@ check('Backtest: a good form passes; each bad field is named with a message', ()
     assert.ok(/between 1,000 and 100,000,000/.test(out.message));
   }
 });
-const UI = { factors: [{ fn: 'ema', params: { period: 20 } }, { fn: 'ema', params: { period: 50 } }],
+const UI = { name: 'My strategy', factors: [{ fn: 'ema', params: { period: 20 } }, { fn: 'ema', params: { period: 50 } }],
   entry: [{ left: 'f1', op: 'crossover', right: 'f2', num: '' }], exit: [{ left: 'f1', op: 'crossunder', right: 'f2', num: '' }],
   stop: '', target: '', sizingType: 'percent_equity', sizingValue: 25 };
 check('Builder: a blank is kept as a blank, not turned into a number', () => {
@@ -192,6 +192,9 @@ check('Builder: a blank is kept as a blank, not turned into a number', () => {
   assert.strictEqual(page.sbNum('14'), 14);
 });
 check('Builder: the default strategy has nothing to fix', () => assert.deepStrictEqual(page.sbCheckUi(UI), []));
+check('Builder: a strategy with no name is asked for one, not given one', () => {
+  assert.deepStrictEqual(page.sbCheckUi({ ...UI, name: '' }), ['The strategy has no name — give it one.']);
+});
 check('Builder: a period of 0, blank or 2.5 is named, row and all', () => {
   const at = (period) => page.sbCheckUi({ ...UI, factors: [{ fn: 'ema', params: { period } }, UI.factors[1]] });
   assert.deepStrictEqual(at(0), ['Indicator f1 (EMA): period is 0 — it must be a whole number from 1 to 500.']);

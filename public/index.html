@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="AI Portfolio News Copilot — Real-time portfolio monitoring with NLP sentiment analysis and intelligent alerts">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <title>SenIQ — Portfolio Intelligence Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -59,7 +60,7 @@
 
           <!-- Live stat strip -->
           <div class="auth-stats">
-            <div class="auth-stat"><span class="auth-stat-val">27</span><span>articles today</span></div>
+            <div class="auth-stat"><span class="auth-stat-val">10 min</span><span>news refresh</span></div>
             <div class="auth-stat-div"></div>
             <div class="auth-stat"><span class="auth-stat-val">4</span><span>asset classes</span></div>
             <div class="auth-stat-div"></div>
@@ -170,6 +171,7 @@
                 </button>
               </div>
             </div>
+            <p class="auth-terms">By creating an account you agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Use</a> and the <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
             <div id="auth-error-signup" class="auth-error hidden"></div>
             <button type="submit" class="btn btn-primary btn-full auth-submit" id="signup-btn">
               <span>Create Free Account</span>
@@ -562,7 +564,7 @@
             <div data-market-pane="us">
             <div class="section-header">
               <h2>Institutions — 13F Filings</h2>
-              <span class="impact-subtitle">Quarterly 13F holdings of the funds you follow</span>
+              <span class="impact-subtitle">Quarterly 13F holdings of the funds SenIQ tracks</span>
             </div>
             <div class="sm-freshness">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -624,7 +626,7 @@
             <div data-market-pane="us">
             <div class="section-header">
               <h2>Congress — STOCK Act Disclosures</h2>
-              <span class="impact-subtitle">STOCK Act disclosures from politicians you follow</span>
+              <span class="impact-subtitle">Stock trades disclosed by members of the US Congress</span>
             </div>
             <div class="sm-freshness">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -645,6 +647,7 @@
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
               </div>
+              <div class="sm-asof hidden" id="congress-asof"></div>
               <div class="congress-list" id="congress-list">
                 <div class="loading-skeleton"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
               </div>
@@ -721,7 +724,7 @@
         <section class="an-help glass">
           <div class="section-header"><h2>How to read this page</h2></div>
           <dl class="an-glossary">
-            <div><dt>Sentiment score</dt><dd>How the recent news on a holding reads, from 0 (all negative) to 100 (all positive). Above 60 counts as positive, below 40 as negative, in between as mixed. Newer articles, more credible sources and clearer readings count for more.</dd></div>
+            <div><dt>Sentiment score</dt><dd>How the recent news on a holding reads, from 0 (all negative) to 100 (all positive). Above 60 counts as positive, below 40 as negative, in between as neutral. Newer articles, more credible sources and clearer readings count for more.</dd></div>
             <div><dt>Acute window</dt><dd>The score looks at the last 72 hours. An article from this morning weighs more than one from two days ago.</dd></div>
             <div><dt>Its own normal (baseline)</dt><dd>Each holding's average score over the last 90 days. Some companies always get upbeat coverage, so 70 can be ordinary for one and remarkable for another.</dd></div>
             <div><dt>σ (z-score)</dt><dd>How far today's score sits from that holding's own normal, in standard deviations. Within ±0.5σ is an ordinary day; beyond ±1σ is unusual for that holding.</dd></div>
@@ -1004,6 +1007,7 @@
             <span class="impact-subtitle" id="bt-results-sub"></span>
           </div>
           <div id="bt-coverage" class="bt-coverage hidden"></div>
+          <div id="bt-notes"></div>
           <div id="bt-metrics" class="bt-metrics"></div>
           <div id="bt-compare" class="bt-compare hidden"></div>
           <div class="chart-container bt-chart-container">
@@ -1138,7 +1142,22 @@
               <div class="form-group">
                 <label>Email Address</label>
                 <input type="email" id="profile-email-display" disabled class="input-readonly">
-                <p class="form-hint" style="margin-top:6px">Email cannot be changed.</p>
+                <div class="email-verify-row">
+                  <span id="email-change-status" class="email-verify-status"></span>
+                  <button type="button" class="btn btn-ghost btn-xs" id="email-change-open">Change address</button>
+                </div>
+                <div id="email-change-form" class="email-change-form hidden">
+                  <label for="email-change-new">New email address</label>
+                  <input type="email" id="email-change-new" placeholder="you@example.com" autocomplete="email">
+                  <label for="email-change-pw">Your password</label>
+                  <input type="password" id="email-change-pw" placeholder="••••••••" autocomplete="current-password">
+                  <p class="form-hint">We send a link to the new address. Your account stays on the current one until you open it.</p>
+                  <div id="email-change-msg" class="profile-msg hidden"></div>
+                  <div class="email-change-actions">
+                    <button type="button" class="btn btn-primary btn-xs" id="email-change-btn">Send link</button>
+                    <button type="button" class="btn btn-ghost btn-xs" id="email-change-cancel">Cancel</button>
+                  </div>
+                </div>
                 <div id="email-verify-row" class="email-verify-row hidden">
                   <span id="email-verify-status" class="email-verify-status"></span>
                   <button type="button" class="btn btn-ghost btn-xs" id="email-verify-btn">Send verification link</button>
@@ -1215,6 +1234,27 @@
           </section>
         </div>
 
+        <!-- Delete account -->
+        <section class="profile-card glass profile-card-danger" id="delete-account-section">
+          <div class="profile-card-header">
+            <h3>Delete Account</h3>
+            <span class="profile-card-sub">This cannot be undone</span>
+          </div>
+          <div class="profile-card-body">
+            <p class="form-hint" style="margin-top:0">Deleting your account removes your holdings, alerts, briefs, conversations, follows, webhooks, saved strategies, paper deployments and API keys, and signs you out everywhere. Nothing can be restored afterwards.</p>
+            <div class="form-group">
+              <label for="delete-account-email">Type your email address to confirm</label>
+              <input type="email" id="delete-account-email" autocomplete="off">
+            </div>
+            <div class="form-group" id="delete-account-pw-group">
+              <label for="delete-account-pw">Your password</label>
+              <input type="password" id="delete-account-pw" placeholder="••••••••" autocomplete="current-password">
+            </div>
+            <div id="delete-account-msg" class="profile-msg hidden"></div>
+            <button class="btn btn-danger btn-sm" id="delete-account-btn">Delete my account</button>
+          </div>
+        </section>
+
         <!-- API Access — MCP keys (Phase 8) -->
         <section class="profile-card glass" id="api-keys-section" data-feature="strategies">
           <div class="profile-card-header">
@@ -1253,14 +1293,15 @@
       <!-- Global Disclaimer -->
       <footer class="app-footer">
         <p class="disclaimer" data-disclaimer></p>
+        <p class="footer-links"><a href="/terms" target="_blank" rel="noopener">Terms</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy</a></p>
       </footer>
     </main>
 
     <!-- Add Asset Modal -->
     <div class="modal-overlay hidden" id="add-stock-modal">
-      <div class="modal glass">
+      <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="add-stock-title">
         <div class="modal-header">
-          <h3>Add Asset to Portfolio</h3>
+          <h3 id="add-stock-title">Add Asset to Portfolio</h3>
           <button class="btn btn-ghost modal-close" id="modal-close">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
@@ -1288,11 +1329,12 @@
               <input type="number" id="asset-quantity" min="0" step="any" placeholder="e.g. 10" autocomplete="off">
             </div>
             <div class="form-group">
-              <label for="asset-cost-basis">Cost basis <span class="label-hint">(optional)</span></label>
-              <input type="number" id="asset-cost-basis" min="0" step="any" placeholder="per unit" autocomplete="off">
+              <label for="asset-cost-basis">Cost / unit <span class="label-hint">(optional)</span></label>
+              <input type="number" id="asset-cost-basis" min="0" step="any" placeholder="what you paid" autocomplete="off">
             </div>
           </div>
-          <p class="form-hint">Quantity powers exposure weighting — what share of your portfolio each event affects. Skip it and the holding is counted at the average size of your others, shown as an estimate (≈).</p>
+          <p class="form-hint">Quantity powers exposure weighting — what share of your portfolio each event affects. Skip it and the holding is counted at the average size of your others, shown as an estimate (≈). Both can be changed later.</p>
+          <p class="form-error hidden" id="add-asset-error" role="alert"></p>
           <div class="quick-add">
             <span class="quick-label">Popular:</span>
             <button class="chip" data-ticker="AAPL"><span class="chip-name">Apple</span><span class="chip-tag stock">AAPL</span></button>
@@ -1316,7 +1358,7 @@
 
     <!-- Company Brief (E4 onboarding) -->
     <div class="modal-overlay hidden" id="brief-modal">
-      <div class="modal glass brief-modal">
+      <div class="modal glass brief-modal" role="dialog" aria-modal="true" aria-labelledby="brief-title">
         <div class="modal-header">
           <h3 id="brief-title">Company Brief</h3>
           <button class="btn btn-ghost modal-close" id="brief-close">

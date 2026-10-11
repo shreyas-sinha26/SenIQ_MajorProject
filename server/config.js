@@ -491,6 +491,7 @@ const QA = {
   STRATEGY_RULES_INLINE: 6,          // spell out rules only when the saved list is this short
   STRATEGY_EVIDENCE_SYMBOLS: 2,      // held symbols that get SenIQ evidence in explain_strategy_signal
   STRATEGY_PRESETS_MAX: 15,
+  STRATEGY_PRESET_CHARS: 150,        // one template's description in list_strategy_presets
   STRATEGY_VALIDATE_TIMEOUT_MS: 5000, // engine check of a drafted spec; on timeout the app's own check stands
   // A stock the user does not hold (services/stockSnapshot.js): price and sentiment only.
   SNAPSHOT_MAX_NAMES: 3,             // names snapshotted in one code-written answer; the rest are named as not shown
@@ -648,7 +649,7 @@ const DISCLOSURES = {
   // Exchanges whose listings file with the SEC. A holding with no exchange is treated as US
   // unless the curated universe says otherwise.
   US_EXCHANGES: ['US', 'NASDAQ', 'NYSE', 'AMEX', 'NYSEARCA'],
-  CARD_EXCERPT_CHARS: 280,       // per filing in a listing
+  CARD_EXCERPT_CHARS: 240,       // per filing in a listing; six with their answer shape must fit QA.MAX_TOOL_RESULT_CHARS
   DETAIL_EXCERPT_CHARS: 3000,    // when one filing is opened
   LIST_LIMIT: 6,
 };
@@ -660,6 +661,12 @@ const INGEST = {
   // Company queries per run for held Indian names. GDELT rate-limits hard (429), so a large
   // set of holdings is covered a slice at a time, rotating each run.
   GDELT_INDIA_MAX_PER_RUN: 12,
+  // GDELT answers one request every 5 seconds per caller and takes 10 to 12 seconds over
+  // each (measured 2026-10-12). The queries of a run used to go out together with a
+  // 6-second limit: every one was refused or timed out, and GDELT gave 0 stories a run.
+  GDELT_GAP_MS: 5500,            // from one answer to the next request
+  GDELT_TIMEOUT_MS: 20000,       // one request
+  GDELT_BUDGET_MS: 150000,       // a run's GDELT step; what is not reached goes first next run
   // Macro/global queries mapped to the __MARKET__ tag (war/budget/rates).
   GDELT_MACRO_QUERIES: [
     'federal reserve interest rate', 'inflation economy', 'stock market',
@@ -694,6 +701,12 @@ const SMART_MONEY = {
   SEC_RATE_DELAY_MS: 250,        // space SEC requests out (well under their 10 req/s)
   TOP_HOLDINGS: 25,              // top-N holdings surfaced per fund (by value)
   CONGRESS_LOOKBACK_DAYS: 60,    // only ingest recent congress disclosures
+  // The source is asked this often, not on every poll: at two URLs a poll, every 15 minutes
+  // is 192 calls a day of the 250 a free FMP key has, which also serves prices.
+  CONGRESS_FETCH_MINUTES: 180,
+  // A disclosure older than this is stored without an alert: after a gap in the data the
+  // first poll brings weeks of them at once, and none of that is news.
+  CONGRESS_ALERT_DAYS: 7,
   // Free community dataset of congress trades. The classic stock-watcher S3 buckets are
   // currently 403; point this at a working mirror/export to light up LIVE congress data.
   // When unreachable, ingest degrades to the bundled sample (data/congress_sample.json).

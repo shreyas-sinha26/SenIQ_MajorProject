@@ -173,6 +173,21 @@ const FILINGS_SHAPE = 'Answer only what was asked. Asked what was filed: the fil
 const OVERVIEW_SHAPE = 'Only when the question asks to list the holdings or which are the biggest: one holding to a line as "name (ticker) · exposure", largest first (five at most, "about" before an estimated exposure), then how many more in a few words; price, day change and sentiment only if the question asks for them. Any other question: use what it needs from this result in sentences, and leave the rest out.';
 const SMART_MONEY_SHAPE = 'Answer only the kind of disclosure the question asks about: funds, Congress, Indian deals or insiders; all of them only when it asks who has been buying or selling. A yes-or-no question is answered first, in a few words. For each kind asked about that has rows: its summary as written, then the rows given, one to a line, in their order: Congress as "politician · action · ticker · trade date"; funds as "fund · change · position value"; an Indian deal as "client · action · ticker · value · date"; an insider trade as "person (category) · action · ticker · value · date". Say how many more in a few words where a not_shown count is present, and give the funds\' quarter end once when the rows share it. A kind asked about that has no rows: say so in a few words. Never write that a fund bought or sold its position value. Leave out, unless asked: the reporting lag, filing and disclosure dates, share counts, kinds the question did not ask about, and other stocks.';
 
+/**
+ * Rows are dropped from the end of `result[key]` until the result fits (measured as runTool
+ * measures it), and what was left out is counted beside them. runTool's own clamp cuts the
+ * text wherever the limit falls, mid-row and mid-JSON, and says nothing of the rest. Pure.
+ */
+function fitRows(result, key, maxChars = QA.MAX_TOOL_RESULT_CHARS) {
+  const rows = Array.isArray(result[key]) ? result[key] : [];
+  const out = { ...result, [key]: rows.slice() };
+  while (out[key].length > 1 && JSON.stringify(out).length > maxChars) {
+    out[key].pop();
+    out[`${key}_not_shown`] = rows.length - out[key].length;
+  }
+  return out;
+}
+
 // ── Tool definitions (static: part of the cached prompt prefix — keep order stable) ──
 const tickerProp = { type: 'string', description: 'A ticker from the user\'s holdings, e.g. "AAPL".' };
 const daysProp = { type: 'integer', description: `Look-back window in days (1–${QA.NEWS_DAYS_MAX}, default ${QA.NEWS_DAYS_DEFAULT}).` };
@@ -533,6 +548,7 @@ const EXECUTORS = {
     const tickers = ticker ? [requireHeld(ctx, ticker)] : [...ctx.heldSet, '__MARKET__'];
     const d = clampDays(days ?? QA.NEWS_DAYS_MAX);
     const r = await searchNews({ query: String(q).slice(0, 200), tickers, userId: ctx.userId, includeMarket: !ticker, days: d });
+    if (r.mode === 'none') return { window_days: d, search_mode: 'none', results: [], note: 'That query has no word to search for. Ask the user what to look for; do not list other stories as matches.' };
     return { window_days: d, search_mode: r.mode, results: r.results.map((x) => ({ ...x, first_seen: day(x.first_seen), last_seen: day(x.last_seen) })) };
   },
 
@@ -546,7 +562,7 @@ const EXECUTORS = {
     const r = await listDisclosures({ tickers, query: q ? String(q).slice(0, 200) : '', days });
     const uncovered = tickers.filter((t) => !r.covered.includes(t));
     const today = todayIso();
-    return {
+    return fitRows({
       source: 'SEC EDGAR 8-K filings (primary source). `filed` is when it became public.',
       // The days looked back over, so an answer that names the window has it from a result.
       window_days: Math.max(1, Math.min(DISCLOSURES.LOOKBACK_DAYS, Number(days) || DISCLOSURES.LOOKBACK_DAYS)),
@@ -554,7 +570,7 @@ const EXECUTORS = {
       filings: r.results.map((f) => ({ ...f, filed: shortDay(f.filed, today) || f.filed })),
       covered_holdings: r.covered,
       ...(uncovered.length ? { no_filings_available_for: uncovered, why: 'Filings exist only for US-listed stocks SenIQ has already checked; Indian stocks, crypto and commodities have none here, and a newly added US stock is picked up on the next poll.' } : {}),
-    };
+    }, 'filings');
   },
 
   async get_story_detail({ id } = {}, ctx) {
@@ -589,4 +605,4 @@ async function runTool(block, ctx, executors = EXECUTORS) {
   return { type: 'tool_result', tool_use_id: block.id, content, ...(isError ? { is_error: true } : {}) };
 }
 
-module.exports = { TOOLS, EXECUTORS, SMART_MONEY_SHAPE, FILINGS_SHAPE, OVERVIEW_SHAPE, ScopeError, runTool, computeAttribution, rankHoldings, tallyBy, findMentionedTickers, scopeCheck, outOfScopeAnswer, requireHeld };
+module.exports = { TOOLS, EXECUTORS, fitRows, SMART_MONEY_SHAPE, FILINGS_SHAPE, OVERVIEW_SHAPE, ScopeError, runTool, computeAttribution, rankHoldings, tallyBy, findMentionedTickers, scopeCheck, outOfScopeAnswer, requireHeld };

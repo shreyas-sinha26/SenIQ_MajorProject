@@ -110,17 +110,31 @@ async function api(path, opts = {}) {
   return data;
 }
 
-function showSignedOut() {
+// Signing out starts the page again from nothing. Hiding the app was not enough: the next
+// person to sign in on this browser was shown the last user's profile and conversation,
+// and the sign-in form still held the last password typed. The Strategy Builder's draft is
+// kept in this browser's storage, so it goes too. `note` is shown on the fresh page.
+const SIGNED_OUT_NOTE = 'seniq_signed_out_note';
+function showSignedOut(note = null) {
   currentUser = null;
   localStorage.removeItem(SIGNED_IN_HINT);
+  for (const key of ['seniq_builder_ui', 'seniq_custom_strategy']) localStorage.removeItem(key);
   if (refreshInterval) clearInterval(refreshInterval);
+  try { if (note) sessionStorage.setItem(SIGNED_OUT_NOTE, JSON.stringify(note)); } catch { /* the note is a nicety */ }
   document.getElementById('dashboard-view').classList.add('hidden');
-  document.getElementById('auth-view').classList.remove('hidden');
+  location.replace('/app');
 }
 function sessionEnded() {
-  showSignedOut();
+  showSignedOut({ kind: 'error', text: 'Your session has ended — please sign in again.' });
+}
+// The note left by the page that signed out, shown once.
+function showSignedOutNote() {
+  let note = null;
+  try { note = JSON.parse(sessionStorage.getItem(SIGNED_OUT_NOTE)); sessionStorage.removeItem(SIGNED_OUT_NOTE); } catch { /* none */ }
+  if (!note || !note.text) return;
+  if (note.kind !== 'error') return showToast(note.text, 'info');
   const errEl = document.getElementById('auth-error');
-  errEl.textContent = 'Your session has ended — please sign in again.';
+  errEl.textContent = note.text;
   errEl.classList.remove('hidden');
 }
 
@@ -235,6 +249,7 @@ function initAuth() {
       });
       localStorage.setItem(SIGNED_IN_HINT, '1');
       currentUser = data.user;
+      e.target.reset(); // the form does not keep the password once it has worked
       showDashboard();
     } catch (err) {
       errEl.textContent = err.message;
@@ -264,8 +279,18 @@ function initAuth() {
           password: document.getElementById('signup-password').value
         })
       });
+      // With email set up the account waits for its link: back to Sign In, with the note.
+      if (data.confirm) {
+        e.target.reset();
+        switchTab('login');
+        const okEl = document.getElementById('auth-success');
+        okEl.textContent = data.message;
+        okEl.classList.remove('hidden');
+        return;
+      }
       localStorage.setItem(SIGNED_IN_HINT, '1');
       currentUser = data.user;
+      e.target.reset();
       showDashboard();
       showToast('Welcome to SenIQ! 🚀', 'success');
     } catch (err) {
@@ -355,6 +380,9 @@ function initAuth() {
 async function showDashboard() {
   document.getElementById('auth-view').classList.add('hidden');
   document.getElementById('dashboard-view').classList.remove('hidden');
+  // The sign-in page's "?auth=login" and its scroll position do not belong to the app.
+  if (location.search) history.replaceState({}, '', '/app');
+  window.scrollTo(0, 0);
   requestAnimationFrame(moveNavIndicator); // nav is measurable only once the view is shown
 
   // Set user info
@@ -423,7 +451,7 @@ function renderHoldings() {
     // its own, so it is counted at the average size of the others and marked as an estimate.
     const estimated = h.weight_pct == null;
     const exposure = h.exposure_pct != null
-      ? `<span${estimated ? ' class="ht-estimate" title="An estimate: this holding has no quantity or no price, so it is counted at the average size of your other holdings. For an exact share, remove it and add it again with a quantity."' : ''}>${estimated ? '≈' : ''}${h.exposure_pct}%</span>`
+      ? `<span${estimated ? ' class="ht-estimate" title="An estimate: this holding has no quantity or no price, so it is counted at the average size of your other holdings. For an exact share, set its quantity with the edit button."' : ''}>${estimated ? '≈' : ''}${h.exposure_pct}%</span>`
       : '—';
     const priceInline = h.pending
       ? '<span class="ht-price muted">adding…</span>'
@@ -436,20 +464,22 @@ function renderHoldings() {
     // so the columns never fall back to dashes while the next refresh is on its way.
     const s = cachedSentiments[h.ticker];
     const reading = s ? s.label : 'neutral';
-    const sentiLabel = !s ? '—' : s.label === 'positive' ? 'Bullish' : s.label === 'negative' ? 'Bearish' : 'Neutral';
+    const sentiLabel = !s ? '—' : sentiWord(s.label);
     return `
     <tr class="${rowClass.trim()}" data-ticker="${escapeHtml(h.ticker)}" onclick="toggleFilter('${escapeHtml(h.ticker)}')">
       <td>
         <div class="ht-ticker">${escapeHtml(h.ticker)} <span class="asset-class-badge ${cls}">${clsLabel}</span>${h.coverage === 'basic' ? ' <span class="coverage-badge" title="Outside SenIQ\'s curated list of companies. News is matched on the name and symbol only, so expect fewer stories and a thinner sentiment score.">Basic coverage</span>' : ''} ${priceInline}</div>
         <div class="ht-name">${escapeHtml(h.company_name || h.ticker)}</div>
+        ${h.pending ? '' : `<div class="ht-position">${holdingPosition(h)}</div>`}
       </td>
       <td class="ht-exposure">${exposure}</td>
       <td><span class="ht-senti-label ${reading}" id="senti-label-${escapeHtml(h.ticker)}">${sentiLabel}</span></td>
       <td><button class="ht-score-why" type="button" title="See the stories behind this score" onclick="event.stopPropagation(); toggleSentimentDrivers('${escapeHtml(h.ticker)}')"><span class="ht-score ${reading}" id="score-${escapeHtml(h.ticker)}">${s ? Math.round(s.score * 100) : '—'}</span><span class="ht-score-caret" aria-hidden="true">▾</span></button></td>
       <td><span class="ht-headline" id="headline-${escapeHtml(h.ticker)}">${s ? escapeHtml(s.recentHeadline || '—') : '—'}</span></td>
       <td class="ht-actions">
-        <button class="ht-info" onclick="event.stopPropagation(); openBriefFor('${escapeHtml(h.ticker)}')" title="Company brief">ℹ</button>
-        <button class="ht-remove" onclick="event.stopPropagation(); removeStock('${escapeHtml(h.ticker)}')" title="Remove">×</button>
+        <button class="ht-info" onclick="event.stopPropagation(); openBriefFor('${escapeHtml(h.ticker)}')" title="Company brief" aria-label="Company brief for ${escapeHtml(h.ticker)}">ℹ</button>
+        <button class="ht-info" onclick="event.stopPropagation(); editHolding('${escapeHtml(h.ticker)}')" title="Edit quantity and cost" aria-label="Edit quantity and cost of ${escapeHtml(h.ticker)}">✎</button>
+        <button class="ht-remove" onclick="event.stopPropagation(); removeStock('${escapeHtml(h.ticker)}')" title="Remove" aria-label="Remove ${escapeHtml(h.ticker)}">×</button>
       </td>
     </tr>
   `}).join('');
@@ -458,6 +488,23 @@ function renderHoldings() {
     const row = grid.querySelector(`tr[data-ticker="${CSS.escape(openFor)}"]`);
     if (row) row.after(openDrivers);
   }
+}
+
+// One word for a sentiment reading on every page: the Portfolio table said Bullish and
+// Bearish, the Dashboard Neutral and Analytics Positive, Mixed and Negative for one score.
+function sentiWord(label) {
+  return label === 'positive' ? 'Positive' : label === 'negative' ? 'Negative' : 'Neutral';
+}
+
+// What the user holds, under the holding's name: the quantity and the cost per unit they
+// typed, and how the price stands against that cost. Both were asked for and shown nowhere.
+function holdingPosition(h) {
+  if (h.quantity == null) return '<span class="muted">No quantity set</span>';
+  const qty = Number(h.quantity).toLocaleString(undefined, { maximumFractionDigits: 8 });
+  if (h.cost_basis == null) return `${qty} held`;
+  const gain = h.price != null && h.cost_basis > 0 ? ((h.price - h.cost_basis) / h.cost_basis) * 100 : null;
+  const versus = gain == null ? '' : ` <span class="ht-chg ${gain >= 0 ? 'up' : 'down'}" title="The price now against your cost per unit">${gain >= 0 ? '+' : '−'}${Math.abs(gain).toFixed(1)}%</span>`;
+  return `${qty} held · cost ${fmtPrice(h.cost_basis, h.currency)}${versus}`;
 }
 
 // ─── Filter Logic ────────────────────────────────────────────
@@ -601,12 +648,11 @@ function selectSearchResult(ticker) {
   if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+// → { ok: true } | { ok: false, error }. The Add Asset dialog stays open on a refusal, with
+// what was typed still in it, and shows the reason itself.
 async function addStock(ticker, opts = {}) {
   ticker = ticker.toUpperCase().trim();
-  if (holdings.some(h => h.ticker === ticker)) {
-    showToast(`${ticker} already in portfolio`, 'error');
-    return;
-  }
+  if (holdings.some(h => h.ticker === ticker)) return { ok: false, error: `${ticker} is already in your portfolio.` };
   const assetClass = opts.assetClass || assetClassOf(ticker);
   const quantity = opts.quantity ?? null;
   const costBasis = opts.costBasis ?? null;
@@ -616,7 +662,6 @@ async function addStock(ticker, opts = {}) {
   holdings.unshift({ ticker, company_name: ticker, asset_class: assetClass, quantity, id: Date.now(), pending: true });
   document.getElementById('holdings-count').textContent = holdings.length;
   renderHoldings();
-  closeModal();
 
   try {
     const res = await api('/api/portfolio', {
@@ -635,15 +680,87 @@ async function addStock(ticker, opts = {}) {
     loadPortfolio();
     loadPortfolioSentiment();
     loadNewsFeed();
+    return { ok: true };
   } catch (err) {
     holdings = holdings.filter(h => h.ticker !== ticker);
     document.getElementById('holdings-count').textContent = holdings.length;
     renderHoldings();
-    showToast(err.message, 'error');
+    return { ok: false, error: err.message };
   }
 }
 
+// Quantity and cost per unit of a holding already in the portfolio.
+function editHolding(ticker) {
+  const h = holdings.find(x => x.ticker === ticker);
+  if (!h) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="edit-holding-title" style="max-width: 400px;">
+      <div class="modal-header"><h3 id="edit-holding-title"></h3></div>
+      <div class="modal-body">
+        <div class="form-row" style="margin-top:0">
+          <div class="form-group">
+            <label for="edit-quantity">Quantity</label>
+            <input type="number" id="edit-quantity" min="0" step="any" placeholder="e.g. 10" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label for="edit-cost-basis">Cost per unit</label>
+            <input type="number" id="edit-cost-basis" min="0" step="any" placeholder="what you paid" autocomplete="off">
+          </div>
+        </div>
+        <p class="form-hint">Leave a box empty to clear it. Without a quantity the holding is counted at the average size of your others.</p>
+        <p class="form-error hidden" role="alert"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" type="button" data-act="cancel">Cancel</button>
+        <button class="btn btn-primary" type="button" data-act="save">Save</button>
+      </div>
+    </div>`;
+  overlay.querySelector('h3').textContent = `${h.ticker} — quantity and cost`;
+  const qty = overlay.querySelector('#edit-quantity');
+  const cost = overlay.querySelector('#edit-cost-basis');
+  const errEl = overlay.querySelector('.form-error');
+  const saveBtn = overlay.querySelector('[data-act="save"]');
+  qty.value = h.quantity ?? '';
+  cost.value = h.cost_basis ?? '';
+  const close = () => { document.removeEventListener('keydown', onKey); overlay.remove(); };
+  const fail = (text) => { errEl.textContent = text; errEl.classList.remove('hidden'); };
+  const save = async () => {
+    errEl.classList.add('hidden');
+    const values = {};
+    for (const [key, input, name] of [['quantity', qty, 'Quantity'], ['cost_basis', cost, 'Cost per unit']]) {
+      const raw = input.value.trim();
+      if (raw !== '' && !(Number(raw) >= 0)) { fail(`${name} must be zero or more.`); input.focus(); return; }
+      values[key] = raw === '' ? null : Number(raw);
+    }
+    saveBtn.disabled = true;
+    try {
+      await api(`/api/portfolio/${encodeURIComponent(h.ticker)}`, { method: 'PUT', body: JSON.stringify(values) });
+      close();
+      showToast(`${h.ticker} updated`, 'success');
+      // Every holding's share follows from the quantities, so the whole list is read again.
+      loadPortfolio();
+    } catch (err) {
+      saveBtn.disabled = false;
+      fail(err.message);
+    }
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); else if (e.key === 'Enter') { e.preventDefault(); save(); } };
+  overlay.addEventListener('click', (e) => {
+    const act = e.target.closest('[data-act]');
+    if (act && act.dataset.act === 'save') save();
+    else if (act || e.target === overlay) close();
+  });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+  qty.focus();
+}
+
 async function removeStock(ticker) {
+  // One click used to remove a holding for good: its monitoring start and what was typed
+  // for it cannot be brought back, so ask first.
+  if (!(await confirmAction(`Remove ${ticker} from your portfolio? Its alerts history stays, but monitoring stops and its quantity and cost are forgotten.`, 'Remove'))) return;
   // Optimistic: immediately remove the card
   const removed = holdings.find(h => h.ticker === ticker);
   holdings = holdings.filter(h => h.ticker !== ticker);
@@ -673,8 +790,10 @@ async function loadNewsFeed() {
     cachedBuckets = data.buckets || { holdings: [], market: [], world: [] };
     renderFilteredNews();
     renderDashboardSummary();
+    return true;
   } catch (err) {
     console.error('News feed error:', err);
+    return false;
   }
 }
 
@@ -694,7 +813,7 @@ function renderNewsItem(a) {
   // The engine's own figures for this reader: how much the story matters to their
   // portfolio, which way it reads for what they hold, and how much of it the story reaches.
   const LEVEL_WORD = { high: 'High', medium: 'Medium', low: 'Low' };
-  const READS = { positive: 'Reads positive', negative: 'Reads negative', neutral: 'Reads mixed' };
+  const READS = { positive: 'Reads positive', negative: 'Reads negative', neutral: 'Reads neutral' };
   let engineLine;
   if (a.impact == null) {
     engineLine = '<span class="ni-label">Not linked to your holdings</span>';
@@ -805,8 +924,10 @@ async function loadAlerts() {
     cachedAlerts = data.alerts || [];
     renderFilteredAlerts();
     renderDashboardSummary();
+    return true;
   } catch (err) {
     console.error('Alerts error:', err);
+    return false;
   }
 }
 
@@ -886,8 +1007,7 @@ async function loadPortfolioSentiment() {
       const scoreEl = document.getElementById(`score-${ticker}`);
       const headlineEl = document.getElementById(`headline-${ticker}`);
       if (sentiEl) {
-        const lbl = s.label === 'positive' ? 'Bullish' : s.label === 'negative' ? 'Bearish' : 'Neutral';
-        sentiEl.textContent = lbl;
+        sentiEl.textContent = sentiWord(s.label);
         sentiEl.className = `ht-senti-label ${s.label}`;
       }
       if (scoreEl) {
@@ -900,8 +1020,10 @@ async function loadPortfolioSentiment() {
     }
 
     renderFilteredSentiment();
+    return true;
   } catch (err) {
     console.error('Sentiment error:', err);
+    return false;
   }
 }
 
@@ -1010,7 +1132,7 @@ function renderFilteredSentiment() {
   const one = activeFilter && cachedSentiments[activeFilter];
   const score = one ? Math.round(one.score * 100) : cachedOverallScore;
   const reading = one ? one.label : cachedOverallLabel;
-  const label = reading === 'positive' ? 'Bullish' : reading === 'negative' ? 'Bearish' : 'Neutral';
+  const label = sentiWord(reading);
 
   document.getElementById('portfolio-score').textContent = score;
   const labelEl = document.getElementById('portfolio-score-label');
@@ -1035,7 +1157,7 @@ function renderFilteredSentiment() {
 // engine's own, the same ones the "why" button on a holding and Ask use.
 let cachedBreakdown = null;
 let breakdownLoadedAt = 0;
-const SENTI_WORD = { positive: 'Positive', negative: 'Negative', neutral: 'Mixed' };
+const SENTI_WORD = { positive: 'Positive', negative: 'Negative', neutral: 'Neutral' }; // the words sentiWord() gives
 const SENTI_COLOR = { positive: '#14B86A', negative: '#EF4444', neutral: '#94A3B8' };
 const signed = (n, d = 1) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(Number(n)).toFixed(d)}`;
 
@@ -1077,7 +1199,7 @@ function renderAnalyticsSummary(b, shown) {
     return;
   }
   if (p.weighted_score == null) { el.innerHTML = `<p class="empty-state small">No scored articles on your holdings in the last ${b.window_hours} hours, so there is nothing to read yet.</p>`; return; }
-  const parts = [`${p.positive} positive`, `${p.neutral} mixed`, `${p.negative} negative`];
+  const parts = [`${p.positive} positive`, `${p.neutral} neutral`, `${p.negative} negative`];
   const quiet = p.holdings - p.with_news;
   const lines = [
     `Weighted by position size, the news across your holdings reads <span class="an-pill ${p.label}">${SENTI_WORD[p.label]}</span> at <strong>${p.weighted_score}</strong> out of 100. The plain average, counting every holding equally, is ${p.score}.`,
@@ -1098,7 +1220,13 @@ function analyticsSentence(h, b) {
   let s = `News on ${t} reads <strong>${SENTI_WORD[h.label].toLowerCase()}</strong> (${h.score}).`;
   if (h.baseline) {
     if (h.baseline.z == null) s += ' There is too little history yet to compare it with its own normal.';
-    else if (Math.abs(h.baseline.z) < 0.5) s += ` That is in line with its own normal of ${h.baseline.usual}.`;
+    else if (Math.abs(h.baseline.z) < 0.5) {
+      // Close to its normal by its own spread. When the two figures are still far apart in
+      // points, "in line with" read as a contradiction ("negative (35) … normal of 48").
+      s += Math.abs(h.score - h.baseline.usual) >= 8
+        ? ` Its own normal is ${h.baseline.usual}, and its score swings widely enough that this is still inside its usual range.`
+        : ` That is in line with its own normal of ${h.baseline.usual}.`;
+    }
     else s += ` That is ${Math.abs(h.baseline.z).toFixed(1)}σ ${h.baseline.z > 0 ? 'above' : 'below'} its own normal of ${h.baseline.usual}${Math.abs(h.baseline.z) >= 1 ? ', which is unusual for it' : ''}.`;
   }
   const m = h.momentum;
@@ -1130,7 +1258,7 @@ function analyticsCard(h, b) {
   const seg = (k) => (h.split[k] ? `<i class="${k}" style="flex:${h.split[k]}" title="${h.split[k]} ${SENTI_WORD[k].toLowerCase()}"></i>` : '');
   const split = total
     ? `<div><div class="an-split">${seg('positive')}${seg('neutral')}${seg('negative')}</div>
-        <div class="an-split-text">${total} read: ${h.split.positive} positive · ${h.split.neutral} mixed · ${h.split.negative} negative</div></div>`
+        <div class="an-split-text">${total} read: ${h.split.positive} positive · ${h.split.neutral} neutral · ${h.split.negative} negative</div></div>`
     : '<span class="muted">None in the window</span>';
   const move = h.change_pct == null ? '' : ` · latest session ${signed(h.change_pct, 2)}%`;
   let drivers = '';
@@ -1167,7 +1295,7 @@ function analyticsCard(h, b) {
 
 // ─── Sentiment Chart ─────────────────────────────────────────
 // Bars = the score now, coloured by its reading. The dash on each bar = that holding's own
-// 90-day normal (Plus). The shaded band is the mixed zone, 40 to 60.
+// 90-day normal (Plus). The shaded band is the neutral zone, 40 to 60.
 const mixedZoneBand = {
   id: 'mixedZoneBand',
   beforeDatasetsDraw(chart) {
@@ -1188,10 +1316,10 @@ function renderAnalyticsChart(b, shown) {
   const hasUsual = b.depth === 'full' && rows.some((h) => h.baseline && h.baseline.usual != null);
   document.getElementById('an-legend').innerHTML = [
     '<span><i class="an-key" style="background:#14B86A"></i>Positive, above 60</span>',
-    '<span><i class="an-key" style="background:#94A3B8"></i>Mixed, 40 to 60</span>',
+    '<span><i class="an-key" style="background:#94A3B8"></i>Neutral, 40 to 60</span>',
     '<span><i class="an-key" style="background:#EF4444"></i>Negative, below 40</span>',
     hasUsual ? `<span><i class="an-key dash"></i>Its own ${b.baseline_days}-day normal</span>` : '',
-    '<span><i class="an-key band"></i>Mixed zone</span>',
+    '<span><i class="an-key band"></i>Neutral zone</span>',
   ].join('');
   document.getElementById('an-chart-caption').textContent = hasUsual
     ? 'Read each bar against its own dash, not against the other bars: a bar well above or below its dash is the unusual one, whatever its height.'
@@ -1295,28 +1423,43 @@ function initModal() {
   const input = document.getElementById('stock-ticker');
   const autocomplete = document.getElementById('asset-autocomplete');
 
+  const addBtn = document.getElementById('modal-add');
+  const addError = document.getElementById('add-asset-error');
+  const showAddError = (text) => { addError.textContent = text; addError.classList.remove('hidden'); };
   document.getElementById('add-stock-btn').addEventListener('click', () => { modal.classList.remove('hidden'); input.focus(); });
   document.getElementById('modal-close').addEventListener('click', closeModal);
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
   modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
 
-  // Commit the modal: resolve the typed value to a ticker, read class + size, add.
-  function commitAdd() {
+  // Commit the modal: resolve the typed value to a ticker, read class + size, add. The
+  // dialog closes only when the holding has gone in. A refusal is shown here, with what
+  // was typed still in the boxes: it used to close, toast the reason and throw the entry away.
+  async function commitAdd() {
+    addError.classList.add('hidden');
     const val = input.value.trim();
-    if (!val) return;
+    if (!val) { showAddError('Type a company name or a ticker first.'); input.focus(); return; }
     const exactMatch = ASSET_DB.find(a => a.ticker.toLowerCase() === val.toLowerCase() || a.name.toLowerCase() === val.toLowerCase());
     const ticker = exactMatch ? exactMatch.ticker : val.toUpperCase();
 
-    const qtyRaw = document.getElementById('asset-quantity').value.trim();
-    const costRaw = document.getElementById('asset-cost-basis').value.trim();
-    addStock(ticker, {
+    const qtyEl = document.getElementById('asset-quantity');
+    const costEl = document.getElementById('asset-cost-basis');
+    const qtyRaw = qtyEl.value.trim();
+    const costRaw = costEl.value.trim();
+    // A number box reports '' for text it cannot read, so validity is asked of the box itself.
+    if (qtyEl.validity.badInput || (qtyRaw !== '' && !(Number(qtyRaw) >= 0))) { showAddError('Quantity must be zero or more.'); qtyEl.focus(); return; }
+    if (costEl.validity.badInput || (costRaw !== '' && !(Number(costRaw) >= 0))) { showAddError('Cost per unit must be zero or more.'); costEl.focus(); return; }
+    addBtn.disabled = true;
+    const out = await addStock(ticker, {
       assetClass: document.getElementById('asset-class').value,
       quantity: qtyRaw === '' ? null : Number(qtyRaw),
       costBasis: costRaw === '' ? null : Number(costRaw),
     });
+    addBtn.disabled = false;
+    if (out.ok) closeModal();
+    else showAddError(out.error);
   }
 
-  document.getElementById('modal-add').addEventListener('click', commitAdd);
+  addBtn.addEventListener('click', commitAdd);
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -1412,7 +1555,19 @@ function closeModal() {
   document.getElementById('asset-cost-basis').value = '';
   document.getElementById('asset-class').value = 'equity';
   document.getElementById('asset-autocomplete').classList.add('hidden');
+  document.getElementById('add-asset-error').classList.add('hidden');
 }
+
+// Escape closes whichever of the page's own dialogs is open (the confirm and edit dialogs
+// handle it themselves).
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('add-stock-modal').classList.contains('hidden')) return closeModal();
+  for (const id of ['brief-modal', 'save-strategy-modal']) {
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains('hidden')) return el.classList.add('hidden');
+  }
+});
 
 // ─── User Menu ───────────────────────────────────────────────
 let previousPage = 'dashboard';
@@ -1438,14 +1593,16 @@ function initUserMenu() {
   document.getElementById('logout-btn').addEventListener('click', async () => {
     // Ends the session on the server; the page signs out here whether or not that call lands.
     try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* signed out locally regardless */ }
-    showSignedOut();
-    showToast('Signed out', 'info');
+    showSignedOut({ kind: 'info', text: 'Signed out' });
   });
 
   document.getElementById('refresh-btn').addEventListener('click', async () => {
     showToast('Refreshing data...', 'info');
-    await Promise.all([loadNewsFeed(), loadAlerts(), loadPortfolioSentiment()]);
-    showToast('Data refreshed!', 'success');
+    // "Data refreshed!" used to follow a refresh in which every call had failed.
+    const loaded = await Promise.all([loadNewsFeed(), loadAlerts(), loadPortfolioSentiment()]);
+    if (loaded.every(Boolean)) showToast('Data refreshed!', 'success');
+    else if (loaded.some(Boolean)) showToast('Partly refreshed: some of the data could not be loaded.', 'info');
+    else showToast('Could not refresh. What you see is the last data loaded.', 'error');
   });
 
   // Password visibility toggles on profile page
@@ -1503,6 +1660,58 @@ function initUserMenu() {
       document.getElementById('profile-pw-btn').disabled = false;
     }
   });
+
+  initAccountControls();
+}
+
+// ─── Change of email address, account deletion ───────────────
+function initAccountControls() {
+  const form = document.getElementById('email-change-form');
+  const msgEl = document.getElementById('email-change-msg');
+  const closeForm = () => {
+    form.classList.add('hidden');
+    document.getElementById('email-change-new').value = '';
+    document.getElementById('email-change-pw').value = '';
+  };
+  document.getElementById('email-change-open').addEventListener('click', () => form.classList.toggle('hidden'));
+  document.getElementById('email-change-cancel').addEventListener('click', closeForm);
+  document.getElementById('email-change-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('email-change-btn');
+    const email = document.getElementById('email-change-new').value.trim();
+    const password = document.getElementById('email-change-pw').value;
+    if (!email || !password) return showProfileMsg(msgEl, 'Enter the new address and your password', 'error');
+    btn.disabled = true;
+    try {
+      const r = await api('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ email, password }) });
+      closeForm();
+      const status = document.getElementById('email-change-status');
+      status.textContent = r.message;
+      status.className = 'email-verify-status warn';
+    } catch (err) {
+      showProfileMsg(msgEl, err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('delete-account-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('delete-account-btn');
+    const delMsg = document.getElementById('delete-account-msg');
+    const confirm = document.getElementById('delete-account-email').value.trim();
+    const password = document.getElementById('delete-account-pw').value;
+    if (!currentUser || confirm.toLowerCase() !== String(currentUser.email).toLowerCase()) {
+      return showProfileMsg(delMsg, 'Type this account\'s email address to confirm', 'error');
+    }
+    if (!(await confirmAction('Delete your SenIQ account and everything in it? This cannot be undone.', 'Delete account'))) return;
+    btn.disabled = true;
+    try {
+      await api('/api/auth/delete-account', { method: 'POST', body: JSON.stringify({ confirm, password }) });
+      showSignedOut({ kind: 'info', text: 'Your account has been deleted.' });
+    } catch (err) {
+      showProfileMsg(delMsg, err.message, 'error');
+      btn.disabled = false;
+    }
+  });
 }
 
 function showProfileMsg(el, text, type) {
@@ -1520,6 +1729,8 @@ function openProfilePage() {
   loadPlans();
   loadApiKeys();
   loadEmailPrefs();
+  // The delete form starts empty each time the page is opened.
+  for (const id of ['delete-account-email', 'delete-account-pw']) document.getElementById(id).value = '';
   moveNavIndicator();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -1691,6 +1902,12 @@ async function loadEmailPrefs() {
     status.textContent = p.email_verified ? 'Verified' : 'Not verified — alert and report emails are only sent to a verified address';
     status.className = `email-verify-status ${p.email_verified ? 'ok' : 'warn'}`;
     btn.classList.toggle('hidden', !!p.email_verified);
+    // A change of address that is waiting for its link, and what an account with no
+    // password (Google or GitHub only) is asked for when it deletes itself.
+    const changeStatus = document.getElementById('email-change-status');
+    changeStatus.textContent = p.pending_email ? `Waiting for the link sent to ${p.pending_email} to be opened` : '';
+    changeStatus.className = `email-verify-status ${p.pending_email ? 'warn' : ''}`;
+    document.getElementById('delete-account-pw-group').classList.toggle('hidden', !p.has_password);
   } catch { /* leave the controls as they are */ }
 }
 
@@ -1939,6 +2156,7 @@ function renderInstitutions() {
     const following = cachedFollows.has(followKey('institution', i.slug));
     const period = i.period_of_report ? `${fmtDate(i.period_of_report)}` : 'no filing yet';
     const filed = i.filed_at ? `filed ${fmtDate(i.filed_at)}` : '';
+    const behind = instBehind(i.period_of_report);
     return `
       <div class="inst-card ${openInstSlug === i.slug ? 'active' : ''}" data-slug="${i.slug}" onclick="openInstitution('${i.slug}')">
         <div class="inst-card-top">
@@ -1954,6 +2172,7 @@ function renderInstitutions() {
         <div class="inst-card-meta">
           <span>${escapeHtml(period)}</span>
           <span>${escapeHtml(filed)}</span>
+          ${behind ? `<span class="inst-old" title="${escapeHtml(behind.why)}">${escapeHtml(behind.label)}</span>` : ''}
           ${i.holdings_count ? `<span><span class="val">${i.holdings_count}</span> holdings</span>` : ''}
           ${i.total_value ? `<span class="val">${fmtMoney(i.total_value)}</span>` : ''}
         </div>
@@ -1962,6 +2181,21 @@ function renderInstitutions() {
   if (instTeaser && !instSearchQuery) {
     grid.insertAdjacentHTML('beforeend', upgradeNote(`Showing ${cachedInstitutions.length} of ${instTeaser.total} funds — unlock all on Plus.`));
   }
+}
+
+// A 13F is due 45 days after each quarter ends. A fund whose newest filing here is for a
+// quarter whose successor is already past that deadline is behind: either it has stopped
+// filing (Scion) or its newer filing has not been read yet. The card used to show the old
+// quarter with nothing to say so. → { label, why } | null
+const INST_BEHIND_DAYS = 140; // a quarter (about 91 days) plus the 45-day deadline, with a few days' grace
+function instBehind(periodOfReport, today = new Date()) {
+  const days = lagDays(periodOfReport, today.toISOString().slice(0, 10));
+  if (days == null || days <= INST_BEHIND_DAYS) return null;
+  const months = Math.round(days / 30.4);
+  return {
+    label: `${months} months old`,
+    why: `The newest filing SenIQ has for this fund is for the quarter that ended ${fmtDate(periodOfReport)}. A later quarter's filing was due by now: the fund may have stopped filing, or its newer filing has not been read yet.`,
+  };
 }
 
 async function openInstitution(slug) {
@@ -2002,11 +2236,14 @@ function renderInstitutionDetail(data) {
     <div class="inst-detail-head">
       <h3>${escapeHtml(institution.name)} · ${escapeHtml(institution.manager || '')}</h3>
       <div class="inst-detail-dates">
-        Quarter end <b>${fmtDate(filing.period_of_report)}</b> · Filed <b>${fmtDate(filing.filed_at)}</b>
+        Quarter end <b>${fmtDate(filing.period_of_report)}</b>${instBehind(filing.period_of_report) ? ` <span class="inst-old" title="${escapeHtml(instBehind(filing.period_of_report).why)}">${escapeHtml(instBehind(filing.period_of_report).label)}</span>` : ''} · Filed <b>${fmtDate(filing.filed_at)}</b>
         · ${filing.holdings_count} positions · ${fmtMoney(filing.total_value)}
       </div>
     </div>
-    <div class="holdings-table">${rows || '<p class="empty-state small">No holdings parsed.</p>'}</div>`;
+    <div class="holdings-table">${rows || '<p class="empty-state small">No holdings parsed.</p>'}</div>
+    ${data.teaser ? upgradeNote(`Showing the top ${holdings.length} of ${data.total} positions — unlock the full list on Plus.`) : ''}`;
+  // The panel opens under the grid, often below the fold: bring it into view.
+  detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 async function loadCongress() {
@@ -2014,8 +2251,26 @@ async function loadCongress() {
     const data = await api(`/api/smart-money/congress?scope=${congressScope}&limit=60`);
     cachedCongress = data.trades || [];
     congressTeaser = data.teaser ? { total: data.total } : null;
+    document.getElementById('congress-sample-badge')?.classList.toggle('hidden', !data.sample);
+    renderCongressAsOf(data.newestDisclosure, data.sample);
     renderCongress();
   } catch (err) { console.error('Congress load error:', err); }
+}
+
+// How recent the list is. A source that has stopped looks the same as one with nothing
+// new, so past the legal reporting lag the line says nothing newer has come in.
+const CONGRESS_STALE_DAYS = 45;
+function renderCongressAsOf(newest, sample) {
+  const el = document.getElementById('congress-asof');
+  if (!el) return;
+  if (!newest || sample) { el.classList.add('hidden'); return; }
+  const age = lagDays(newest, new Date().toISOString().slice(0, 10));
+  const stale = age != null && age > CONGRESS_STALE_DAYS;
+  el.textContent = stale
+    ? `Newest disclosure on record: ${fmtDate(newest)}. Nothing newer has come in for ${age} days, so recent trades are missing from this list.`
+    : `Newest disclosure on record: ${fmtDate(newest)}.`;
+  el.classList.toggle('stale', stale);
+  el.classList.remove('hidden');
 }
 
 function renderCongress() {
@@ -2316,7 +2571,15 @@ async function loadIpoCalendar() {
 // The US table. A US issue has a ticker and a stated status from the day it files, and no
 // lot size, grey market or subscription figures.
 const IPO_US_STAGE_LABEL = { announced: 'Filed', upcoming: 'Expected', closed: 'Priced', listed: 'Trading', withdrawn: 'Withdrawn' };
-const IPO_US_DATE_LABEL = { announced: 'filed', withdrawn: 'withdrawn' };
+// The date a US row shows, and the word under it saying what day that is. A filed issue
+// can carry the day it filed (status_date) or the day it expects to list (listing_date):
+// the second used to be shown with "filed" under it. → [day, word]
+function ipoUsDate(i) {
+  if (i.stage === 'announced') return i.status_date ? [i.status_date, 'filed'] : [i.listing_date, i.listing_date ? 'expected' : ''];
+  if (i.stage === 'withdrawn') return [i.status_date || i.listing_date, 'withdrawn'];
+  if (i.stage === 'upcoming') return [i.listing_date || i.status_date, i.listing_date ? 'expected' : ''];
+  return [i.first_trade_date || i.listing_date || i.status_date, ''];
+}
 
 function ipoUsPrice(i) {
   const d = (v) => `$${Number(v).toFixed(2)}`;
@@ -2330,13 +2593,13 @@ function renderUsIpoTable(issues) {
       <table class="holdings-tbl ipo-tbl">
         <thead><tr><th>Company</th><th>Stage</th><th>Date</th><th>Price</th><th>Shares</th><th>Deal size</th></tr></thead>
         <tbody>${issues.map(i => {
-          const day = i.first_trade_date || i.listing_date || i.status_date;
+          const [day, dayWord] = ipoUsDate(i);
           return `
           <tr ${IPO_ROW_ATTRS} data-ipo="${i.id}">
             <td><span class="ipo-name">${escapeHtml(i.name)}</span>
                 <span class="ipo-meta">${[i.exchange, i.symbol, i.is_spac ? 'SPAC' : '', ipoStoryCount(i)].filter(Boolean).map(escapeHtml).join(' · ')}${ipoAddButton(i)}</span></td>
             <td><span class="ipo-stage ${i.stage}">${IPO_US_STAGE_LABEL[i.stage] || escapeHtml(i.stage)}</span></td>
-            <td class="mono">${ipoDay(day)}${day && IPO_US_DATE_LABEL[i.stage] ? `<span class="ipo-meta ipo-lot">${IPO_US_DATE_LABEL[i.stage]}</span>` : ''}${ipoListingNote(i, '$')}</td>
+            <td class="mono">${ipoDay(day)}${day && dayWord ? `<span class="ipo-meta ipo-lot">${dayWord}</span>` : ''}${ipoListingNote(i, '$')}</td>
             <td class="mono">${ipoUsPrice(i)}</td>
             <td class="mono">${i.shares ? fmtMoney(i.shares).replace('$', '') : '—'}</td>
             <td class="mono">${i.issue_size_usd ? fmtMoney(i.issue_size_usd) : '—'}</td>
@@ -2384,7 +2647,9 @@ function ipoArcChart(issue, arc) {
   if (!arc.length) return '';
   const W = 640, H = 150, L = 34, R = 14, T = 16, B = 26;
   const t = (d) => Date.parse(d);
-  const marks = [['Opens', issue.open_date], ['Closes', issue.close_date], ['Lists', issue.listing_date]].filter(([, d]) => d);
+  // A listing day that has not come yet is an expectation, not a listing.
+  const listed = issue.first_trade_date || ['listed', 'closed'].includes(issue.stage);
+  const marks = [['Opens', issue.open_date], ['Closes', issue.close_date], [listed ? 'Lists' : 'Expected', issue.listing_date]].filter(([, d]) => d);
   const days = [...arc.map(p => p.day), ...marks.map(([, d]) => d)];
   const lo = Math.min(...days.map(t)) - 86400e3, hi = Math.max(...days.map(t)) + 86400e3;
   const x = (d) => L + ((t(d) - lo) / (hi - lo)) * (W - L - R);
@@ -2488,7 +2753,20 @@ let btChart = null;         // Chart.js instance for the equity curve
 let btInitDone = false;
 let btLastBody = null;      // body of the last successful backtest (re-used by the robustness check)
 
+// Said wherever the strategy engine cannot be reached. The old wording ("Start it and
+// revisit this page") was addressed to whoever runs the server, not to the person reading.
+const ENGINE_DOWN = 'The strategy engine cannot be reached right now. Please try again in a few minutes.';
+const BT_LOCKED = 'Backtesting is a Plus feature. <a href="#" onclick="switchToPage(\'profile\');return false;">Upgrade your plan</a> to run strategies over history.';
+
 async function initBacktestPage() {
+  // A plan without backtests gets the lock and its reason, like Your Strategies and Paper
+  // Trade beside it: the whole form used to be shown with no word that it would be refused.
+  if (currentTier() === 'free') {
+    document.getElementById('bt-form').classList.add('hidden');
+    document.getElementById('bt-results').classList.add('hidden');
+    btStatus(`<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>${BT_LOCKED}</p></div>`);
+    return;
+  }
   if (!btInitDone) {
     btInitDone = true;
     document.getElementById('bt-form').addEventListener('submit', runBacktest);
@@ -2540,9 +2818,7 @@ async function loadBtCatalog() {
   } catch (err) {
     btCatalog = null;
     document.getElementById('bt-form').classList.add('hidden');
-    const msg = err.status === 503
-      ? 'The strategy engine is offline. Start it and revisit this page.'
-      : (err.message || 'Could not load the strategy catalog.');
+    const msg = err.status === 503 ? ENGINE_DOWN : (err.message || 'Could not load the strategy catalog.');
     btStatus(`<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">cloud_off</span><p>${escapeHtml(msg)}</p></div>`);
   }
 }
@@ -2631,9 +2907,9 @@ async function runBacktest(e) {
     document.getElementById('bt-results').classList.add('hidden');
     if (err.status === 402) {
       const need = err.data && err.data.upgrade ? err.data.upgrade.requiredLabel : 'Plus';
-      btStatus(`<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>Backtesting is a ${escapeHtml(need)} feature. <a href="#" onclick="switchToPage('profile');return false;">Upgrade your plan</a> to run strategies over history.</p></div>`);
+      btStatus(`<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">lock</span><p>${BT_LOCKED.replace('a Plus feature', `a ${escapeHtml(need)} feature`)}</p></div>`);
     } else if (err.status === 503) {
-      btStatus('<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">cloud_off</span><p>The strategy engine is offline. Start it and try again.</p></div>');
+      btStatus(`<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">cloud_off</span><p>${ENGINE_DOWN}</p></div>`);
     } else {
       showToast(err.message || 'Backtest failed', 'error');
     }
@@ -2696,7 +2972,7 @@ async function runBtCompare() {
       <div class="bt-compare-note">Buy and hold over the same period: <strong>${p(d.buy_hold_return_pct)}</strong> · ${d.seniq_conditions_removed} SenIQ ${d.seniq_conditions_removed === 1 ? 'condition' : 'conditions'} removed for the price-only run.</div>
       <ul class="bt-compare-caveats">${(d.notes || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
   } catch (err) {
-    body.innerHTML = `<div class="bt-compare-note warn">${escapeHtml(err.status === 503 ? 'The strategy engine is offline. Start it and try again.' : (err.message || 'The comparison could not be run.'))}</div>`;
+    body.innerHTML = `<div class="bt-compare-note warn">${escapeHtml(err.status === 503 ? ENGINE_DOWN : (err.message || 'The comparison could not be run.'))}</div>`;
   } finally {
     btn.disabled = false;
   }
@@ -2734,6 +3010,22 @@ function renderBtResults(data) {
     covEl.classList.add('hidden');
   }
 
+  // A range too short for the strategy's slowest indicator cannot produce a signal: the
+  // engine says so, and "0 trades" is not shown as if it were a result.
+  // A position still open when the range ends is in the final equity and in no closed
+  // trade, so the trades below did not add up to the return above.
+  const notes = [];
+  if (data.range_note) notes.push(`<div class="bt-coverage bt-coverage-warn"><span class="material-symbols-outlined">warning</span><span>${escapeHtml(data.range_note)}</span></div>`);
+  for (const pos of (data.open_positions || [])) {
+    const paid = Number(pos.avg_cost), mark = Number(pos.mark_price), qty = Number(pos.qty);
+    const open = (mark - paid) * qty;
+    notes.push(`<div class="bt-coverage bt-coverage-ok"><span class="material-symbols-outlined">hourglass_top</span><span>
+      Still holding <strong>${qty.toLocaleString()} ${escapeHtml(pos.symbol)}</strong> when the range ends: bought at ${btNum(paid)}, last price ${btNum(mark)},
+      worth ${Number(pos.market_value).toLocaleString(undefined, { maximumFractionDigits: 0 })} (<span class="${open >= 0 ? 'pos' : 'neg'}">${open >= 0 ? '+' : '−'}${Math.abs(open).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span> so far).
+      It counts in the final equity and the return, and is not in the closed trades listed below.</span></div>`);
+  }
+  document.getElementById('bt-notes').innerHTML = notes.join('');
+
   const cards = [
     { label: 'Total return', value: btPct(m.total_return_pct), cls: positive ? 'pos' : 'neg' },
     { label: 'Final equity', value: Number(m.final_equity).toLocaleString(undefined, { maximumFractionDigits: 0 }) },
@@ -2741,7 +3033,7 @@ function renderBtResults(data) {
     { label: 'CAGR', value: btPct(m.cagr) },
     { label: 'Sharpe', value: btNum(m.sharpe) },
     { label: 'Win rate', value: btPct(m.win_rate) },
-    { label: 'Trades', value: m.n_trades },
+    { label: 'Closed trades', value: m.n_trades },
     { label: 'Exposure', value: btPct(m.exposure_pct) },
   ];
   // The question a single-symbol backtest has to answer: did the rules beat just holding it?
@@ -2807,7 +3099,9 @@ function renderBtResults(data) {
           <td>${t.holding_days}</td>
         </tr>`;
       }).join('')
-    : '<tr><td colspan="9" class="bt-no-trades">No completed trades in this window — the strategy never triggered (or a position is still open).</td></tr>';
+    : `<tr><td colspan="9" class="bt-no-trades">${(data.open_positions || []).length
+        ? 'No trade was closed in this range: the strategy bought and is still holding (see the note above).'
+        : 'No trade in this range: the strategy\'s entry rule never fired.'}</td></tr>`;
 
   document.getElementById('bt-results').classList.remove('hidden');
   document.getElementById('bt-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2843,17 +3137,17 @@ async function runWalkForward() {
         <span class="brief-muted">${s.n_valid_folds} of ${s.n_folds} folds usable · ${traded} traded${s.oos_consistency != null ? ` · profitable in ${btPct(s.oos_consistency)} of the unseen windows that traded` : ''}</span>
       </div>
       <div class="bt-trades-scroll"><table class="bt-wf-table">
-        <thead><tr><th>Fold</th><th>Judged on</th><th>Return</th><th>Then tested on</th><th>Return</th><th>Max drawdown</th><th>Trades</th></tr></thead>
+        <thead><tr><th>Fold</th><th>Judged on</th><th>Return</th><th>Then tested on</th><th>Return</th><th>Max drawdown</th><th>Closed trades</th></tr></thead>
         <tbody>${wf.folds.map(f => `<tr>
           <td>${f.index}</td>
           <td>${f.is_start} → ${f.is_end}</td>${cell(f.is_metrics && f.is_metrics.total_return_pct)}
           <td>${f.oos_start} → ${f.oos_end}</td>${sat(f) ? '<td class="brief-muted">no trade</td>' : cell(f.oos_metrics && f.oos_metrics.total_return_pct)}
           <td>${f.oos_metrics && !sat(f) ? btPct(f.oos_metrics.max_drawdown_pct) : '—'}</td>
-          <td>${f.oos_metrics ? f.oos_metrics.n_trades : '—'}</td>
+          <td>${!f.oos_metrics || sat(f) ? '—' : f.oos_metrics.n_trades === 0 ? '<span title="The strategy bought in this window and was still holding when it ended, so no trade was closed.">0 · still holding</span>' : f.oos_metrics.n_trades}</td>
         </tr>`).join('')}</tbody>
       </table></div>`;
   } catch (err) {
-    out.innerHTML = `<p class="bt-wf-hint">${escapeHtml(err.status === 503 ? 'The strategy engine is offline.' : (err.message || 'Robustness check failed'))}</p>`;
+    out.innerHTML = `<p class="bt-wf-hint">${escapeHtml(err.status === 503 ? ENGINE_DOWN : (err.message || 'Robustness check failed'))}</p>`;
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<span class="material-symbols-outlined">fact_check</span> Run check';
@@ -2933,7 +3227,7 @@ function sbFactorLabel(f, i) {
 
 // Reads the current DOM rows back into the UI model.
 function sbReadUi() {
-  const ui = { name: document.getElementById('sb-name').value.trim() || 'My strategy', factors: [], entry: [], exit: [] };
+  const ui = { name: document.getElementById('sb-name').value.trim(), factors: [], entry: [], exit: [] };
   document.querySelectorAll('#sb-factors .sb-row').forEach(row => {
     const fn = row.querySelector('.sb-fn').value;
     const params = {};
@@ -2973,6 +3267,8 @@ function sbNum(v) {
 const SB_WINDOW_MAX = { window_days: 365 };
 function sbCheckUi(ui) {
   const problems = [];
+  // An empty name used to become "My strategy" without a word.
+  if (!ui.name) problems.push('The strategy has no name — give it one.');
   ui.factors.forEach((f, i) => {
     for (const [k, v] of Object.entries(f.params)) {
       if (typeof SB_PARAMS[f.fn]?.[k] === 'string') continue; // optional text
@@ -3153,7 +3449,7 @@ async function initBuilderPage() {
   } catch (err) {
     sbInitDone = false; // retry on next visit
     statusEl.classList.remove('hidden');
-    statusEl.innerHTML = '<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">cloud_off</span><p>The strategy engine is offline. Start it and revisit this page.</p></div>';
+    statusEl.innerHTML = `<div class="empty-state"><span class="material-symbols-outlined strat-ph-icon">cloud_off</span><p>${ENGINE_DOWN}</p></div>`;
     return;
   }
 
@@ -3177,10 +3473,16 @@ async function initBuilderPage() {
     }
     if (e.target.id === 'sb-sizing-type') sbRender();
   });
-  editor.addEventListener('click', (e) => {
+  editor.addEventListener('click', async (e) => {
     if (!e.target.classList.contains('sb-del')) return;
     const ui = sbReadUi();
     const kind = e.target.dataset.kind, i = Number(e.target.dataset.i);
+    if (kind === 'factors') {
+      // Removing an indicator removes every rule that reads it. Say how many, and ask:
+      // removing one of two used to empty the entry and the exit without a word.
+      const uses = ['entry', 'exit'].reduce((n, k) => n + ui[k].filter(r => r.left === `f${i + 1}` || r.right === `f${i + 1}`).length, 0);
+      if (uses && !(await confirmAction(`Remove indicator f${i + 1}? ${uses} rule${uses === 1 ? '' : 's'} that use${uses === 1 ? 's' : ''} it will be removed with it.`, 'Remove'))) return;
+    }
     ui[kind].splice(i, 1);
     if (kind === 'factors') {
       // Rebase condition references: drop rows pointing at the removed factor,
@@ -3232,7 +3534,7 @@ async function initBuilderPage() {
       const check = await api('/api/strategies/validate', { method: 'POST', body: JSON.stringify(spec) });
       if (!check.valid) return sbShowErrors('Fix these before saving:', check.errors);
     } catch (err) {
-      showToast(err.status === 503 ? 'Strategy engine is offline' : (err.message || 'Validation failed'), 'error');
+      showToast(err.status === 503 ? ENGINE_DOWN : (err.message || 'Validation failed'), 'error');
       return;
     }
     openSaveModal({ custom: spec }, spec.name);
@@ -3288,7 +3590,7 @@ async function sbBacktest() {
     const check = await api('/api/strategies/validate', { method: 'POST', body: JSON.stringify(spec) });
     if (!check.valid) return sbShowErrors('Fix these before running:', check.errors);
   } catch (err) {
-    showToast(err.status === 503 ? 'Strategy engine is offline' : (err.message || 'Validation failed'), 'error');
+    showToast(err.status === 503 ? ENGINE_DOWN : (err.message || 'Validation failed'), 'error');
     return;
   }
   localStorage.setItem(SB_SPEC_KEY, JSON.stringify(spec));
@@ -3416,7 +3718,12 @@ async function initStrategiesPage() {
   }
   const list = data.strategies || [];
   const key = ysListKey(list);
-  if (key === ysShown) return;
+  if (key === ysShown) {
+    // The same list as on screen: its cards stay, but a signal read a while ago is read
+    // again. The page used to keep "AAPL: LONG" for good, engine up or not.
+    list.forEach(s => { if (Date.now() - ((ysSignalSeen.get(s.id) || {}).at || 0) > SIGNAL_FRESH_MS) ysLoadSignal(s.id, (s.symbols || []).length); });
+    return;
+  }
   ysShown = key;
   statusEl.classList.add('hidden');
   if (!list.length) {
@@ -3461,11 +3768,25 @@ function ysCardHtml(s) {
     </div>`;
 }
 
+// A signal or a paper replay read less than this long ago is not read again on a return to
+// its page. `ysSignalSeen` / `ptStateSeen`: the last good reading per card, { html, at }.
+const SIGNAL_FRESH_MS = 2 * 60 * 1000;
+const ysSignalSeen = new Map();
+const ptStateSeen = new Map();
+const clockTime = (at) => new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+// What a card shows when a fresh reading failed but an earlier one is at hand: that one,
+// dimmed, with when it is from and why there is no newer one.
+function staleReading(seen, err, what) {
+  const why = err.status === 503 ? 'The strategy engine cannot be reached' : (err.message || `${what} failed`);
+  return `<div class="stale-reading">${seen.html}</div><div class="ys-note stale-note">${escapeHtml(why)}. Showing the last ${escapeHtml(what)}, from ${escapeHtml(clockTime(seen.at))}.</div>`;
+}
+
 async function ysLoadSignal(id, nSymbols) {
   const el = document.getElementById(`ys-signals-${id}`);
   if (!el) return;
   if (!nSymbols) { el.innerHTML = ''; return; }
-  el.innerHTML = '<span class="ys-loading">evaluating signals…</span>';
+  const seen = ysSignalSeen.get(id);
+  if (!seen) el.innerHTML = '<span class="ys-loading">evaluating signals…</span>';
   try {
     const data = await api(`/api/strategies/saved/${id}/signal`, { method: 'POST' });
     const chips = (data.signals || []).map(sig => {
@@ -3480,8 +3801,10 @@ async function ysLoadSignal(id, nSymbols) {
     const note = data.has_protective_exits
       ? '<div class="ys-note">Stop-loss / take-profit exits are order-level and not reflected in rule state.</div>' : '';
     el.innerHTML = (chips || '<span class="ys-loading">no signals</span>') + note;
+    ysSignalSeen.set(id, { html: el.innerHTML, at: Date.now() });
   } catch (err) {
-    el.innerHTML = `<span class="ys-sig ys-sig-err">${escapeHtml(err.status === 503 ? 'engine offline' : (err.message || 'signal failed'))}</span>`;
+    el.innerHTML = seen ? staleReading(seen, err, 'signals')
+      : `<span class="ys-sig ys-sig-err">${escapeHtml(err.status === 503 ? ENGINE_DOWN : (err.message || 'signal failed'))}</span>`;
   }
 }
 
@@ -3552,13 +3875,17 @@ const PT_UPSELL = 'Paper trading is a Pro feature. <a href="#" onclick="switchTo
 
 async function initPaperPage() {
   if (ptInitDone) {
-    // Back on the page: a card that said "engine offline" asks again. It used to keep
-    // saying so until the whole app was reloaded, though the engine was back.
-    [...ptStateFailed].forEach(ptLoadState);
+    // Back on the page: a card that said "engine offline" asks again (it used to keep
+    // saying so until the whole app was reloaded, though the engine was back), and so does
+    // a card whose figures are a while old (it used to keep them, engine up or not).
+    const due = new Set(ptStateFailed);
+    if (ptCanDeploy) for (const [id, seen] of ptStateSeen) if (Date.now() - seen.at > SIGNAL_FRESH_MS) due.add(id);
+    [...due].forEach(ptLoadState);
     return;
   }
   ptInitDone = true;
   ptStateFailed.clear();
+  ptStateSeen.clear();
   const statusEl = document.getElementById('pt-status');
   const listEl = document.getElementById('pt-list');
   const formEl = document.getElementById('pt-deploy-form');
@@ -3725,8 +4052,9 @@ async function ptLoadLedger(id) {
 
 async function ptLoadState(id) {
   const el = document.getElementById(`pt-state-${id}`);
-  if (!el) { ptStateFailed.delete(id); return; }
-  el.innerHTML = '<span class="ys-loading">replaying…</span>';
+  if (!el) { ptStateFailed.delete(id); ptStateSeen.delete(id); return; }
+  const seen = ptStateSeen.get(id);
+  if (!seen) el.innerHTML = '<span class="ys-loading">replaying…</span>';
   try {
     const data = await api(`/api/paper/${id}/state`, { method: 'POST' });
     ptStateFailed.delete(id);
@@ -3734,6 +4062,7 @@ async function ptLoadState(id) {
     const initial = Number(data.deployment.initial_cash);
     if (!data.n_bars) {
       el.innerHTML = '<span class="ys-loading">warming up — no completed bars since deploy yet</span>';
+      ptStateSeen.set(id, { html: el.innerHTML, at: Date.now() });
       return;
     }
     const equity = Number(m.final_equity);
@@ -3752,10 +4081,12 @@ async function ptLoadState(id) {
         <div class="bt-metric"><span class="bt-metric-value">${data.n_bars}</span><span class="bt-metric-label">Bars traded</span></div>
       </div>
       ${posHtml}`;
+    ptStateSeen.set(id, { html: el.innerHTML, at: Date.now() });
   } catch (err) {
     ptStateFailed.add(id);
-    el.innerHTML = `<span class="ys-sig ys-sig-err">${escapeHtml(err.status === 503 ? 'The strategy engine is offline' : (err.message || 'replay failed'))}</span>
-      <button type="button" class="ys-btn pt-retry" onclick="ptLoadState(${id})" title="Try again"><span class="material-symbols-outlined">refresh</span></button>`;
+    const retry = `<button type="button" class="ys-btn pt-retry" onclick="ptLoadState(${id})" title="Try again"><span class="material-symbols-outlined">refresh</span></button>`;
+    el.innerHTML = seen ? staleReading(seen, err, 'figures') + retry
+      : `<span class="ys-sig ys-sig-err">${escapeHtml(err.status === 503 ? ENGINE_DOWN : (err.message || 'replay failed'))}</span>${retry}`;
   }
 }
 
@@ -3920,7 +4251,7 @@ function briefScoreClass(score) {
 
 function renderBrief(b) {
   const c = b.company || {};
-  const meta = [c.sector, c.exchange, c.country].filter(Boolean).join(' · ');
+  const meta = [...new Set([c.sector, c.exchange, c.country].filter(Boolean))].join(' · ');
   const execs = (c.executives || []).map(e => {
     const role = [e.former ? 'former' : '', e.role || ''].filter(Boolean).join(' ');
     return `${escapeHtml(e.name)}${role ? ` (${escapeHtml(role)})` : ''}`;
@@ -3938,7 +4269,7 @@ function renderBrief(b) {
   };
   const sentimentBlock = s ? `
     <div class="brief-stats">
-      <div class="brief-stat" data-tip="${escapeHtml(TT.sentiment)}" aria-label="${escapeHtml(TT.sentiment)}"><span class="brief-stat-label">Sentiment</span><span class="brief-stat-val ${briefScoreClass(s.acute)}">${escapeHtml(s.label)}</span></div>
+      <div class="brief-stat" data-tip="${escapeHtml(TT.sentiment)}" aria-label="${escapeHtml(TT.sentiment)}"><span class="brief-stat-label">Sentiment</span><span class="brief-stat-val ${['positive', 'negative'].includes(s.label) ? s.label : 'neutral'}">${escapeHtml(s.label)}</span></div>
       <div class="brief-stat" data-tip="${escapeHtml(TT.acute)}" aria-label="${escapeHtml(TT.acute)}"><span class="brief-stat-label">Acute</span><span class="brief-stat-val">${s.acute ?? '—'}</span></div>
       <div class="brief-stat" data-tip="${escapeHtml(TT.momentum)}" aria-label="${escapeHtml(TT.momentum)}"><span class="brief-stat-label">Momentum</span><span class="brief-stat-val">${escapeHtml(s.momentum || 'flat')}</span></div>
       <div class="brief-stat" data-tip="${escapeHtml(TT.z)}" aria-label="${escapeHtml(TT.z)}"><span class="brief-stat-label">90d z-score</span><span class="brief-stat-val">${s.baseline_z != null ? s.baseline_z : 'n/a'}</span></div>
@@ -3965,7 +4296,7 @@ function renderBrief(b) {
   const sm = b.smart_money || { institutions: [], congress: [] };
   const smBits = [];
   if (sm.institutions && sm.institutions.length) smBits.push(`${sm.institutions.length} fund${sm.institutions.length > 1 ? 's' : ''} hold it (${escapeHtml(sm.institutions[0].name)}…)`);
-  if (sm.congress && sm.congress.length) smBits.push(`${sm.congress.length} recent congress trade${sm.congress.length > 1 ? 's' : ''}`);
+  if (sm.congress && sm.congress.length) smBits.push(`${sm.congress.length} ${sm.congress_sample ? 'sample (not real) ' : 'recent '}congress trade${sm.congress.length > 1 ? 's' : ''}`);
   const smBlock = smBits.length ? `<p class="brief-smartmoney">🏛️ ${smBits.join(' · ')}</p>` : '';
 
   return `
@@ -4008,16 +4339,24 @@ function initBriefModal() {
 }
 
 // ─── Daily Brief (E5 — the analyst voice) ────────────────────
-async function loadDailyBrief() {
+// The AI Workspace on a plan without it: the upgrade card, and no Ask box or question count
+// under it (a Free account used to see both, and each page load asked for two things the
+// plan does not have).
+function showWorkspaceLocked(locked) {
+  document.getElementById('ask-section')?.classList.toggle('hidden', locked);
+  if (!locked) return;
   const el = document.getElementById('daily-brief');
+  if (el) el.innerHTML = `<div class="empty-state"><p>The AI Workspace — daily brief + Ask — is a <strong>Plus</strong> feature.</p>${upgradeNote('Unlock your personalized daily brief and portfolio Q&A.')}</div>`;
+}
+
+async function loadDailyBrief() {
+  if (currentTier() === 'free') return showWorkspaceLocked(true);
+  showWorkspaceLocked(false);
   try {
     const data = await api('/api/reports/daily');
     renderDailyBrief(data.brief);
   } catch (err) {
-    if (err.status === 402 && el) {
-      el.innerHTML = `<div class="empty-state"><p>The AI Workspace — daily brief + Ask — is a <strong>Plus</strong> feature.</p>${upgradeNote('Unlock your personalized daily brief and portfolio Q&A.')}</div>`;
-      return;
-    }
+    if (err.status === 402) return showWorkspaceLocked(true);
     console.error('Daily brief error:', err);
   }
 }
@@ -4119,7 +4458,7 @@ function renderAskThread(pending) {
         <div class="ask-q">${escapeHtml(t.question)}</div>
         <div class="ask-answer-text">${escapeHtml(t.answer)}</div>
         ${askDraftCard(t.draft, i)}
-        ${t.writer ? `<div class="ask-answer-meta"><span class="ask-writer">${ASK_WRITER_TAG[t.writer] || t.writer}</span>${askGroundingBadge(t.grounding)}<span class="ask-disclaimer">Informational only — not advice.</span></div>` : ''}
+        ${t.writer ? `<div class="ask-answer-meta"><span class="ask-writer">${ASK_WRITER_TAG[t.writer] || t.writer}${t.writer === 'deterministic' && t.guard === 'user_quota_exceeded' ? ' · today\'s AI answers are used up' : ''}</span>${askGroundingBadge(t.grounding)}<span class="ask-disclaimer">Informational only — not advice.</span></div>` : ''}
       </div>`).join('');
   const pendingHtml = pending ? `<div class="ask-turn"><div class="ask-q">${escapeHtml(pending)}</div><div class="ask-thinking">Thinking…</div></div>` : '';
   answerEl.innerHTML = turns + pendingHtml;
@@ -4130,6 +4469,7 @@ function renderAskThread(pending) {
 async function loadAskThreads() {
   const wrap = document.getElementById('ask-threads');
   if (!wrap) return;
+  if (currentTier() === 'free') { wrap.classList.add('hidden'); return; }
   let threads = [];
   try { threads = (await api('/api/reports/threads')).threads || []; }
   catch { wrap.classList.add('hidden'); return; } // e.g. 402 on Free — the Ask box shows the upsell
@@ -4186,7 +4526,7 @@ async function askPortfolio(question) {
   try {
     const data = await api('/api/reports/ask', { method: 'POST', body: JSON.stringify({ question: q, thread_id: askThreadId }) });
     askThreadId = data.thread_id;
-    askThread.push({ question: data.question || q, answer: data.answer, writer: data.writer, draft: data.draft || null, grounding: data.grounding || null });
+    askThread.push({ question: data.question || q, answer: data.answer, writer: data.writer, guard: data.guard, draft: data.draft || null, grounding: data.grounding || null });
     renderAskThread();
     renderAskQuota(data.quota);
     loadAskThreads();
@@ -4195,9 +4535,13 @@ async function askPortfolio(question) {
     renderAskThread();
     const answerEl = document.getElementById('ask-answer');
     answerEl.classList.remove('hidden');
+    // The refusal sits under the question it refused, and the question goes back in the
+    // box to send again: it used to vanish, leaving a reason with nothing above it.
+    const asked = `<div class="ask-q">${escapeHtml(q)}</div>`;
     answerEl.insertAdjacentHTML('beforeend', err.status === 402
-      ? `<div class="ask-turn"><div class="ask-answer-text">Portfolio Q&A is a Plus feature.</div>${upgradeNote('Upgrade to ask anything about your portfolio.')}</div>`
-      : `<div class="ask-turn"><div class="ask-answer-text">${escapeHtml(err.message)}</div></div>`);
+      ? `<div class="ask-turn">${asked}<div class="ask-answer-text">Portfolio Q&A is a Plus feature.</div>${upgradeNote('Upgrade to ask anything about your portfolio.')}</div>`
+      : `<div class="ask-turn">${asked}<div class="ask-answer-text">${escapeHtml(err.message)}</div></div>`);
+    input.value = q;
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Ask'; }
     input.focus();
@@ -4292,7 +4636,7 @@ async function loadPlans() {
     const { plans, currentTier: cur } = await api('/api/billing/plans');
     wrap.innerHTML = plans.map(p => {
       const isCur = p.id === cur;
-      const price = p.price.usd === 0 ? 'Free' : `$${p.price.usd}<span class="plan-per">/mo</span>`;
+      const price = p.price.usd === 0 ? 'Free' : `$${p.price.usd}<span class="plan-per">/mo</span>${p.price.inr ? `<span class="plan-per"> · ₹${Number(p.price.inr).toLocaleString('en-IN')}/mo</span>` : ''}`;
       const feats = [
         p.maxHoldings === null || p.maxHoldings > 999 ? 'Unlimited holdings' : `${p.maxHoldings} holdings`,
         p.impactFeed === 'full' ? 'Full impact feed' : 'Top event only',
@@ -4353,7 +4697,7 @@ async function loadApiKeys() {
         ${k.can_write ? '<span class="ak-write">write</span>' : ''}
         <span class="ak-meta">${k.revoked
           ? 'revoked'
-          : (k.last_used_at ? `last used ${new Date(k.last_used_at).toLocaleDateString()}` : 'never used')}</span>
+          : (k.last_used_at ? `last used ${new Date(k.last_used_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}` : 'never used')}</span>
         ${k.revoked ? '' : `<button class="btn btn-ghost btn-xs" onclick="revokeApiKey(${k.id})">Revoke</button>`}
       </div>`).join('');
   } catch (err) {
@@ -4476,6 +4820,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Mark all alerts as read
   document.getElementById('mark-all-read-btn').addEventListener('click', markAllRead);
 
+  showSignedOutNote();
+
   // ── Phase 5 boot: OAuth return, OAuth errors, reset + verify links ──
   {
     const qp = new URLSearchParams(location.search);
@@ -4494,8 +4840,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (qp.get('verified') === '1') {
       const okEl = document.getElementById('auth-success');
-      okEl.textContent = 'Email verified ✓';
+      okEl.textContent = 'Email confirmed ✓ You can sign in now.';
       okEl.classList.remove('hidden');
+      history.replaceState({}, '', '/app');
+    }
+    // Back from the link sent to a new address (GET /api/auth/confirm-email-change).
+    const changed = qp.get('email_changed');
+    if (changed) {
+      if (changed === '1') showToast('Your email address has been changed.', 'success');
+      else showToast('That link is invalid or has expired. Ask for the change again from your profile.', 'error');
       history.replaceState({}, '', '/app');
     }
   }
@@ -4503,7 +4856,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Check for an existing session. Always asked, hint or not: a Google/GitHub sign-in
   // returns here with only the cookie set.
   try {
-    const data = await api('/api/auth/me');
+    const data = await api('/api/auth/session');
+    if (!data.user) throw new Error('signed out');
     currentUser = data.user;
     localStorage.setItem(SIGNED_IN_HINT, '1');
     showDashboard();

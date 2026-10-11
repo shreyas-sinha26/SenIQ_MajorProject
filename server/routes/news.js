@@ -1,13 +1,12 @@
 const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, execute } = require('../db');
 const { authMiddleware } = require('./auth');
-const { fetchNewsForTickers } = require('../services/newsFetcher');
-const { analyzeSentiment, aggregateSentiment } = require('../services/sentiment');
+const { analyzeSentiment } = require('../services/sentiment');
 const { matchTickers } = require('../services/tickerMatcher');
-const { generateDigest, summarizeArticle } = require('../services/summarizer');
+const { resolve: resolveEntities } = require('../services/entityResolver');
+const { summarizeArticle } = require('../services/summarizer');
 const { isUrl, scrapeArticle } = require('../services/articleScraper');
 const { explainForPortfolio } = require('../services/ollamaExplainer');
-const { scoreTicker } = require('../services/sentimentScoring');
 const { getImpactFeed, collapseStories, companyNamer } = require('../services/impactScoring');
 const { classifyStance } = require('../services/eventTyping');
 const { IMPACT } = require('../config');
@@ -15,7 +14,6 @@ const { attachTier, requireTier } = require('../middleware/tier');
 const { userRateLimit, LIMITS } = require('../middleware/rateLimit');
 const { EXECUTORS: ASK_TOOLS, ScopeError } = require('../services/qaTools');
 const { loadSentimentBreakdown } = require('../services/sentimentBreakdown');
-const { isValidTicker } = require('../services/assetRegistry');
 const { classifyBatch, isEnabled: finbertEnabled } = require('../services/finbertClassifier');
 const { idParam } = require('../middleware/idParam');
 
@@ -30,6 +28,18 @@ router.param('id', idParam('Alert not found'));
 // event cluster (with a source count), so the same story from four outlets, and
 // generic filler, never reach the user.
 const FEED_WINDOW_HOURS = 48;
+
+/**
+ * A plan that sees only its single most important event (TIERS.impactFeed 'top', as on
+ * GET /impact) gets the engine's figures for that one story and for no other: the feed
+ * used to carry the score, direction and exposure of every story, which is the full ranked
+ * feed by another door. The stories themselves, and their order, are the plan's to see. Pure.
+ */
+function topImpactOnly(stories, tierCfg) {
+  if (!tierCfg || tierCfg.impactFeed !== 'top') return stories;
+  const top = stories.reduce((best, s) => (s.impact != null && (best == null || s.impact > best.impact) ? s : best), null);
+  return stories.map((s) => (s === top ? s : { ...s, impact: null, impact_level: null, direction: null, exposure_pct: null }));
+}
 
 router.get('/feed', async (req, res) => {
   try {
@@ -107,7 +117,7 @@ router.get('/feed', async (req, res) => {
       };
     };
 
-    const shaped = evs.map(shape);
+    const shaped = topImpactOnly(evs.map(shape), req.tierCfg);
 
     const byImpactThenTime = (a, b) =>
       (b.impact ?? -1) - (a.impact ?? -1) || new Date(b.published_at) - new Date(a.published_at);
@@ -131,37 +141,6 @@ router.get('/feed', async (req, res) => {
   } catch (err) {
     console.error('News feed error:', err);
     res.status(500).json({ error: 'Failed to fetch news' });
-  }
-});
-
-// ─── GET /api/news/sentiment/:ticker ─────────────────────────
-// Get sentiment analysis for a specific ticker
-router.get('/sentiment/:ticker', userRateLimit(LIMITS.LIVE_NEWS), async (req, res) => {
-  try {
-    const ticker = req.params.ticker.toUpperCase();
-    // Each call asks the news provider live, so only for something that can be a symbol.
-    if (!isValidTicker(ticker)) return res.status(400).json({ error: 'That does not look like a ticker symbol' });
-    const apiKey = process.env.FINNHUB_API_KEY || '';
-    const articles = await fetchNewsForTickers([ticker], apiKey);
-
-    const tickerArticles = articles.filter(a => a.matchedTickers.includes(ticker));
-    const sentiments = tickerArticles.map(a => a.sentiment);
-    const aggregate = aggregateSentiment(sentiments);
-
-    // Phase 2a: decay-weighted acute score + momentum + 90-day baseline z-score,
-    // computed from persisted history (what makes the picture non-generic).
-    const scoring = await scoreTicker(ticker);
-
-    res.json({
-      ticker,
-      aggregate,
-      scoring,
-      articles: tickerArticles.slice(0, 10),
-      digest: generateDigest(tickerArticles, ticker)
-    });
-  } catch (err) {
-    console.error('Sentiment error:', err);
-    res.status(500).json({ error: 'Failed to analyze sentiment' });
   }
 });
 
@@ -324,7 +303,17 @@ router.post('/analyze', userRateLimit(LIMITS.ANALYZE), async (req, res) => {
     const read = await classifyBatch([inputText]).catch(() => null);
     if (read && read[0]) sentiment = { label: read[0].label, score: read[0].score, confidence: read[0].confidence, model: read[0].model || 'finbert', details: byWords.details };
   }
-  const tickers = matchTickers(inputText);
+  // The same matcher the news pipeline tags stories with, so a headline is read here as it
+  // would be in the feed: the old word-list matcher tagged "Plan V is ready" as Visa. It
+  // stands in only if the company reference cannot be read.
+  let tickers;
+  try {
+    const found = await resolveEntities(articleTitle || inputText, articleTitle ? inputText : '');
+    tickers = (found.tickers || []).filter((t) => t !== '__MARKET__');
+  } catch (err) {
+    console.warn('Analyzer: company reference unavailable, using the word list:', err.message);
+    tickers = matchTickers(inputText);
+  }
 
   // Step 3: LLM explanation with portfolio context (graceful fallback if Ollama is down)
   let llmExplanation = null;
@@ -340,3 +329,4 @@ router.post('/analyze', userRateLimit(LIMITS.ANALYZE), async (req, res) => {
 });
 
 module.exports = router;
+module.exports.topImpactOnly = topImpactOnly;

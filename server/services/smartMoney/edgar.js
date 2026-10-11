@@ -81,8 +81,16 @@ function tagValue(block, tag) {
   return m ? m[1].trim() : '';
 }
 
+// The five entities XML text can carry, so "S&amp;P" is stored as "S&P". `&amp;` last: a
+// doubly escaped "&amp;lt;" is the text "&lt;", not "<". Pure.
+function decodeXml(text) {
+  return String(text || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;|&#39;/g, "'").replace(/&amp;/g, '&');
+}
+
 // Parse <infoTable> blocks, aggregating duplicate CUSIPs (a fund's book often lists the
 // same issuer once per sub-manager). Pre-2023 filings report value in $thousands.
+// A row with <putCall> is an option on the issuer, reported at the value of the shares
+// under it: it is not shares held, so it is left out of the position and the total.
 function parseInfoTable(xml, reportDate) {
   const blocks = xml.match(/<(?:[\w-]+:)?infoTable[\s>][\s\S]*?<\/(?:[\w-]+:)?infoTable>/gi);
   if (!blocks) return [];
@@ -93,7 +101,8 @@ function parseInfoTable(xml, reportDate) {
   for (const b of blocks) {
     const cusip = tagValue(b, 'cusip').toUpperCase();
     if (!cusip) continue;
-    const issuer = tagValue(b, 'nameOfIssuer');
+    if (/^(put|call)$/i.test(tagValue(b, 'putCall'))) continue;
+    const issuer = decodeXml(tagValue(b, 'nameOfIssuer'));
     let value = Number(tagValue(b, 'value').replace(/[^0-9.]/g, '')) || 0;
     if (inThousands) value *= 1000;
     const shares = Number(tagValue(b, 'sshPrnamt').replace(/[^0-9.]/g, '')) || 0;
@@ -116,4 +125,4 @@ function parseInfoTable(xml, reportDate) {
   return [...byCusip.values()].sort((a, b) => b.value - a.value);
 }
 
-module.exports = { fetchRecent13F, fetchHoldings, parseInfoTable, secGet, padCik, bareCik };
+module.exports = { fetchRecent13F, fetchHoldings, parseInfoTable, decodeXml, secGet, padCik, bareCik };

@@ -20,6 +20,7 @@ const { assertPublicUrl, UnsafeUrlError } = require('../services/safeFetch');
 const { idParam } = require('../middleware/idParam');
 const { SMART_MONEY, INDIA_SMART_MONEY, FEATURES, DISCLAIMER } = require('../config');
 const { pollSmartMoney, polKey } = require('../services/smartMoney');
+const { decodeXml } = require('../services/smartMoney/edgar');
 const { pollIndiaSmartMoney } = require('../services/smartMoney/india');
 const { INDIA_INVESTORS, INVESTOR_BY_SLUG } = require('../data/indiaInvestors');
 
@@ -29,6 +30,9 @@ router.use(authMiddleware, attachTier);
 // Phase 6 — Free tier gets a teaser (top 2 only) of smart money; Plus/Pro get the full set.
 const TEASER_LIMIT = 2;
 const isTeaser = (req) => req.tierCfg?.smartMoney === 'teaser';
+// ?limit= as a row count: 1 to 200, 50 when it is missing or not a number. A negative one
+// used to reach slice() and return everything but the last few rows.
+const listLimit = (raw) => { const n = Math.floor(Number(raw)); return Number.isFinite(n) && n >= 1 ? Math.min(n, 200) : 50; };
 
 const FRESHNESS_NOTE =
   'Smart-money data is disclosed with a legal lag — 13F filings ~45 days after quarter ' +
@@ -100,13 +104,14 @@ router.get('/institutions/:slug', async (req, res) => {
       [inst.id]
     );
 
+    // A plan that sees a teaser of the lists sees the same two rows of a fund's holdings.
     let holdings = [];
     if (filing) {
       holdings = await query(
         `SELECT cusip, ticker, issuer_name, shares, value, pct_of_portfolio, change_type
            FROM institution_holdings WHERE filing_id = $1
           ORDER BY value DESC LIMIT $2`,
-        [filing.id, SMART_MONEY.TOP_HOLDINGS]
+        [filing.id, isTeaser(req) ? TEASER_LIMIT : SMART_MONEY.TOP_HOLDINGS]
       );
     }
 
@@ -120,9 +125,11 @@ router.get('/institutions/:slug', async (req, res) => {
       filing: filing
         ? { accession: filing.accession, period_of_report: filing.period_of_report, filed_at: filing.filed_at, holdings_count: filing.holdings_count, total_value: filing.total_value }
         : null,
-      holdings,
+      // Names stored before the reader decoded XML entities still carry "&amp;".
+      holdings: holdings.map((h) => ({ ...h, issuer_name: decodeXml(h.issuer_name) })),
       following: !!follow,
       freshnessNote: FRESHNESS_NOTE,
+      ...(isTeaser(req) && filing ? { teaser: true, total: filing.holdings_count, upgrade: { requiredTier: 'plus', requiredLabel: 'Plus' } } : {}),
     });
   } catch (err) {
     console.error('Institution detail error:', err);
@@ -135,16 +142,24 @@ router.get('/institutions/:slug', async (req, res) => {
 router.get('/congress', async (req, res) => {
   try {
     const scope = req.query.scope === 'all' ? 'all' : 'mine';
-    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const limit = listLimit(req.query.limit);
 
+    // Sample rows stand in only while there are no real disclosures: the two are never
+    // mixed, and the page marks a sample list as one (`sample`).
+    const live = (await queryOne('SELECT count(*)::int AS n FROM congress_trades WHERE is_sample = false')).n > 0;
     const recent = await query(
       `SELECT politician, chamber, party, state, ticker, asset_description, transaction_type,
               transaction_date::text AS transaction_date, disclosure_date::text AS disclosure_date,
               amount_range, amount_min, amount_max, is_sample
-         FROM congress_trades
+         FROM congress_trades WHERE is_sample = $1
         ORDER BY disclosure_date DESC NULLS LAST, id DESC
-        LIMIT 400`
+        LIMIT 400`,
+      [!live]
     );
+    // How recent the whole list is, whatever the scope: the page says so, since a source
+    // that has stopped looks the same as one with nothing new.
+    const newest = recent.map((t) => t.disclosure_date).filter(Boolean).sort().pop() || null;
+    const about = { scope, freshnessNote: FRESHNESS_NOTE, sample: !live && recent.length > 0, newestDisclosure: newest };
 
     let trades = recent;
     if (scope === 'mine') {
@@ -159,10 +174,10 @@ router.get('/congress', async (req, res) => {
     }
 
     if (isTeaser(req)) {
-      return res.json({ trades: trades.slice(0, TEASER_LIMIT), scope, freshnessNote: FRESHNESS_NOTE,
+      return res.json({ trades: trades.slice(0, TEASER_LIMIT), ...about,
         teaser: true, total: trades.length, upgrade: { requiredTier: 'plus', requiredLabel: 'Plus' } });
     }
-    res.json({ trades: trades.slice(0, limit), scope, freshnessNote: FRESHNESS_NOTE });
+    res.json({ trades: trades.slice(0, limit), ...about });
   } catch (err) {
     console.error('Congress list error:', err);
     res.status(500).json({ error: 'Failed to load congress trades' });
@@ -185,15 +200,15 @@ router.get('/follows', async (req, res) => {
 
 router.post('/follow', async (req, res) => {
   try {
-    const { entity_type, entity_ref, label } = req.body || {};
+    const { entity_type, entity_ref } = req.body || {};
     if (!['institution', 'politician', 'in_investor'].includes(entity_type)) {
       return res.status(400).json({ error: 'entity_type must be institution, politician or in_investor' });
     }
-    if (!entity_ref) return res.status(400).json({ error: 'entity_ref is required' });
+    if (typeof entity_ref !== 'string' || !entity_ref.trim()) return res.status(400).json({ error: 'entity_ref is required' });
 
     // For institutions, the ref must be a tracked slug.
-    let ref = String(entity_ref).trim();
-    let resolvedLabel = label || ref;
+    let ref = entity_ref.trim();
+    let resolvedLabel = ref;
     if (entity_type === 'institution') {
       const inst = await queryOne('SELECT name, slug FROM institutions WHERE slug = $1', [ref]);
       if (!inst) return res.status(404).json({ error: 'Unknown institution slug' });
@@ -204,9 +219,14 @@ router.post('/follow', async (req, res) => {
       if (!inv) return res.status(404).json({ error: 'Unknown investor slug' });
       resolvedLabel = inv.name;
     } else {
-      // Normalize politician names to the same key the emitter uses.
-      resolvedLabel = String(label || ref).trim().slice(0, 120);
-      ref = polKey(ref);
+      // A politician is followed by the key the emitter uses, and must be one with a
+      // disclosure on record: the label shown is the name as filed, never what was sent.
+      const wanted = polKey(ref.slice(0, 120));
+      const people = await query('SELECT DISTINCT politician FROM congress_trades');
+      const known = wanted ? people.find((p) => polKey(p.politician) === wanted) : null;
+      if (!known) return res.status(404).json({ error: 'No disclosures on record for that politician' });
+      resolvedLabel = known.politician;
+      ref = wanted;
     }
 
     await execute(
@@ -252,6 +272,17 @@ router.get('/webhooks', async (req, res) => {
   }
 });
 
+// What a webhook can subscribe to: everything, the whole smart-money family, or one kind
+// (the names services/smartMoney emits). Pure. → the cleaned list, or null when a name is not one.
+const WEBHOOK_EVENT_TYPES = ['*', 'smart_money', 'smart_money.institution_filing', 'smart_money.congress_trade',
+  'smart_money.india_deal', 'smart_money.india_insider_trade'];
+function webhookTypes(raw) {
+  if (raw == null || raw === '') return 'smart_money';
+  if (typeof raw !== 'string') return null;
+  const list = [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))];
+  return list.length && list.every((t) => WEBHOOK_EVENT_TYPES.includes(t)) ? list.join(',') : null;
+}
+
 router.post('/webhooks', requireTier('pro'), async (req, res) => {
   try {
     const { event_types } = req.body || {};
@@ -270,8 +301,9 @@ router.post('/webhooks', requireTier('pro'), async (req, res) => {
     if (have.n >= SMART_MONEY.MAX_WEBHOOKS_PER_USER) {
       return res.status(400).json({ error: `Limit reached (${SMART_MONEY.MAX_WEBHOOKS_PER_USER} webhooks) — delete one first.` });
     }
+    const types = webhookTypes(event_types);
+    if (!types) return res.status(400).json({ error: `event_types must be a comma-separated list of: ${WEBHOOK_EVENT_TYPES.join(', ')}` });
     const secret = crypto.randomBytes(24).toString('hex');
-    const types = (event_types && String(event_types).trim().slice(0, 200)) || 'smart_money';
     const created = await queryOne(
       `INSERT INTO webhooks (user_id, url, secret, event_types) VALUES ($1, $2, $3, $4) RETURNING id`,
       [req.user.id, url, secret, types]
@@ -330,7 +362,7 @@ async function followedInvestors(userId) {
 }
 
 function sendIndiaList(req, res, key, rows, scope) {
-  const limit = Math.min(Number(req.query.limit) || 50, 200);
+  const limit = listLimit(req.query.limit);
   if (isTeaser(req)) {
     return res.json({ [key]: rows.slice(0, TEASER_LIMIT), scope, freshnessNote: INDIA_NOTE,
       teaser: true, total: rows.length, upgrade: { requiredTier: 'plus', requiredLabel: 'Plus' } });
@@ -429,3 +461,5 @@ router.post('/poll', requireAdmin, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.listLimit = listLimit;
+module.exports.webhookTypes = webhookTypes;
