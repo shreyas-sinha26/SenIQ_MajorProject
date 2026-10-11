@@ -70,7 +70,7 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   on `71230ec` (pull request #15, the QA pass, §8). The two numbers differ because `v2.13` was strategies-only work (§11). No
   pull request is open. Untracked and never pushed: `samples/` and `.github/` (§11), and
   the two QA reports of 2026-10-11, `QA_REPORT_v1.md` and `QA_REPORT_v2.md`, which were
-  left out of pull request #19 for Annas to decide on.
+  left out of pull request #19 for Annas to decide on ("Next, in order", items 6 and 7).
 - **What `v1.17` / `v2.18` adds** *(pull request #19; five commits and the merge of two
   local branches, `ask-shapes` and `finnhub-gate`)*. One migration, `0045`. Nothing in it
   is switched on. The section named has each one's detail.
@@ -337,6 +337,36 @@ Finnhub work below was started at his word the same day and is built, not yet ru
      order: one round where two are used now, caching (or calling Anthropic directly,
      which the app can already do with `ANTHROPIC_API_KEY`), fewer tool definitions a
      question, streaming, shorter answers.
+
+6. **The QA pass of 2026-10-11: its findings are not dealt with, bar half of one.** A
+   session tested `v1.16` / `v2.17` end to end on 2026-10-11, report only, and wrote two
+   files at the repo root, **untracked and not pushed**: `QA_REPORT_v1.md` (3 high, 14
+   medium, 23 low) and `QA_REPORT_v2.md` (7 medium, 12 low). Each finding says where it
+   is and how to reproduce it. The three high ones, and where each stands after
+   `v1.17` / `v2.18`:
+   - **H1, invented congressional trades shown as real.** The database has 12 sample
+     rows beside 225 real ones. **Fixed in two of the four readers:** Ask's
+     `get_smart_money` (`fd7e3db`) and the daily brief's packet (`4d19d5d`) now use
+     sample rows only while there are no real ones. **Still open:** the Congress tab
+     lists them with no label (the route returns `is_sample`, the page ignores it), and
+     the company brief (`loadSmartMoney` in `onboarding.js`) does not filter
+     them. Removing the 12 rows from the dev database is a deletion, so it waits for
+     Annas to ask.
+   - **H2, the congressional data stopped on 2026-06-30:** `CONGRESS_TRADES_URL` is not
+     in the local `.env`. Open. Ask now says how recent the data is
+     (`newest_disclosure`), which is all that changed.
+   - **H3, after sign-out the next person on the same browser sees the last user's
+     data** (the Ask answer on screen, and the password still in the sign-in box). Open.
+7. **Two decisions waiting on Annas** *(asked on 2026-10-11, not answered)*:
+   - **News answers as rows or as sentences.** After the answer shapes, four of the 22
+     news-type answers set their headlines out one to a line ("headline · outlet ·
+     date") where they used to be a paragraph; the prompt still asks for sentences. Keep
+     the rows for a question that asks for a list of news, or force every news answer
+     back into sentences (a stronger line in the prompt and four questions run again,
+     about $0.01).
+   - **Whether the two QA reports go to GitHub.** They were left out of pull request #19:
+     they list faults that are not fixed, H3 among them, and a file pushed to the shared
+     repo stays in its history.
 
 Unchanged: **retention stays off**; nothing new goes on `/mcp` or `/v1` (every new tool is
 Ask only); hosting choices wait until there is a deployment to make.
