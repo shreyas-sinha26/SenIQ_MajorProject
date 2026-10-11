@@ -664,7 +664,7 @@ const INGEST = {
   // GDELT answers one request every 5 seconds per caller and takes 10 to 12 seconds over
   // each (measured 2026-10-12). The queries of a run used to go out together with a
   // 6-second limit: every one was refused or timed out, and GDELT gave 0 stories a run.
-  GDELT_GAP_MS: 5500,            // between the starts of two requests
+  GDELT_GAP_MS: 5500,            // from one answer to the next request
   GDELT_TIMEOUT_MS: 20000,       // one request
   GDELT_BUDGET_MS: 150000,       // a run's GDELT step; what is not reached goes first next run
   // Macro/global queries mapped to the __MARKET__ tag (war/budget/rates).
@@ -701,6 +701,12 @@ const SMART_MONEY = {
   SEC_RATE_DELAY_MS: 250,        // space SEC requests out (well under their 10 req/s)
   TOP_HOLDINGS: 25,              // top-N holdings surfaced per fund (by value)
   CONGRESS_LOOKBACK_DAYS: 60,    // only ingest recent congress disclosures
+  // The source is asked this often, not on every poll: at two URLs a poll, every 15 minutes
+  // is 192 calls a day of the 250 a free FMP key has, which also serves prices.
+  CONGRESS_FETCH_MINUTES: 180,
+  // A disclosure older than this is stored without an alert: after a gap in the data the
+  // first poll brings weeks of them at once, and none of that is news.
+  CONGRESS_ALERT_DAYS: 7,
   // Free community dataset of congress trades. The classic stock-watcher S3 buckets are
   // currently 403; point this at a working mirror/export to light up LIVE congress data.
   // When unreachable, ingest degrades to the bundled sample (data/congress_sample.json).

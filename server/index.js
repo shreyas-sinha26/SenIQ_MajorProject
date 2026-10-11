@@ -24,6 +24,7 @@ const mcpRouter = require('./routes/mcp');
 const v1Router = require('./routes/v1');
 const { clientErrors } = require('./middleware/errors');
 const { startScheduler } = require('./scheduler');
+const legalPages = require('./services/legalPages');
 const { initSentry, sentryErrorHandler, captureException } = require('./observability');
 
 const app = express();
@@ -161,6 +162,11 @@ app.get('/docs', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'docs.html'));
 });
 
+// ─── Terms of Use and Privacy Policy (public) ───────────────
+for (const name of legalPages.NAMES) {
+  app.get(`/${name}`, (req, res) => res.type('html').send(legalPages.legalPage(name)));
+}
+
 const NOT_FOUND_PAGE = '<!doctype html><meta charset="utf-8"><title>Not found · SenIQ</title>'
   + '<body style="font-family:system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem;color:#111">'
   + '<h1 style="font-size:1.3rem">This page does not exist</h1>'
@@ -179,8 +185,8 @@ app.get('*', (req, res, next) => {
 
 // ─── The app (auth + dashboard) ─────────────────────────────
 // /app, /app?auth=signup and anything under /app load index.html. Every link and redirect
-// into the app goes there. Any other path is not a page: /terms and /privacy used to answer
-// with the sign-in screen and a 200.
+// into the app goes there. Any other path is not a page: before /terms and /privacy had pages
+// of their own they answered with the sign-in screen and a 200.
 app.get(['/app', '/app/*'], (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });

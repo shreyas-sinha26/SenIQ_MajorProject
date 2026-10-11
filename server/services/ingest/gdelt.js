@@ -106,8 +106,8 @@ function tallyProblems(problems) {
 
 /**
  * One run's GDELT queries, ONE AT A TIME: the macro queries first, then the held Indian
- * names, starting where the last run stopped. Requests start at least GDELT_GAP_MS apart
- * (GDELT refuses more than one every 5 seconds), and the step ends at GDELT_BUDGET_MS so a
+ * names, starting where the last run stopped. A request starts at least GDELT_GAP_MS after
+ * the last one was answered (GDELT refuses more than one every 5 seconds), and the step ends at GDELT_BUDGET_MS so a
  * slow GDELT cannot hold the pipeline: the names not reached go first next run.
  * A refused or failed query gives no stories and the run goes on; one line says what happened.
  *
@@ -129,15 +129,18 @@ async function fetchGdelt(tickers = [], { ask = runQuery, wait = sleep, now = Da
   const problems = [];
   let asked = 0;
   let askedIndia = 0;
-  let lastStart = null;
+  let lastEnd = null;
   for (const query of queries) {
-    if (lastStart != null) {
-      const gap = INGEST.GDELT_GAP_MS - (now() - lastStart);
+    // The gap runs from the END of the last answer. GDELT takes 10 to 14 seconds over one,
+    // so a gap counted from its start was already over when the answer came and the next
+    // request went out at once: asked that way by hand, it was refused.
+    if (lastEnd != null) {
+      const gap = INGEST.GDELT_GAP_MS - (now() - lastEnd);
       if (gap > 0) await wait(gap);
     }
     if (now() - began >= INGEST.GDELT_BUDGET_MS) break;
-    lastStart = now();
     const r = await ask(query.q, query.platform);
+    lastEnd = now();
     asked++;
     if (query.india) askedIndia++;
     if (r.problem) problems.push(r.problem);

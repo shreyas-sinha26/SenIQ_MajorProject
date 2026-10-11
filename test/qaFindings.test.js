@@ -311,14 +311,17 @@ check('the step stops at its budget, and the names not reached go first next run
   const held = ['TCS', 'INFY', 'RELIANCE', 'HDFCBANK', 'ITC', 'SBIN', 'WIPRO', 'LT', 'AXISBANK', 'MARUTI'];
   const run = async () => {
     let clock = 0; const asked = [];
-    const ask = async (q, platform) => { if (platform === 'news') asked.push(q); clock += 25000; return { articles: [], problem: 'timed out' }; };
+    const starts = [];
+    const ask = async (q, platform) => { starts.push(clock); if (platform === 'news') asked.push(q); clock += 20000; return { articles: [], problem: 'timed out' }; };
     const warn = console.warn; console.warn = () => {};
     try { await fetchGdelt(held, { ask, wait: async (ms) => { clock += ms; }, now: () => clock }); } finally { console.warn = warn; }
+    // Each request starts a full gap after the last one was answered (20s here), not after it began.
+    for (let i = 1; i < starts.length; i++) assert.ok(starts[i] - starts[i - 1] >= 20000 + INGEST.GDELT_GAP_MS, String(starts[i] - starts[i - 1]));
     return asked;
   };
   const first = await run();
   const second = await run();
-  assert.ok(first.length >= 1 && first.length < held.length, String(first.length)); // 150s at 25s a query: the macro five, then one name
+  assert.ok(first.length >= 1 && first.length < held.length, String(first.length)); // 150s at 20s a query and the gap after each: the macro five, then one name
   assert.ok(!second.some((q) => first.includes(q)), `${first} | ${second}`);        // the next run starts after it
   const sorted = held.slice().sort().map(indiaTerm);
   assert.strictEqual(second[0], sorted[(sorted.indexOf(first[first.length - 1]) + 1) % sorted.length]);
