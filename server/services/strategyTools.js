@@ -23,6 +23,7 @@ const { seniqDataIfNeeded, seniqDataForWatchlist } = require('./signalHistory');
 const { listPresets: listSeniqPresets } = require('./strategySignals');
 const { validateSpec, dataDepthNotes, INDICATORS, SENIQ_METRICS } = require('./strategySpec');
 const { shortDay, todayIso } = require('./answerText');
+const { isId } = require('../middleware/idParam');
 
 const clip = (text, n) => {
   const t = String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -357,8 +358,10 @@ const STRATEGY_EXECUTORS = {
 
   async explain_strategy_signal({ strategy_id, symbol } = {}, ctx) {
     requireTier(ctx, 'plus', 'Saved strategies');
+    // A plain positive whole number that fits the column: a longer one reached the database
+    // and came back as "tool failed".
+    if (!isId(typeof strategy_id === 'number' ? strategy_id : String(strategy_id ?? ''))) throw new ScopeError('strategy_id must be an id from list_my_strategies');
     const id = Number(strategy_id);
-    if (!Number.isInteger(id) || id <= 0) throw new ScopeError('strategy_id is required (from list_my_strategies)');
     const { queryOne } = require('../db');
     const row = await queryOne('SELECT * FROM user_strategies WHERE id = $1 AND user_id = $2', [id, ctx.userId]);
     if (!row) throw new ScopeError(`strategy_not_found: no saved strategy ${id} on this account. Use an id from list_my_strategies.`);

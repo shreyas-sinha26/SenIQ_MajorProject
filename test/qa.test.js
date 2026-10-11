@@ -698,7 +698,7 @@ section('\nstrategy tools (v2 only):');
   });
   check('explain_strategy_signal needs a real id (no query runs)', async () => {
     const r = await runTool({ id: 's5', name: 'explain_strategy_signal', input: { strategy_id: 'x' } }, { ...ctx, tier: 'pro' }, agentSetup(true, false).executors);
-    assert.ok(r.is_error && /strategy_id is required/.test(r.content));
+    assert.ok(r.is_error && /strategy_id must be an id from list_my_strategies/.test(r.content));
   });
   check('no strategy tool saves, runs or deploys: every name reads, explains or drafts', () => {
     assert.ok(ST.STRATEGY_TOOLS.every((x) => /^(list_|get_|explain_|draft_)/.test(x.name)));

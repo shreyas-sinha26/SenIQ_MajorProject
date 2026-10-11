@@ -166,6 +166,70 @@ check('the leftover live-lookup route is gone', () => {
   assert.ok(paths.includes('/sentiment/:ticker/drivers') && !paths.includes('/sentiment/:ticker'), paths.join(' '));
 });
 
+section('v1 M1 / M2 / L7 / L25 / L28, v2 L16 — a bad request is answered as one:');
+check('a path that cannot be decoded, and other client errors Express raises, are 4xx and are not logged', () => {
+  const { clientErrors } = require('../server/middleware/errors');
+  const reply = (err) => { const out = { passed: false }; clientErrors(err, {}, { status: (c) => ({ json: (b) => { out.status = c; out.body = b; } }) }, () => { out.passed = true; }); return out; };
+  const decode = Object.assign(new URIError("Failed to decode param '%E0%A4%A'"), { status: 400, statusCode: 400 });
+  assert.deepStrictEqual(reply(decode), { passed: false, status: 400, body: { error: 'That address is not valid' } });
+  assert.strictEqual(reply({ type: 'entity.too.large' }).status, 413);
+  assert.strictEqual(reply({ type: 'entity.parse.failed', body: '{"password":"secret"' }).body.error, 'The request body is not valid JSON');
+  assert.strictEqual(reply({ status: 400, expose: true, message: 'Bad Request' }).status, 400); // the static-file server's own
+  // A failure of ours is not dressed up as the caller's: it goes on to the 500 handler.
+  assert.strictEqual(reply(new Error('boom')).passed, true);
+  assert.strictEqual(reply(Object.assign(new Error('db'), { status: 400 })).passed, true); // a status nobody meant to show
+});
+check('a conversation id too long for its column is "not found" without asking the database', async () => {
+  resetDb();
+  const threads = require('../server/services/askThreads');
+  for (const id of ['9999999999999999999999', 1e22, '1.5', '0x10', 'abc', -1, null, {}]) {
+    assert.strictEqual(await threads.getThread(7, id), null, String(id));
+    assert.strictEqual(await threads.getMessages(7, id), null, String(id));
+    assert.strictEqual(await threads.deleteThread(7, id), false, String(id));
+  }
+  assert.strictEqual(db.calls.length, 0);
+  resetDb([[/FROM ask_threads WHERE id = \$1/, [{ id: '12', title: 't' }]]]);
+  assert.deepStrictEqual((await threads.getThread(7, '12')).id, 12);
+});
+check('a quantity or cost typed as text is plain decimal; "0x10" and "1e3" are refused', () => {
+  const { parseOptionalNumber, INVALID } = require('../server/routes/portfolio');
+  assert.deepStrictEqual(['10', ' 2.5 ', '.5', 16, 0, '', null, undefined].map(parseOptionalNumber), [10, 2.5, 0.5, 16, 0, null, null, null]);
+  for (const bad of ['0x10', '1e3', '-5', 'abc', '1,000', '5.', {}, [], true, 1e13, -1]) assert.strictEqual(parseOptionalNumber(bad), INVALID, String(bad));
+});
+check('a named exchange must be a real one, for a stock, in the company\'s own country', () => {
+  const { exchangeProblem } = require('../server/routes/portfolio');
+  assert.strictEqual(exchangeProblem(null, 'equity', null, 'IBM'), null);
+  assert.strictEqual(exchangeProblem('NYSE', 'equity', { country: 'US' }, 'IBM'), null);
+  assert.strictEqual(exchangeProblem('BSE', 'equity', { country: 'IN' }, 'TCS'), null);
+  assert.strictEqual(exchangeProblem('NSE', 'equity', null, 'OBSCURE'), null); // not in the reference: taken at its word
+  assert.strictEqual(exchangeProblem('NSE', 'equity', { country: 'US' }, 'IBM'), 'IBM is listed in the US, not on NSE.');
+  assert.strictEqual(exchangeProblem('NASDAQ', 'equity', { country: 'IN' }, 'TCS'), 'TCS is listed in India, not on NASDAQ.');
+  assert.match(exchangeProblem('MARS', 'equity', null, 'IBM'), /Unknown exchange "MARS"/);
+  assert.match(exchangeProblem('NSE', 'crypto', null, 'BTC'), /applies to stocks only/);
+});
+check('a search with no word in it finds nothing, and says so, instead of listing the top stories', async () => {
+  resetDb([[/FROM articles a/, [{ id: 1, title: 'A top story', summary: 's', source: 'x', published_at: new Date(), event_id: null, tickers: ['AAPL'] }]]]);
+  const { searchNews } = require('../server/services/newsSearch');
+  for (const q of ['%%%___', 'a', '  ', '!!']) {
+    assert.deepStrictEqual(await searchNews({ query: q, tickers: ['AAPL'] }), { mode: 'none', results: [] }, q);
+  }
+  assert.strictEqual(called(/FROM articles a/).length, 0);
+  const { runTool } = require('../server/services/qaTools');
+  const r = await runTool({ id: 't', name: 'search_news', input: { query: '%%%___' } }, { userId: 1, holdings: [], heldSet: new Set(['AAPL']) });
+  const out = JSON.parse(r.content);
+  assert.ok(!r.is_error && out.search_mode === 'none' && out.results.length === 0 && /no word to search for/.test(out.note));
+});
+check('explain_strategy_signal refuses an id no saved strategy can have, before any query', async () => {
+  resetDb();
+  const { runTool } = require('../server/services/qaTools');
+  const { STRATEGY_EXECUTORS } = require('../server/services/strategyTools');
+  for (const strategy_id of ['99999999999999999999', 1e30, 'abc', 0, undefined]) {
+    const r = await runTool({ id: 't', name: 'explain_strategy_signal', input: { strategy_id } }, { userId: 1, tier: 'pro', heldSet: new Set() }, STRATEGY_EXECUTORS);
+    assert.ok(r.is_error && /strategy_id must be an id from list_my_strategies/.test(r.content), String(strategy_id));
+  }
+  assert.strictEqual(db.calls.length, 0);
+});
+
 (async () => {
   for (const step of pending) await step();
   console.log(`\n${passed} QA-finding checks passed`);
