@@ -62,7 +62,7 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 ## 3. Current state
 
 - **Git** *(checked 2026-10-11)*: everything is on `main` and pushed. Latest tags
-  **`v1.16`** and **`v2.17`**, both on `@@MERGE@@`, the merge of pull request #18. The
+  **`v1.16`** and **`v2.17`**, both on `91f53fb`, the merge of pull request #18. The
   one commit after it on `main` puts that hash into this file. Before it: `v1.15` /
   `v2.16` on `75fcb2f` (pull request #17, the plan of 2026-10-10), `v1.14` / `v2.15` on
   `d0aa0ca` (pull request #16, IPO Watch's "Show all" button, §5) and `v1.13` / `v2.14`
@@ -2005,11 +2005,11 @@ that remain, none of them a defect waiting for a fix:
 | `v1.13` / `v2.14` | `71230ec` | #15: the QA pass of 2026-10-10 — no new feature, no migration. v1: bad input is a 400 or 404, logs carry no bodies or failed rows, Ask's holding size is the exposure figure, an executive's other venture is not their company, the brief's writer sees no engine scores and its headline is checked. v2: saves and deployments are checked first, bad ids are 404s, engine refusals in plain words, starting capital bounded, the Builder keeps what was typed, the robustness check counts traded windows, an account off Pro keeps the handle on its deployments |
 | `v1.14` / `v2.15` | `d0aa0ca` | #16: IPO Watch opens an issue's news on its latest 5 stories, with a "Show all N stories" button for the rest; the tone and the chart are still from every story. Page only |
 | `v1.15` / `v2.16` | `75fcb2f` | #17: Ask reads IPO Watch, answers on a stock the user does not hold (price, sentiment, price history, each session's high and low) and reads the app's other pages; news retention (off); the listed names that matched wrongly, and news for the listed names nobody holds in India and the US (two switches, both off; a US listed name is tagged only from its own ticker's feed); one model for every Claude call, Claude Haiku 5.5. Migrations `0043` and `0044` |
-| `v1.16` / `v2.17` | `@@MERGE@@` | #18: Ask's code-written answer on a stock the user does not hold gives what the question asked for and stops; each model call and tool round is timed, and `ASK_EFFORT` sets Ask's effort (unset by default); the US rotation has two queues, curated names about every 3 hours and the rest about every 9. No migration |
+| `v1.16` / `v2.17` | `91f53fb` | #18: Ask's code-written answer on a stock the user does not hold gives what the question asked for and stops; each model call and tool round is timed, and `ASK_EFFORT` sets Ask's effort (unset by default); the US rotation has two queues, curated names about every 3 hours and the rest about every 9. No migration |
 
 Pull request #6 was closed by GitHub when its base branch was deleted; #7 replaced it.
 
-**Pull request #18** (`ask-to-the-point`) was merged on 2026-10-11 as `@@MERGE@@`, at
+**Pull request #18** (`ask-to-the-point`) was merged on 2026-10-11 as `91f53fb`, at
 Annas's request from a session, and the branch deleted. Tagged `v1.16` / `v2.17`. Six
 commits from two sessions. Nothing in it is switched on, and the work on how long an
 answer takes is on hold (§3, "Next, in order", item 5).
