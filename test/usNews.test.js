@@ -82,6 +82,19 @@ check('a run takes what is left of its calls after the held and IPO tickers', ()
   assert.strictEqual(U.batchSize(50, limits), 0);
   assert.strictEqual(U.batchSize(400, limits), 0);
 });
+check('the curated names have a few of a run\'s places to themselves, and keep their share as it shrinks', () => {
+  assert.ok(US_NEWS.CURATED_PER_RUN > 0 && US_NEWS.CURATED_PER_RUN < US_NEWS.PER_RUN, 'both queues move');
+  const limits = { PER_RUN: 30, CURATED_PER_RUN: 5 };
+  assert.deepStrictEqual([30, 15, 6, 3, 2, 1, 0].map((n) => U.curatedShare(n, limits)), [5, 3, 1, 1, 0, 0, 0]);
+  // About 100 curated names and 1,400 others: the curated ones come round about three times as often.
+  assert.ok(100 / U.curatedShare(US_NEWS.PER_RUN) < 1400 / (US_NEWS.PER_RUN - U.curatedShare(US_NEWS.PER_RUN)) / 2);
+});
+check('a run\'s names are picked from the two queues, curated first, spare places to the rest', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'usNews.js'), 'utf8');
+  assert.match(src, /const curated = await pick\(CURATED, curatedShare\(n\)\);/);
+  assert.match(src, /pick\(THE_REST, n - curated\.length\)/);
+  assert.match(src, /const THE_REST = "tier IS DISTINCT FROM 'curated'"/);   // the listed tier and graduated IPOs
+});
 const story = (id, headline) => ({ id, headline, summary: '', source: 'Yahoo', url: `https://example.com/${id}`, image: '', datetime: 1791000000 });
 const answers = (byTicker) => async (url) => {
   const sym = new URL(url).searchParams.get('symbol');

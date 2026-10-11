@@ -733,11 +733,13 @@ const INDIA_SMART_MONEY = {
 };
 
 // ─── US coverage (services/usNews.js) ────────────────────────
-// The US shares nobody holds are taken through Finnhub's company news in turn. About 1,500
-// names at 30 a run and a run every 10 minutes: each is visited about every 8 hours, and a
-// visit asks for 7 days, so nothing is missed between two.
+// The US shares nobody holds are taken through Finnhub's company news in turn, 30 a run and
+// a run every 10 minutes, in two queues: about 100 curated names at 5 a run, each visited
+// about every 3 hours, and about 1,400 others at 25 a run, each about every 9 hours. A visit
+// asks for 7 days, so nothing is missed between two.
 const US_NEWS = {
   PER_RUN: 30,
+  CURATED_PER_RUN: 5,      // of those 30, the curated queue's places
   // Finnhub's free plan allows 60 calls a minute, and US quotes use the same key. A run's
   // news calls (held tickers, IPO Watch's, the rotation) stay within this many, so the
   // rotation shrinks as holdings grow and stops when they alone reach it.
