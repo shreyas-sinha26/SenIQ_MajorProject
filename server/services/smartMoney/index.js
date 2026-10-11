@@ -217,7 +217,23 @@ function summarizeTrade(t) {
   return `🏛️ ${role} ${t.politician}${where ? ` (${where})` : ''} ${verb} ${what}${amt}${disc}`;
 }
 
+// Whether a trade is still news when it is first seen: disclosed (or, with no disclosure
+// date, made) within SMART_MONEY.CONGRESS_ALERT_DAYS of now. Pure.
+function isRecentDisclosure(t, now = Date.now()) {
+  const day = t.disclosure_date || t.transaction_date;
+  const at = day ? Date.parse(day) : NaN;
+  return Number.isFinite(at) && now - at <= SMART_MONEY.CONGRESS_ALERT_DAYS * 24 * 3600 * 1000;
+}
+
+let lastCongressFetch = 0;
+
 async function pollCongress() {
+  // Asked every CONGRESS_FETCH_MINUTES, and at the first poll after a start.
+  if (lastCongressFetch && Date.now() - lastCongressFetch < SMART_MONEY.CONGRESS_FETCH_MINUTES * 60 * 1000) {
+    return { inserted: 0, alerts: 0, source: 'not due', baseline: false };
+  }
+  lastCongressFetch = Date.now();
+
   const existing = await queryOne('SELECT count(*)::int AS n FROM congress_trades');
   const isBaseline = existing.n === 0;
 
@@ -239,7 +255,7 @@ async function pollCongress() {
     if (!row) continue;
     inserted++;
 
-    if (!isBaseline) {
+    if (!isBaseline && isRecentDisclosure(t)) {
       const message = summarizeTrade(t);
       const event = {
         type: 'smart_money.congress_trade',
@@ -305,4 +321,4 @@ async function pollSmartMoney() {
   }
 }
 
-module.exports = { pollSmartMoney, pollInstitutions, pollCongress, backfillHoldingTickers, emitEvent, notifyUsers, polKey };
+module.exports = { pollSmartMoney, pollInstitutions, pollCongress, backfillHoldingTickers, emitEvent, notifyUsers, polKey, diffChangeType, isRecentDisclosure };

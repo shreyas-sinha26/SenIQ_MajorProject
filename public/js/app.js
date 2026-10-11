@@ -279,6 +279,15 @@ function initAuth() {
           password: document.getElementById('signup-password').value
         })
       });
+      // With email set up the account waits for its link: back to Sign In, with the note.
+      if (data.confirm) {
+        e.target.reset();
+        switchTab('login');
+        const okEl = document.getElementById('auth-success');
+        okEl.textContent = data.message;
+        okEl.classList.remove('hidden');
+        return;
+      }
       localStorage.setItem(SIGNED_IN_HINT, '1');
       currentUser = data.user;
       e.target.reset();
@@ -1651,6 +1660,58 @@ function initUserMenu() {
       document.getElementById('profile-pw-btn').disabled = false;
     }
   });
+
+  initAccountControls();
+}
+
+// ─── Change of email address, account deletion ───────────────
+function initAccountControls() {
+  const form = document.getElementById('email-change-form');
+  const msgEl = document.getElementById('email-change-msg');
+  const closeForm = () => {
+    form.classList.add('hidden');
+    document.getElementById('email-change-new').value = '';
+    document.getElementById('email-change-pw').value = '';
+  };
+  document.getElementById('email-change-open').addEventListener('click', () => form.classList.toggle('hidden'));
+  document.getElementById('email-change-cancel').addEventListener('click', closeForm);
+  document.getElementById('email-change-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('email-change-btn');
+    const email = document.getElementById('email-change-new').value.trim();
+    const password = document.getElementById('email-change-pw').value;
+    if (!email || !password) return showProfileMsg(msgEl, 'Enter the new address and your password', 'error');
+    btn.disabled = true;
+    try {
+      const r = await api('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ email, password }) });
+      closeForm();
+      const status = document.getElementById('email-change-status');
+      status.textContent = r.message;
+      status.className = 'email-verify-status warn';
+    } catch (err) {
+      showProfileMsg(msgEl, err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('delete-account-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('delete-account-btn');
+    const delMsg = document.getElementById('delete-account-msg');
+    const confirm = document.getElementById('delete-account-email').value.trim();
+    const password = document.getElementById('delete-account-pw').value;
+    if (!currentUser || confirm.toLowerCase() !== String(currentUser.email).toLowerCase()) {
+      return showProfileMsg(delMsg, 'Type this account\'s email address to confirm', 'error');
+    }
+    if (!(await confirmAction('Delete your SenIQ account and everything in it? This cannot be undone.', 'Delete account'))) return;
+    btn.disabled = true;
+    try {
+      await api('/api/auth/delete-account', { method: 'POST', body: JSON.stringify({ confirm, password }) });
+      showSignedOut({ kind: 'info', text: 'Your account has been deleted.' });
+    } catch (err) {
+      showProfileMsg(delMsg, err.message, 'error');
+      btn.disabled = false;
+    }
+  });
 }
 
 function showProfileMsg(el, text, type) {
@@ -1668,6 +1729,8 @@ function openProfilePage() {
   loadPlans();
   loadApiKeys();
   loadEmailPrefs();
+  // The delete form starts empty each time the page is opened.
+  for (const id of ['delete-account-email', 'delete-account-pw']) document.getElementById(id).value = '';
   moveNavIndicator();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -1839,6 +1902,12 @@ async function loadEmailPrefs() {
     status.textContent = p.email_verified ? 'Verified' : 'Not verified — alert and report emails are only sent to a verified address';
     status.className = `email-verify-status ${p.email_verified ? 'ok' : 'warn'}`;
     btn.classList.toggle('hidden', !!p.email_verified);
+    // A change of address that is waiting for its link, and what an account with no
+    // password (Google or GitHub only) is asked for when it deletes itself.
+    const changeStatus = document.getElementById('email-change-status');
+    changeStatus.textContent = p.pending_email ? `Waiting for the link sent to ${p.pending_email} to be opened` : '';
+    changeStatus.className = `email-verify-status ${p.pending_email ? 'warn' : ''}`;
+    document.getElementById('delete-account-pw-group').classList.toggle('hidden', !p.has_password);
   } catch { /* leave the controls as they are */ }
 }
 
@@ -4771,8 +4840,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (qp.get('verified') === '1') {
       const okEl = document.getElementById('auth-success');
-      okEl.textContent = 'Email verified ✓';
+      okEl.textContent = 'Email confirmed ✓ You can sign in now.';
       okEl.classList.remove('hidden');
+      history.replaceState({}, '', '/app');
+    }
+    // Back from the link sent to a new address (GET /api/auth/confirm-email-change).
+    const changed = qp.get('email_changed');
+    if (changed) {
+      if (changed === '1') showToast('Your email address has been changed.', 'success');
+      else showToast('That link is invalid or has expired. Ask for the change again from your profile.', 'error');
       history.replaceState({}, '', '/app');
     }
   }

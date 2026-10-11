@@ -1,6 +1,6 @@
 const { asyncRouter } = require('../middleware/asyncRouter');
 const bcrypt = require('bcryptjs');
-const { queryOne } = require('../db');
+const { queryOne, execute, tx } = require('../db');
 const { makeLimiter } = require('../services/slidingWindow');
 const { createToken, consumeToken } = require('../services/authTokens');
 const { sendEmail, emailEnabled } = require('../services/emailService');
@@ -46,6 +46,28 @@ const USER_COLUMNS = 'id, email, name, created_at, subscription_tier, is_admin';
 // as a wrong password does: the timing told a caller which addresses have accounts.
 const DUMMY_HASH = bcrypt.hashSync('no-such-account', 10);
 
+const validEmail = (e) => e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+
+// One link or notice to an address per window, whoever asks for it: a form that sends
+// mail to any address typed into it must not be a way to fill someone's inbox.
+const mailLimiter = makeLimiter(AUTH_LIMITS.RESET);
+const mailAllowed = (email) => mailLimiter.allow(`mail:${String(email).toLowerCase()}`).allowed;
+
+// An account made by a confirmed sign-up that has not opened its link yet.
+const awaitingConfirm = (user) => !!(user && user.confirm_required && !user.email_verified);
+
+// The link that confirms an account's address. Not awaited by its callers: the answer must
+// not take longer for an address that gets mail than for one that does not.
+function sendConfirmLink(user) {
+  return createToken(user.id, 'verify', AUTH_LIMITS.TOKEN_TTL_MIN.VERIFY)
+    .then((tok) => sendEmail({
+      to: user.email, kind: 'verify', userId: user.id,
+      subject: 'Confirm your SenIQ email',
+      text: `Hi ${user.name},\n\nConfirm this email address to finish creating your SenIQ account:\n${APP_URL}/api/auth/verify-email?token=${tok}\n\nThe link is valid for 24 hours and works once. If you didn't create this account, ignore this email and nothing will happen.`,
+    }))
+    .catch((err) => console.error('Confirmation email error:', err.message));
+}
+
 const validPassword = (p) => typeof p === 'string' && p.length >= AUTH_LIMITS.MIN_PASSWORD_CHARS && p.length <= AUTH_LIMITS.MAX_PASSWORD_CHARS;
 const PASSWORD_RULE = `Password must be ${AUTH_LIMITS.MIN_PASSWORD_CHARS}–${AUTH_LIMITS.MAX_PASSWORD_CHARS} characters`;
 
@@ -59,33 +81,52 @@ router.post('/signup', rateLimit(loginLimiter), async (req, res) => {
     if (!email || !password || !name) {
       return res.status(400).json({ error: 'Email, password, and name are required' });
     }
-    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!validEmail(email)) {
       return res.status(400).json({ error: 'Enter a valid email address' });
     }
     if (!validPassword(password)) return res.status(400).json({ error: PASSWORD_RULE });
 
-    const existing = await queryOne('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [email]);
+    // Hashed before the address is looked up, so every answer below takes as long.
+    const passwordHash = await bcrypt.hash(password, 10);
+    const existing = await queryOne(
+      'SELECT id, email, name, email_verified, confirm_required FROM users WHERE LOWER(email) = LOWER($1)', [email]);
+
+    // With an email provider the address is confirmed before the account can be used, and
+    // the answer is the same whether or not the address already has an account ("Email
+    // already registered" told anyone who asked which addresses are SenIQ users). What
+    // differs is the email: a link for a new sign-up, a notice for an existing account.
+    if (emailEnabled()) {
+      const reply = { confirm: true, email, message: `Check your inbox: we sent a link to ${email}. Open it to finish creating your account.` };
+      if (!existing) {
+        const created = await queryOne(
+          `INSERT INTO users (email, password_hash, name, confirm_required) VALUES ($1, $2, $3, TRUE)
+           ON CONFLICT (email) DO NOTHING RETURNING id, email, name`,
+          [email, passwordHash, name]);
+        if (created && mailAllowed(email)) sendConfirmLink(created);
+      } else if (awaitingConfirm(existing)) {
+        // A sign-up that was never confirmed is started again: the link confirms the name
+        // and password typed last, and the earlier link stops working (createToken).
+        await execute('UPDATE users SET password_hash = $1, name = $2 WHERE id = $3', [passwordHash, name, existing.id]);
+        if (mailAllowed(email)) sendConfirmLink({ id: existing.id, email: existing.email, name });
+      } else if (mailAllowed(email)) {
+        sendEmail({
+          to: existing.email, kind: 'signup_existing', userId: existing.id,
+          subject: 'You already have a SenIQ account',
+          text: `Hi ${existing.name},\n\nSomeone tried to create a SenIQ account with this email address, and it already has one.\n\nIf that was you, sign in here:\n${APP_URL}/app?auth=login\nIf you have forgotten the password, choose "Forgot password" on that page.\n\nIf it was not you, ignore this email: nothing has changed.`,
+        });
+      }
+      return res.status(202).json(reply);
+    }
+
+    // No email provider (local development): no link can be sent, so the account is
+    // usable at once and an address that is taken is said to be.
     if (existing) {
       return res.status(409).json({ error: 'Email already registered' });
     }
-
-    const passwordHash = await bcrypt.hash(password, 10);
     const created = await queryOne(
       `INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING ${USER_COLUMNS}`,
       [email, passwordHash, name]
     );
-
-    // Best-effort verification email (Phase 5) — never blocks signup, and is
-    // skipped entirely when no email provider is configured.
-    if (emailEnabled()) {
-      createToken(created.id, 'verify', AUTH_LIMITS.TOKEN_TTL_MIN.VERIFY)
-        .then((tok) => sendEmail({
-          to: email, kind: 'verify', userId: created.id,
-          subject: 'Verify your SenIQ email',
-          text: `Welcome to SenIQ, ${name}!\n\nConfirm this email address:\n${APP_URL}/api/auth/verify-email?token=${tok}\n\nThe link is valid for 24 hours. If you didn't create this account, ignore this email.`,
-        }))
-        .catch((err) => console.error('Verification email error:', err.message));
-    }
 
     await sessions.startSession(res, created.id, req);
     res.status(201).json({ user: { id: created.id, email, name, created_at: created.created_at, subscription_tier: created.subscription_tier || 'free', is_admin: !!created.is_admin } });
@@ -123,6 +164,19 @@ router.post('/login', rateLimit(loginLimiter), async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Reached only with the right password, so it tells a stranger nothing. A new link goes
+    // out with the refusal: the first one may have expired or been lost.
+    if (awaitingConfirm(user)) {
+      const resent = emailEnabled() && mailAllowed(user.email);
+      if (resent) sendConfirmLink(user);
+      return res.status(403).json({
+        confirm: true,
+        error: resent
+          ? `Confirm your email address first. We have sent a new link to ${user.email}.`
+          : `Confirm your email address first: open the link we sent to ${user.email}.`,
+      });
     }
 
     await sessions.startSession(res, user.id, req);
@@ -294,8 +348,12 @@ router.post('/reset-password', rateLimit(loginLimiter), async (req, res) => {
     if (!consumed) return res.status(400).json({ error: 'This reset link is invalid or has expired — request a new one' });
 
     const hash = await bcrypt.hash(password, 10);
-    await queryOne('UPDATE users SET password_hash = $1, password_changed_at = to_timestamp($2) WHERE id = $3 RETURNING id',
-      [hash, nowSeconds(), consumed.user_id]);
+    // The link went to the account's own address, so using it confirms that address too
+    // (not when the link was shown on screen because no email provider is set up).
+    await queryOne(
+      `UPDATE users SET password_hash = $1, password_changed_at = to_timestamp($2),
+              email_verified = email_verified OR $4 WHERE id = $3 RETURNING id`,
+      [hash, nowSeconds(), consumed.user_id, emailEnabled()]);
     // Whoever was signed in before the reset is signed out everywhere.
     await sessions.endUserSessions(consumed.user_id);
     res.json({ message: 'Password updated — you can sign in now.' });
@@ -341,6 +399,113 @@ router.get('/verify-email', async (req, res) => {
   } catch (err) {
     console.error('Verify email error:', err);
     res.redirect('/app');
+  }
+});
+
+// ─── POST /api/auth/change-email ─────────────────────────────
+// Asks for the account's address to be changed. Nothing changes here: a link goes to the
+// new address and a notice to the current one, and the address changes when the link is
+// opened (GET /confirm-email-change). The answer is the same when the new address belongs
+// to another account, which then gets no mail and never becomes this account's.
+router.post('/change-email', authMiddleware, rateLimit(passwordLimiter, byUser), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const email = typeof body.email === 'string' ? body.email.trim() : '';
+    if (!email || !validEmail(email)) return res.status(400).json({ error: 'Enter a valid email address' });
+    if (!emailEnabled()) return res.status(503).json({ error: 'Email is not set up on this server yet, so a new address cannot be confirmed.' });
+
+    const user = await queryOne('SELECT id, email, name, password_hash, oauth_provider FROM users WHERE id = $1', [req.user.id]);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.password_hash) {
+      const label = PROVIDER_LABEL[user.oauth_provider] || 'social';
+      return res.status(400).json({ error: `This account uses ${label} sign-in and has no password. Set a password first, then change the address.` });
+    }
+    if (typeof body.password !== 'string' || !body.password) return res.status(400).json({ error: 'Your password is required' });
+    if (!(await bcrypt.compare(body.password, user.password_hash))) return res.status(401).json({ error: 'Password is incorrect' });
+    if (email.toLowerCase() === user.email.toLowerCase()) return res.status(400).json({ error: 'That is already this account\'s address' });
+
+    const reply = { message: `We sent a link to ${email}. Your address changes when you open it.` };
+    const taken = await queryOne('SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id <> $2', [email, user.id]);
+    if (!taken && mailAllowed(email)) {
+      await execute('UPDATE users SET pending_email = $1 WHERE id = $2', [email, user.id]);
+      createToken(user.id, 'email_change', AUTH_LIMITS.TOKEN_TTL_MIN.VERIFY)
+        .then((tok) => sendEmail({
+          to: email, kind: 'email_change', userId: user.id,
+          subject: 'Confirm your new SenIQ email',
+          text: `Hi ${user.name},\n\nOpen this link to make this the email address of your SenIQ account:\n${APP_URL}/api/auth/confirm-email-change?token=${tok}\n\nThe link is valid for 24 hours and works once. If you didn't ask for this, ignore this email: the account keeps its current address.`,
+        }))
+        .catch((err) => console.error('Email change link error:', err.message));
+      sendEmail({
+        to: user.email, kind: 'email_change_notice', userId: user.id,
+        subject: 'A change of your SenIQ email was requested',
+        text: `Hi ${user.name},\n\nSomeone signed in to your SenIQ account asked to change its email address to ${email}.\n\nIf that was you, open the link we sent to the new address. Until then your account stays on this one.\n\nIf it was not you, change your password now:\n${APP_URL}/app`,
+      });
+    }
+    res.json(reply);
+  } catch (err) {
+    console.error('Change email error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── GET /api/auth/confirm-email-change?token=… ──────────────
+// Landed from the link sent to the new address. The address changes only if no other
+// account took it in the meantime. Reset links already sent to the old address stop working.
+router.get('/confirm-email-change', async (req, res) => {
+  try {
+    const consumed = await consumeToken(String(req.query.token || ''), 'email_change');
+    const changed = consumed && await queryOne(
+      `UPDATE users SET email = pending_email, pending_email = NULL, email_verified = TRUE
+        WHERE id = $1 AND pending_email IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM users o WHERE LOWER(o.email) = LOWER(users.pending_email) AND o.id <> users.id)
+        RETURNING id`, [consumed.user_id]);
+    if (!changed) return res.redirect('/app?email_changed=0');
+    await execute(`UPDATE auth_tokens SET used_at = now() WHERE user_id = $1 AND purpose = 'reset' AND used_at IS NULL`, [changed.id]);
+    res.redirect('/app?email_changed=1');
+  } catch (err) {
+    console.error('Confirm email change error:', err);
+    res.redirect('/app?email_changed=0');
+  }
+});
+
+// ─── POST /api/auth/delete-account ───────────────────────────
+// Removes the account and everything kept for it: holdings, alerts, briefs, conversations,
+// follows, webhooks, saved strategies, paper deployments, API keys and sessions go with the
+// users row (ON DELETE CASCADE), and the log of emails sent to its address is removed here.
+// What stays is the count and cost of its AI calls, with no user attached. The caller types
+// the account's address, and its password when it has one; an account with no password
+// (Google or GitHub only) must have signed in within the last SESSION.REAUTH_MINUTES.
+router.post('/delete-account', authMiddleware, rateLimit(passwordLimiter, byUser), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const user = await queryOne('SELECT id, email, password_hash, is_admin FROM users WHERE id = $1', [req.user.id]);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (typeof body.confirm !== 'string' || body.confirm.trim().toLowerCase() !== user.email.toLowerCase()) {
+      return res.status(400).json({ error: 'Type this account\'s email address to confirm' });
+    }
+    if (user.password_hash) {
+      if (typeof body.password !== 'string' || !body.password) return res.status(400).json({ error: 'Your password is required' });
+      if (!(await bcrypt.compare(body.password, user.password_hash))) return res.status(401).json({ error: 'Password is incorrect' });
+    } else {
+      const at = req.session && req.session.reauth_at ? new Date(req.session.reauth_at).getTime() : 0;
+      if (Date.now() - at > SESSION.REAUTH_MINUTES * 60_000) {
+        return res.status(403).json({ error: `To delete this account, sign out, sign in again, and delete it within ${SESSION.REAUTH_MINUTES} minutes.` });
+      }
+    }
+    if (user.is_admin) {
+      const others = await queryOne('SELECT count(*)::int AS n FROM users WHERE is_admin AND id <> $1', [user.id]);
+      if (!others || !others.n) return res.status(409).json({ error: 'This is the only admin account. Make another account an admin before deleting it.' });
+    }
+
+    await tx(async (client) => {
+      await client.query('DELETE FROM email_log WHERE user_id = $1 OR LOWER(to_email) = LOWER($2)', [user.id, user.email]);
+      await client.query('DELETE FROM users WHERE id = $1', [user.id]);
+    });
+    sessions.clearSessionCookie(res);
+    res.json({ message: 'Your account and its data have been deleted.' });
+  } catch (err) {
+    console.error('Delete account error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

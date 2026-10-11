@@ -88,7 +88,7 @@ router.post('/resubscribe', async (req, res) => {
 // The signed-in user's email settings, plus what the report schedule works out to for them.
 async function preferences(userId) {
   const u = await queryOne(
-    'SELECT email, email_verified, email_alerts, email_reports, home_market, time_zone, subscription_tier FROM users WHERE id = $1', [userId]);
+    'SELECT email, pending_email, (password_hash IS NOT NULL) AS has_password, email_verified, email_alerts, email_reports, home_market, time_zone, subscription_tier FROM users WHERE id = $1', [userId]);
   if (!u) return null;
   const holdings = await query('SELECT ticker, exchange, asset_class FROM portfolio WHERE user_id = $1', [userId]);
   const market = guessMarket(holdings, u.home_market);
@@ -97,6 +97,8 @@ async function preferences(userId) {
   const zone = zoneFor(u, holdings);
   return {
     email: u.email, email_verified: u.email_verified, email_alerts: u.email_alerts, provider: emailEnabled(),
+    pending_email: u.pending_email || null,           // a change of address waiting for its link to be opened
+    has_password: !!u.has_password,                   // false for an account that only signs in with Google or GitHub
     email_reports: u.email_reports,
     home_market: u.home_market,                       // null = follow the portfolio
     time_zone: u.time_zone,                           // null = not set: the market's zone is used
