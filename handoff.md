@@ -61,13 +61,16 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ## 3. Current state
 
-- **Git** *(checked 2026-10-11)*: everything is on `main` and pushed. Latest tags
-  **`v1.16`** and **`v2.17`**, both on `91f53fb`, the merge of pull request #18. The
-  one commit after it on `main` puts that hash into this file. Before it: `v1.15` /
+- **Git** *(checked 2026-10-11, evening)*: everything is on `main` and pushed. Latest tags
+  **`v1.17`** and **`v2.18`**, both on `13c70bf`, the merge of pull request #19. The
+  one commit after it on `main` puts that hash into this file. Before it: `v1.16` /
+  `v2.17` on `91f53fb` (pull request #18), `v1.15` /
   `v2.16` on `75fcb2f` (pull request #17, the plan of 2026-10-10), `v1.14` / `v2.15` on
   `d0aa0ca` (pull request #16, IPO Watch's "Show all" button, §5) and `v1.13` / `v2.14`
   on `71230ec` (pull request #15, the QA pass, §8). The two numbers differ because `v2.13` was strategies-only work (§11). No
-  pull request is open. Untracked and never pushed: `samples/` and `.github/` (§11).
+  pull request is open. Untracked and never pushed: `samples/` and `.github/` (§11), and
+  the two QA reports of 2026-10-11, `QA_REPORT_v1.md` and `QA_REPORT_v2.md`, which were
+  left out of pull request #19 for Annas to decide on.
 - **What `v1.17` / `v2.18` adds** *(pull request #19; five commits and the merge of two
   local branches, `ask-shapes` and `finnhub-gate`)*. One migration, `0045`. Nothing in it
   is switched on. The section named has each one's detail.
@@ -88,6 +91,12 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
     migration `0045`.
   - **The daily brief's congressional rows** (`4d19d5d`): sample rows stand in only while
     there are no real disclosures, in `smartMoneyContext` (`grounding.js`), as in Ask.
+- **Where the work of the evening of 2026-10-11 was done.** `ask-shapes`, in a worktree
+  of its own, and `finnhub-gate`, in the main checkout (the Finnhub session's work and,
+  after it, the daily brief's fix from a third session). `finnhub-gate` was merged into
+  `ask-shapes` locally and the one branch pushed, so every commit named in this file
+  keeps its hash. Both local branches and the `ask-shapes` worktree are gone; the eval's
+  run folders were moved to `eval/ask/runs/` in the main checkout (gitignored).
 - **Where the work of 2026-10-10 and -11 was done.** On five local branches, each cut
   from the one before: `ipo-ask`, `listed-news`, `ask-tools`, `us-news`, and `haiku-5-5`
   (in a worktree of its own, because two sessions were at work at once). They went to
@@ -163,7 +172,9 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   started with strategies on will replay those three in the daily ledger job. On 2026-10-10 two
   stored Tesla tags were removed from it (§9). Two copies made for checks (`seniq_qa` on
   2026-10-10, `seniq_p6check` on 2026-10-11) were dropped the day they were made.
-- **Nothing is running** *(checked 2026-10-11, 13:26 IST)*: the dev server was started at
+- **Nothing is running** *(checked 2026-10-11, 19:45 IST: the strategy engine was started
+  from the shell at about 18:30 for the Ask eval's strategy cases and stopped at about
+  19:25; the dev server was not started)*. Earlier *(13:26 IST)*: the dev server was started at
   Annas's word at 12:56 IST and stopped at his word at 13:25; no other dev server, no
   strategy engine, no `ollama serve` is listening. Postgres is up. Nothing is hosted. **`.env` has `CLAUDE_REPORTS=1`**, so the next plain
   `npm start` **can make the app's own Claude calls**, now to Claude Haiku 5.5: briefs at
@@ -2245,8 +2256,17 @@ that remain, none of them a defect waiting for a fix:
 | `v1.14` / `v2.15` | `d0aa0ca` | #16: IPO Watch opens an issue's news on its latest 5 stories, with a "Show all N stories" button for the rest; the tone and the chart are still from every story. Page only |
 | `v1.15` / `v2.16` | `75fcb2f` | #17: Ask reads IPO Watch, answers on a stock the user does not hold (price, sentiment, price history, each session's high and low) and reads the app's other pages; news retention (off); the listed names that matched wrongly, and news for the listed names nobody holds in India and the US (two switches, both off; a US listed name is tagged only from its own ticker's feed); one model for every Claude call, Claude Haiku 5.5. Migrations `0043` and `0044` |
 | `v1.16` / `v2.17` | `91f53fb` | #18: Ask's code-written answer on a stock the user does not hold gives what the question asked for and stops; each model call and tool round is timed, and `ASK_EFFORT` sets Ask's effort (unset by default); the US rotation has two queues, curated names about every 3 hours and the rest about every 9. No migration |
+| `v1.17` / `v2.18` | `13c70bf` | #19: Ask's answers shaped tool by tool (rows, an `answer_shape` with each tool's result, only the rows an answer shows, dates and money written out, the closing line put on by code), on the strategies side too; IPO Watch's calendar gives what is open and coming up; Indian deals read for promoters, pledges, buys or sells; sample congressional rows never mixed with real ones, in Ask and in the daily brief; the Ask eval grades shape (81 cases); one gate for every Finnhub call and IPO Watch's news rotation, **not yet run against Finnhub**. Migration `0045` |
 
 Pull request #6 was closed by GitHub when its base branch was deleted; #7 replaced it.
+
+**Pull request #19** (`ask-shapes`) was merged on 2026-10-11 as `13c70bf`, at Annas's
+request from a session ("commit push merge everything done today across all sessions"),
+and the branch deleted. Tagged `v1.17` / `v2.18`. Five commits from three sessions, the
+merge of `finnhub-gate` into `ask-shapes`, and one handoff commit. Nothing in it is
+switched on. **The Finnhub gate went in without a run against Finnhub** (§3, "Next, in
+order", item 2); the next start of the server applies migration `0045` and is the first
+time that code calls Finnhub.
 
 **Pull request #18** (`ask-to-the-point`) was merged on 2026-10-11 as `91f53fb`, at
 Annas's request from a session, and the branch deleted. Tagged `v1.16` / `v2.17`. Six
