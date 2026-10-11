@@ -106,8 +106,10 @@ section('\nAsk and the brief quote the stored day:');
 check('get_smart_money', async () => {
   const r = await EXECUTORS.get_smart_money({ ticker: 'AAPL' }, { userId: 1, heldSet: new Set(['AAPL']) });
   const text = JSON.stringify(r);
-  for (const d of ['2026-06-01', '2026-06-25', '2025-12-31', '2026-02-14']) assert.ok(text.includes(d), `missing ${d}`);
-  for (const d of ['2026-05-31', '2026-06-24', '2025-12-30', '2026-02-13']) assert.ok(!text.includes(d), `off by one: ${d}`);
+  // Ask is given the day written out ("1 Jun 2026", the year left off in that year): the trade's
+  // day, the newest disclosure and the quarter end.
+  for (const d of [/"traded":"1 Jun( 2026)?"/, /"newest_congress_disclosure":"25 Jun( 2026)?"/, /"quarter_end":"31 Dec( 2025)?"/]) assert.ok(d.test(text), `missing ${d}`);
+  for (const d of ['31 May', '24 Jun', '30 Dec']) assert.ok(!text.includes(d), `off by one: ${d}`);
 });
 check('smartMoneyContext', async () => {
   const r = await smartMoneyContext(1);

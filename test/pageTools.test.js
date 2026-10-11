@@ -68,19 +68,34 @@ check('a 13F position: its share of the fund, the change as filed, and whether t
   const r = P.holdingRow({ ticker: null, issuer_name: 'GOODYEAR TIRE &amp; RUBR CO', value: '9956701', change_type: 'baseline' }, 0, held);
   assert.deepStrictEqual([r.issuer, r.ticker, r.pct_of_fund, r.change, 'held_by_user' in r], ['GOODYEAR TIRE & RUBR CO', null, null, 'no earlier quarter to compare', false]);
 });
-check('a congressional trade keeps both dates and the amount band as disclosed', () => {
+check('a congressional trade: who, what, the amount band as disclosed and the day of the trade written out', () => {
   const t = { politician: 'Nancy Pelosi', chamber: 'house', party: null, ticker: 'INTC', asset_description: 'Intel', transaction_type: 'buy', transaction_date: '2026-05-29', disclosure_date: '2026-06-24', amount_range: '$1,000,001 - $5,000,000' };
-  const r = P.congressRow(t, held);
-  assert.deepStrictEqual([r.action, r.amount, r.traded, r.disclosed, 'party' in r, 'held_by_user' in r], ['buy', '$1,000,001 - $5,000,000', '2026-05-29', '2026-06-24', false, false]);
+  const r = P.congressRow(t, held, '2026-10-11');
+  assert.deepStrictEqual([r.action, r.amount, r.traded, 'disclosed' in r, 'chamber' in r, 'held_by_user' in r], ['buy', '$1,000,001 - $5,000,000', '29 May', false, false, false]);
+  assert.strictEqual(P.congressRow(t, held, '2027-01-05').traded, '29 May 2026');   // another year's trade keeps its year
   assert.strictEqual(P.congressRow({ ...t, ticker: null }, held).asset, 'Intel');
   assert.strictEqual(P.congressRow({ ...t, ticker: 'NVDA', party: 'D' }, held).held_by_user, true);
 });
+check('trades are counted in code: the tally, and the stocks traded most', () => {
+  const t = (ticker, type) => ({ ticker, transaction_type: type });
+  const rows = [t('NVDA', 'sell'), t('NVDA', 'sell'), t('AAPL', 'sell'), t('NVDA', 'sell'), t('AAPL', 'buy'), t(null, 'buy')];
+  assert.strictEqual(P.tallyText(rows, 'transaction_type'), '6 trades: 4 sell, 2 buy');
+  assert.strictEqual(P.tallyText(rows.slice(0, 1), 'transaction_type'), '1 trade: 1 sell');
+  assert.strictEqual(P.tallyText([], 'transaction_type'), '0 trades');
+  assert.strictEqual(P.byStock(rows), 'NVDA 3 trades (3 sell); AAPL 2 trades (1 sell, 1 buy)');
+  assert.strictEqual(P.byStock(rows, 1), 'NVDA 3 trades (3 sell); and 1 more stock');
+  assert.strictEqual(P.byStock([]), null);
+});
 check('an Indian deal names the client as NSE does, and the investor when it is one SenIQ follows', () => {
   const d = { deal_type: 'bulk', deal_date: '2026-10-07', ticker: 'RELIANCE', security_name: 'Reliance Industries', client_name: 'LIFE INSURANCE CORPORATION OF INDIA', investor_slug: 'lic', side: 'buy', quantity: '1000', price: '55.64', value: '55640.4' };
-  assert.deepStrictEqual(P.dealRow(d, held), { client: 'LIFE INSURANCE CORPORATION OF INDIA', investor: 'LIC', deal: 'bulk', action: 'buy', ticker: 'RELIANCE', company: 'Reliance Industries', shares: 1000, price_inr: 55.64, value: '₹55,640', traded: '2026-10-07', held_by_user: true });
+  assert.deepStrictEqual(P.dealRow(d, held, '2026-10-11'), { client: 'LIFE INSURANCE CORPORATION OF INDIA', investor: 'LIC', deal: 'bulk', action: 'buy', ticker: 'RELIANCE', company: 'Reliance Industries', shares: 1000, price_inr: 55.64, value: '₹55,640', traded: '7 Oct', held_by_user: true });
   assert.ok(!('investor' in P.dealRow({ ...d, investor_slug: null, ticker: 'SUZLON' }, held)) && !('investor' in P.dealRow({ ...d, investor_slug: 'constructor' }, held)));
   const i = P.insiderRow({ ticker: 'RELIANCE', company: 'Reliance Industries Limited', person: 'A B', category: 'Promoter', mode: 'Market Purchase', side: 'buy', quantity: '960', value: null, trade_from: '2026-02-02', disclosed_at: '2026-02-09' }, held);
-  assert.deepStrictEqual([i.action, i.shares, i.value, i.traded, i.disclosed, i.held_by_user], ['buy', 960, null, '2026-02-02', '2026-02-09', true]);
+  assert.deepStrictEqual([i.action, i.shares, i.value, i.traded, 'disclosed' in i, i.held_by_user], ['buy', 960, null, '2 Feb 2026', false, true]);
+  // A transfer filed with no value has no value to give: not "₹0".
+  const transfer = { ticker: 'X', person: 'A', category: 'Promoters', mode: 'Inter-se-Transfer', side: 'sell', quantity: '110000', trade_from: '2025-12-29' };
+  assert.strictEqual(P.insiderRow({ ...transfer, value: '0' }, held).value, null);
+  assert.strictEqual(P.insiderRow({ ...transfer, value: '3294168' }, held).value, '₹32.94 lakh');
 });
 check('money is given in the unit a reader uses, so the model converts nothing', () => {
   // The eval's failure: ₹1,075,420,825 was called "1,075 crore"; it is 107.54 crore.
@@ -95,7 +110,8 @@ check('money is given in the unit a reader uses, so the model converts nothing',
 });
 check('an alert: when it was made, without the page\'s emoji, its text cut to length', () => {
   const a = P.alertRow({ ticker: 'MARKET', alert_type: 'market_event', sentiment_label: 'neutral', message: `📊 Markets: ${'x'.repeat(400)}`, read: false, delivery: 'digest', created_at: '2026-10-10T16:20:07.602Z' });
-  assert.deepStrictEqual([a.when, a.ticker, a.read, a.sent], ['2026-10-10 16:20 UTC', null, false, 'digest']);
+  assert.deepStrictEqual([a.when, a.ticker, a.read, a.sent], ['10 Oct 2026, 16:20 UTC', null, false, 'digest']);
+  assert.strictEqual(P.alertRow({ ticker: 'BTC', message: 'x', created_at: '2026-10-10T16:20:07.602Z' }, '2026-10-11').when, '10 Oct, 16:20 UTC');
   assert.ok(a.message.startsWith('Markets: x') && a.message.length === QA.PAGE_ALERT_CHARS);
   assert.strictEqual(P.alertRow({ ticker: 'BTC', message: 'BTC — up', created_at: '2026-10-10T16:10:00Z' }).message, 'BTC — up');
 });
@@ -108,13 +124,30 @@ check('the brief: its date, who wrote it, its text cut to length; none is said, 
   assert.ok(none.brief === null && /No daily brief has been written/.test(none.brief_note));
 });
 
+check('the answer shapes go out in a tool result, which is evidence: none holds a figure', () => {
+  const { SMART_MONEY_SHAPE } = require('../server/services/qaTools');
+  const { FILINGS_SHAPE, OVERVIEW_SHAPE } = require('../server/services/qaTools');
+  const { HISTORY_SHAPE } = require('../server/services/priceHistory');
+  const { SNAPSHOT_SHAPE } = require('../server/services/stockSnapshot');
+  for (const shape of [OVERVIEW_SHAPE]) assert.ok(!/\d/.test(shape) && /one holding to a line/.test(shape));
+  // The strategy tools' shapes (v2 only) follow the same rule, and v1's prompt never mentions them.
+  const S = require('../server/services/strategyTools');
+  for (const shape of [S.LIST_SHAPE, S.PERFORMANCE_SHAPE, S.SIGNAL_SHAPE, S.PRESETS_SHAPE, S.DRAFT_SHAPE]) assert.ok(!/\d/.test(shape) && /Leave out/.test(shape), shape.slice(0, 40));
+  assert.ok(/Each of these tools sends an answer_shape/.test(S.STRATEGY_PROMPT) && !/strateg/i.test(require('../server/services/qa').SYSTEM_PROMPT));
+  for (const shape of [P.FUND_LIST_SHAPE, P.FUND_SHAPE, P.CONGRESS_SHAPE, P.INDIA_SHAPE, P.ALERTS_SHAPE, SMART_MONEY_SHAPE, FILINGS_SHAPE, HISTORY_SHAPE, SNAPSHOT_SHAPE]) {
+    assert.ok(!/\d/.test(shape.replace(/13F/g, '')), shape.slice(0, 40));
+    assert.ok(/unless asked/.test(shape));
+  }
+  for (const shape of [P.FUND_SHAPE, P.CONGRESS_SHAPE, P.INDIA_SHAPE, SMART_MONEY_SHAPE]) assert.ok(/one to a line/.test(shape) && / · /.test(shape));
+});
+
 console.log('the room a full result takes:');
 const long = (n) => 'W'.repeat(n);
-check('ten congressional trades, with long names, fit the tool-result allowance', () => {
+check('a result\'s congressional trades, with long names, fit the tool-result allowance', () => {
   const rows = Array.from({ length: QA.PAGE_ROWS }, () => P.congressRow({ politician: long(30), chamber: 'senate', party: 'Republican', ticker: 'GOOGL', transaction_type: 'sell (partial)', transaction_date: '2026-06-15', disclosure_date: '2026-06-29', amount_range: '$1,000,001 - $5,000,000' }, new Set(['GOOGL'])));
   assert.ok(JSON.stringify(rows).length + 700 < QA.MAX_TOOL_RESULT_CHARS, String(JSON.stringify(rows).length));
 });
-check('five Indian deals and five insider trades, with long names, fit', () => {
+check('a result\'s Indian deals and insider trades, with long names, fit', () => {
   const n = Math.ceil(QA.PAGE_ROWS / 2);
   const deals = Array.from({ length: n }, () => P.dealRow({ deal_type: 'block', deal_date: '2026-10-07', ticker: 'RELIANCE', security_name: long(40), client_name: long(60), investor_slug: 'gic-singapore', side: 'sell', quantity: '19328196', price: '1055.64', value: '20403618825.44' }, held));
   const ins = Array.from({ length: n }, () => P.insiderRow({ ticker: 'RELIANCE', company: long(40), person: long(40), category: 'Promoter Group', mode: 'Revokation of Pledge', side: 'pledge', quantity: '19328196', value: '20403618825', trade_from: '2026-02-02', disclosed_at: '2026-02-09' }, held));

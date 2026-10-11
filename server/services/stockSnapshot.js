@@ -40,6 +40,10 @@ function pickCompany(typed, rows) {
     || { matches: rows.slice(0, QA.SNAPSHOT_MATCHES).map((r) => ({ ticker: r.ticker, name: r.name, exchange: r.exchange || null })) };
 }
 
+// How an answer that uses a snapshot is laid out and how much it holds; sent with the result.
+// No figures in it: a tool result is evidence to the grounding check.
+const SNAPSHOT_SHAPE = 'Answer only what was asked. Asked for its price or its sentiment: one sentence, saying in a few words that it is not in the portfolio. Asked to set it beside another stock: one line for each as "name · price · day change · sentiment label with the number of stories behind it", keeping only the fields the question is about ("no reading" where there is none); then one short sentence that says which is not in the portfolio and, when the question asks which is better or higher, what the two readings are without choosing between the stocks. Leave out, unless asked: the session high and low, z-scores and momentum, exposure, the baseline, how many stories is few, and how to add the stock.';
+
 /**
  * The snapshot of one company from its quote and its sentiment (scoreTicker's result). Pure.
  * `company` = a row of the reference: { ticker, name, asset_class, exchange, tier }.
@@ -81,7 +85,8 @@ function buildSnapshot(company, quote, sentiment, { held = false, now = new Date
   }
   out.note = held
     ? 'This company IS in the user\'s portfolio: use the holding tools for its news, sentiment detail, smart money and impact.'
-    : 'Not in the user\'s portfolio. Price and sentiment are all SenIQ has for it: no news detail, smart money or impact. Adding it to the portfolio brings those.';
+    : 'Not in the user\'s portfolio. Price and sentiment are all SenIQ has for it: no news detail, smart money or impact.';
+  out.answer_shape = SNAPSHOT_SHAPE;
   return out;
 }
 
@@ -270,4 +275,4 @@ async function outsideAnswer(tickers, question = '') {
   return snapshotAnswer(snaps, tickers.filter((t) => !shown.has(t)), { advice: asksForAdvice(question), histories, parts: asksFor(question) });
 }
 
-module.exports = { pickCompany, buildSnapshot, snapshotLine, snapshotAnswer, historyLine, asksFor, asksForAdvice, asksAboutHistory, priceText, searchCompanies, findCompany, snapshot, outsideAnswer };
+module.exports = { pickCompany, buildSnapshot, snapshotLine, snapshotAnswer, historyLine, asksFor, asksForAdvice, asksAboutHistory, priceText, searchCompanies, findCompany, snapshot, outsideAnswer, SNAPSHOT_SHAPE };

@@ -119,7 +119,10 @@ function summarize(bars) {
   };
 }
 
-const NOTE = 'Changes and closes are closing prices. highest_price and lowest_price are the highest and lowest prices TRADED in the period (each session\'s high and low), and are what "its high" or "its low" means; highest_close and lowest_close are closing prices. latest_session is the most recent trading session, which may not be today: give its date. Quote these figures as given, each with its dates; do not work out a change over any other period, and do not describe what the price did on days between the closes listed. The period ends on period.to. The latest session may still be in progress. Describe what the price did: do not call a trend, forecast, or say whether it is a good time to buy or sell.';
+const NOTE = 'Changes and closes are closing prices. highest_price and lowest_price are the highest and lowest prices TRADED in the period, and are what "its high" or "its low" means; highest_close and lowest_close are closing prices. latest_session is the most recent trading session, which may not be today. Quote these figures as given, each with its dates; do not work out a change over any other period, and do not describe what the price did on days between the closes listed. The latest session may still be in progress. Describe what the price did: do not call a trend, forecast, or say whether it is a good time to buy or sell.';
+// How a price-history answer is laid out and how much it holds; sent with the result. No
+// figures in it: a tool result is evidence to the grounding check.
+const HISTORY_SHAPE = 'Answer only the period or figure asked about, in one or two sentences. A change: the change, the close and date it is measured from, and the last close with its date. A high or low: the price traded with its date, and not the closing-basis one beside it; for "today" use latest_session and, only then, say in a few words if that session is not today. No period named: the one-year and year-to-date changes, each with its starting close and date, and nothing else. Two names compared: one line each as "name · change · from close and date · to close and date", one period for both (the one-year change when none is named), and nothing from other tools. Leave out, unless asked: other periods, closing-basis highs and lows, volume, other closes, position size, the period the data covers, and what it does not cover or explain.';
 const COIN_NOTE = ' This is a coin: it trades all day, there is one price reading a day here and no session high or low, so the highest and lowest are daily readings; last_24_hours is its high and low over the last 24 hours.';
 
 // The tool result for one company. Pure.
@@ -128,7 +131,7 @@ function buildHistory(company, { currency, bars, volumeUnit, last24h = null }, {
   const head = { kind: 'price_history', ticker: company.ticker, name: company.name || company.ticker, held };
   if (!s) return { ...head, history: null, note: 'No price history is available for it right now. Say so; do not describe its past prices from memory.' };
   const coin = !s.highest_price;
-  return { ...head, currency, ...s, ...(last24h ? { last_24_hours: last24h } : {}), ...(s.avg_daily_volume ? { volume_unit: volumeUnit } : {}), note: NOTE + (coin ? COIN_NOTE : '') };
+  return { ...head, currency, ...s, ...(last24h ? { last_24_hours: last24h } : {}), ...(s.avg_daily_volume ? { volume_unit: volumeUnit } : {}), note: NOTE + (coin ? COIN_NOTE : ''), answer_shape: HISTORY_SHAPE };
 }
 
 // ── Network ──
@@ -184,4 +187,4 @@ async function priceHistory(company, { held = false } = {}) {
   return buildHistory(company, await fetchHistory(company), { held });
 }
 
-module.exports = { parseYahoo, parseCoinGecko, summarize, buildHistory, sourceFor, fetchHistory, priceHistory };
+module.exports = { parseYahoo, parseCoinGecko, summarize, buildHistory, sourceFor, fetchHistory, priceHistory, HISTORY_SHAPE };
