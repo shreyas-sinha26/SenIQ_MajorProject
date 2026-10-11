@@ -14,7 +14,7 @@
  */
 
 const { FEATURES } = require('../../config');
-const { fetchFinnhub, fetchRotation } = require('./finnhub');
+const { fetchRun } = require('./finnhub');
 const { fetchGdelt } = require('./gdelt');
 const { fetchRss } = require('./rss');
 const { fetchReddit } = require('./reddit');
@@ -46,19 +46,19 @@ function dedupe(articles) {
 
 // `alsoCompanyNews`: tickers nobody holds whose company news is wanted all the same (IPO
 // Watch's newly filed and priced issues). They go to the per-ticker source only.
-// `rotation`: this run's batch of the US shares nobody holds (usNews.js). Fetched after the
-// others from the same source, one at a time, so the two never call it at once.
-// Returns { articles, counts, rotation: { checked, stopped } }.
-async function gatherArticles(tickers = [], alsoCompanyNews = [], rotation = []) {
-  let rotated = { checked: [], stopped: null };
+// `rotation`: this run's batch of the US shares nobody holds (usNews.js). The per-ticker
+// source is asked in that order, one call at a time (ingest/finnhub.js).
+// `purpose`: what the gate's log calls the calls for `tickers` ('held' in the pipeline).
+// Returns { articles, counts, companyNews: { checked: { held, ipo, rotation }, stopped } }.
+async function gatherArticles(tickers = [], alsoCompanyNews = [], rotation = [], { purpose = 'held' } = {}) {
+  let companyNews = { checked: { held: [], ipo: [], rotation: [] }, stopped: null };
   const jobs = [{
     name: 'finnhub',
     run: async () => {
-      const own = await fetchFinnhub([...new Set([...tickers, ...alsoCompanyNews])]);
-      if (!rotation.length) return own;
-      const r = await fetchRotation(rotation);
-      rotated = { checked: r.checked, stopped: r.stopped };
-      return [...own, ...r.articles];
+      const held = [...new Set(tickers)];
+      const r = await fetchRun({ held, ipo: [...new Set(alsoCompanyNews)].filter((t) => !held.includes(t)), rotation, purpose });
+      companyNews = { checked: r.checked, stopped: r.stopped };
+      return r.articles;
     },
   }];
   if (FEATURES.MACRO_INGEST) jobs.push({ name: 'gdelt', run: () => fetchGdelt(tickers) });
@@ -80,7 +80,7 @@ async function gatherArticles(tickers = [], alsoCompanyNews = [], rotation = [])
     articles = getDemoNews();
     counts.demo = articles.length;
   }
-  return { articles, counts, rotation: rotated };
+  return { articles, counts, companyNews };
 }
 
 module.exports = { gatherArticles, dedupe };

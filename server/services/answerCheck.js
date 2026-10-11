@@ -12,7 +12,9 @@
  *   number — some evidence number equals it once rounded to the answer's precision
  *            (0.224 supports "0.22"), ignoring sign ("down 1.2%" vs -1.2), or as a
  *            fraction shown as a percentage (0.44 supports "44%"), or with k/M/B scaling.
- *   date   — the same month-day (and year, if the answer gives one) appears in the evidence.
+ *   date   — the same month-day (and year, if the answer gives one) appears in the evidence,
+ *            as 2026-10-13 or written out ("13 Oct", as a tool's own dates and headlines
+ *            have it). A written date with no year stands for a year the evidence names.
  *   url    — appears verbatim in the evidence.
  *   ticker — a company the answer names is also named in the evidence.
  *
@@ -96,10 +98,23 @@ function numberSupported(c, nums) {
   return false;
 }
 
-function dateSupported(c, evidence) {
+/** The dates written out in the evidence ("13 Oct", "October 7, 2026"), as -MM-DD and YYYY-MM-DD. Pure. */
+function evidenceDates(text) {
+  const out = new Set();
+  for (const c of extractClaims(text)) {
+    if (c.type !== 'date' || c.day == null) continue;
+    out.add(`-${pad(c.month)}-${pad(c.day)}`);
+    if (c.year) out.add(`${c.year}-${pad(c.month)}-${pad(c.day)}`);
+  }
+  return out;
+}
+
+function dateSupported(c, evidence, written = new Set()) {
   if (c.day == null) return evidence.includes(`${c.year}-${pad(c.month)}`);
   const md = `-${pad(c.month)}-${pad(c.day)}`;
-  return c.year ? evidence.includes(`${c.year}${md}`) : evidence.includes(md);
+  if (!c.year) return evidence.includes(md) || written.has(md);
+  // A date written without its year in the evidence is of a year the evidence names elsewhere.
+  return evidence.includes(`${c.year}${md}`) || written.has(`${c.year}${md}`) || (written.has(md) && evidence.includes(`${c.year}-`));
 }
 
 /**
@@ -112,12 +127,13 @@ function dateSupported(c, evidence) {
 function checkGrounding(answer, evidenceTexts, { findTickers } = {}) {
   const evidence = (evidenceTexts || []).filter(Boolean).join('\n');
   const nums = evidenceNumbers(evidence);
+  const written = evidenceDates(evidence);
   const claims = extractClaims(answer);
   const unsupported = [];
 
   for (const c of claims) {
     const ok = c.type === 'number' ? numberSupported(c, nums)
-      : c.type === 'date' ? dateSupported(c, evidence)
+      : c.type === 'date' ? dateSupported(c, evidence, written)
       : evidence.includes(c.text);
     if (!ok) unsupported.push({ type: c.type, text: c.text });
   }

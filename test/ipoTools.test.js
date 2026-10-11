@@ -56,8 +56,8 @@ check('card: an Indian issue with its figures, each dated; nothing empty is sent
   const c = T.issueCard(closed);
   assert.deepStrictEqual(c, {
     id: 'i6', name: 'R.K.Fashion Accessories', market: 'IN', board: 'sme', stage: 'closed',
-    open_date: '2026-10-05', close_date: '2026-10-07', listing_date: '2026-10-12',
-    currency: 'INR', price: 82, size_cr: 34.99,
+    dates: 'bidding closed 7 Oct 2026, lists 12 Oct 2026',
+    price: '₹82', size: '₹34.99 crore',
     subscription: { total_x: 2.7, qib_x: 14.11, nii_x: 1.77, retail_x: 3.11, as_of: '2026-10-07' },
     gmp: { inr: 1.5, pct_of_price: 1.8, as_of: '2026-10-09', reading_before: 7 },
   });
@@ -75,11 +75,48 @@ check('card: no premium is sent once the page stops showing one, and none is mad
 
 check('card: a US issue is in dollars, in millions, with the source\'s own status', () => {
   const c = T.issueCard(usListed);
-  assert.deepStrictEqual([c.currency, c.size_usd_m, c.us_status, c.symbol, c.board], ['USD', 3.5, 'priced', 'CHWM', undefined]);
+  assert.deepStrictEqual([c.price, c.size, c.us_status, c.symbol, c.board], ['$5.6', '$3.5 million', 'priced', 'CHWM', undefined]);
   assert.deepStrictEqual(c.listing, { price: 6, gain_pct: 7.14 });                 // "worked back" only when it was
   assert.deepStrictEqual(c.returns_pct, { listing_day: 17.86, week_1: -8.21 });    // later horizons not yet reached
   assert.strictEqual(T.issueCard({ ...usListed, listing_price_derived: true }).listing.price_worked_back_from_gain, true);
-  assert.strictEqual(T.issueCard({ ...usListed, issue_size_usd: null }).size_usd_m, undefined);
+  assert.strictEqual(T.issueCard({ ...usListed, issue_size_usd: null }).size, undefined);
+});
+
+check('card: money is written out once; the band is fine print, and only when there is one', () => {
+  const banded = { ...closed, price_low: 78, issue_size_cr: 712.31 };
+  const c = T.issueCard(banded, { full: true });
+  assert.deepStrictEqual([c.price, c.price_band, c.size], ['₹82', '₹78 to ₹82', '₹712.31 crore']);
+  assert.ok(!('price_band' in T.issueCard(banded)));
+  assert.ok(!('price_band' in T.issueCard(closed, { full: true })) && !('price_band' in T.issueCard({ ...closed, price_low: 82 }, { full: true })));
+});
+
+check('card: its dates are one phrase for its stage, the year left off when it is this year\'s', () => {
+  const on = (over) => T.issueCard(row({ open_date: '2026-10-13', close_date: '2026-10-15', listing_date: '2026-10-21', ...over }), { today: '2026-10-11' }).dates;
+  assert.strictEqual(on({}), 'bidding 13 to 15 Oct');
+  assert.strictEqual(on({ open_date: '2026-09-30', close_date: '2026-10-02' }), 'bidding 30 Sep to 2 Oct');
+  assert.strictEqual(on({ stage: 'open' }), 'bidding open until 15 Oct');
+  assert.strictEqual(on({ stage: 'closed' }), 'bidding closed 15 Oct, lists 21 Oct');
+  assert.strictEqual(on({ stage: 'listed' }), 'listed 21 Oct');
+  assert.strictEqual(on({ stage: 'announced', open_date: null }), undefined);
+  assert.strictEqual(on({ market: 'US', listing_date: '2026-10-15' }), 'expected 15 Oct');
+  assert.strictEqual(on({ market: 'US', listing_date: '2026-10-09' }), 'was expected 9 Oct');
+  assert.strictEqual(on({ market: 'US', stage: 'announced', status_date: '2025-12-30' }), 'filed 30 Dec 2025');
+  // The one-issue view keeps each date on its own as well.
+  assert.strictEqual(T.issueCard(closed, { full: true }).listing_date, '2026-10-12');
+  assert.ok(!('listing_date' in T.issueCard(closed)));
+});
+
+check('a stale calendar is one ready line, with the day it was last refreshed', () => {
+  assert.strictEqual(T.staleLine(['IN'], { IN: '2026-10-09' }, '2026-10-11'), 'India calendar last refreshed 9 Oct.');
+  assert.strictEqual(T.staleLine(['IN', 'US'], { IN: '2026-10-09', US: null }, '2026-10-11'), 'India calendar last refreshed 9 Oct. US calendar last refreshed at a time not on record.');
+  assert.strictEqual(T.staleLine([], {}, '2026-10-11'), null);
+});
+
+check('card: a US issue still called expected after its date says so', () => {
+  const late = { ...usListed, stage: 'upcoming', source_status: 'expected', first_trade_date: null, listing_date: '2026-10-09' };
+  assert.strictEqual(T.issueCard(late, { today: '2026-10-11' }).listing_date_passed, true);
+  assert.ok(!('listing_date_passed' in T.issueCard(late, { today: '2026-10-09' })));
+  assert.ok(!('listing_date_passed' in T.issueCard(late)));
 });
 
 check('card: news is a count, with the tone when stories have been read', () => {
@@ -120,19 +157,40 @@ check('orderings: each by one recorded figure, dated, with SME marked', () => {
     { name: 'B', board: 'sme', sub_total: 40, sub_on: '2026-10-06', gmp_pct: 20, gmp_at: '2026-10-09T07:00:00Z' },
     { name: 'C', board: 'mainboard' },
   ]);
-  assert.strictEqual(o.by_subscription, '1. B (SME) 40x, as of 2026-10-06; 2. A 3x, as of 2026-10-07');
-  assert.strictEqual(o.by_gmp_pct, '1. B (SME) 20% of the issue price, unofficial, as of 2026-10-09; 2. A 5% of the issue price, unofficial, as of 2026-10-09');
+  assert.strictEqual(o.by_subscription, '1. B (SME) 40x, as of 6 Oct 2026; 2. A 3x, as of 7 Oct 2026');
+  assert.strictEqual(o.by_gmp_pct, '1. B (SME) 20% of the issue price, unofficial, as of 9 Oct 2026; 2. A 5% of the issue price, unofficial, as of 9 Oct 2026');
   assert.deepStrictEqual(Object.keys(o), ['by_subscription', 'by_gmp_pct']);       // nothing listed → no gains
   assert.deepStrictEqual(T.orderings([{ name: 'C' }]), {});
   assert.ok(!Object.keys(o).some((k) => /overall|score|rating|best/.test(k)));
+});
+
+check('orderings: size within a market, and what comes soonest', () => {
+  const o = T.orderings([
+    row({ name: 'Big', issue_size_cr: 712.31, open_date: '2026-10-14' }),
+    row({ name: 'Small', board: 'sme', issue_size_cr: 42.1, open_date: '2026-10-13' }),
+    row({ name: 'Yank', market: 'US', board: null, issue_size_usd: 183300000, listing_date: '2026-10-15' }),
+    row({ name: 'Late', market: 'US', board: null, issue_size_usd: 49300000, listing_date: '2026-10-09' }),
+    row({ name: 'Done', stage: 'closed', issue_size_cr: 9000 }),
+  ], { today: '2026-10-11' });
+  assert.strictEqual(o.by_size_india, '1. Big ₹712.31 crore; 2. Small (SME) ₹42.1 crore');   // an issue no longer ahead is not ranked by size
+  assert.strictEqual(o.by_size_us, '1. Yank $183.3 million; 2. Late $49.3 million');
+  // A date already past is not "soonest".
+  assert.strictEqual(o.soonest, '1. Small (SME) bidding opens 13 Oct; 2. Big bidding opens 14 Oct; 3. Yank expected to list 15 Oct');
+});
+
+check('orderings: demand can be read across more issues than are shown, each marked', () => {
+  const shown = [row({ name: 'Next' })];
+  const o = T.orderings(shown, { demand: [...shown, { name: 'Shut', board: 'sme', stage: 'closed', sub_total: 2.7, sub_on: '2026-10-07' }] });
+  assert.strictEqual(o.by_subscription, '1. Shut (SME, bidding closed) 2.7x, as of 7 Oct 2026');
+  assert.ok(!('by_subscription' in T.orderings(shown)));
 });
 
 check('orderings: listing gains come with both ends and the count that gained', () => {
   const gains = [90, 40, 12, 2, 0, -5, -14, -20].map((g, i) => ({ name: `N${i}`, board: 'mainboard', listing_gain_pct: g, listing_date: '2026-10-05' }));
   const o = T.orderings(gains);
   assert.strictEqual(o.listing_gains, '8 with a listing result: 4 above the issue price, 3 below, 1 at it; median 1%');
-  assert.strictEqual(o.highest_listing_gain, '1. N0 90%, listed 2026-10-05; 2. N1 40%, listed 2026-10-05; 3. N2 12%, listed 2026-10-05');
-  assert.strictEqual(o.lowest_listing_gain, '1. N7 -20%, listed 2026-10-05; 2. N6 -14%, listed 2026-10-05; 3. N5 -5%, listed 2026-10-05');
+  assert.strictEqual(o.highest_listing_gain, '1. N0 90%, listed 5 Oct 2026; 2. N1 40%, listed 5 Oct 2026; 3. N2 12%, listed 5 Oct 2026');
+  assert.strictEqual(o.lowest_listing_gain, '1. N7 -20%, listed 5 Oct 2026; 2. N6 -14%, listed 5 Oct 2026; 3. N5 -5%, listed 5 Oct 2026');
   const few = T.orderings(gains.slice(0, 3));
   assert.ok(few.highest_listing_gain && !('lowest_listing_gain' in few));          // the top list already holds them all
   assert.strictEqual(few.listing_gains, '3 with a listing result: 3 above the issue price, 0 below, 0 at it; median 40%');
@@ -208,22 +266,37 @@ check('news: an issue nothing was written about, and one whose stories are unrea
   assert.deepStrictEqual(Object.keys(n), ['stories_linked', 'latest']);            // no tone is claimed
 });
 
-check('digest: the no-model answer counts stages, dates the calendar and ranks by one figure', () => {
+check('digest: the no-model answer lists what is ahead, one issue to a line, then the orderings', () => {
   const text = T.ipoDigest({
+    as_of: '2026-10-11',
     markets: ['IN', 'US'],
-    counts: { IN: { upcoming: 4, closed: 1, listed: 44 }, US: { listed: 5 } },
+    counts: { IN: { upcoming: 2, closed: 1, listed: 44 }, US: { upcoming: 1, announced: 21 } },
     refreshed: { IN: '2026-10-09', US: null },
-    orderings: { by_subscription: '1. A 3x, as of 2026-10-07', by_gmp_pct: '1. B 20% of the issue price, unofficial, as of 2026-10-09' },
-    issues: [{ name: 'HD Fire Protect', market: 'IN', stage: 'upcoming', open_date: '2026-10-13' }],
+    orderings: { by_subscription: '1. A (SME, bidding closed) 3x, as of 7 Oct', by_gmp_pct: '1. B 20% of the issue price, unofficial, as of 9 Oct', by_size_india: '1. HD Fire Protect ₹712.31 crore; 2. Ravita (SME) ₹116.05 crore' },
+    not_shown: '3 more issues match; narrow with market, stage or board to see them.',
+    issues: [
+      { name: 'HD Fire Protect', market: 'IN', board: 'mainboard', stage: 'upcoming', dates: 'bidding 13 to 15 Oct', price: '₹271', size: '₹712.31 crore' },
+      { name: 'Ravita', market: 'IN', board: 'sme', stage: 'upcoming' },
+      { name: 'TRex Bio', market: 'US', stage: 'upcoming', dates: 'was expected 9 Oct', listing_date_passed: true, price: '$16', size: '$153.3 million' },
+    ],
   });
-  assert.ok(text.includes('IPO Watch, India: 4 upcoming, 1 closed, 44 recently listed (calendar refreshed 2026-10-09).'));
-  assert.ok(text.includes('IPO Watch, the US: nothing ahead of listing, 5 recently listed (calendar refreshed never).'));
-  assert.ok(text.includes('First in line: HD Fire Protect (India), expected 2026-10-13.'));
-  assert.ok(text.includes('By grey market premium: 1. B 20% of the issue price, unofficial'));
-  assert.ok(text.endsWith('Educational only, not investment advice.'));
+  assert.deepStrictEqual(text.split('\n'), [
+    'India: 2 upcoming (calendar refreshed 9 Oct).',
+    'HD Fire Protect · mainboard · bidding 13 to 15 Oct · ₹271 · ₹712.31 crore',
+    'Ravita · sme',
+    'US: 1 upcoming (calendar refreshed never).',
+    'TRex Bio · was expected 9 Oct · $16 · $153.3 million',
+    '3 more issues match.',
+    '',
+    'Most subscribed: 1. A (SME, bidding closed) 3x, as of 7 Oct.',
+    'Grey market premium: 1. B 20% of the issue price, unofficial, as of 9 Oct.',
+    'Largest in India: HD Fire Protect ₹712.31 crore.',
+    '',
+    '(Auto-generated from IPO Watch — turn on the AI writer for a fuller answer.) Educational only, not investment advice.',
+  ]);
   assert.ok(!/promising|recommend|should|best/i.test(text));
-  const open = T.ipoDigest({ markets: ['IN'], counts: {}, refreshed: {}, orderings: {}, issues: [{ name: 'X', market: 'IN', stage: 'open', close_date: '2026-10-15' }] });
-  assert.ok(open.includes('First in line: X (India), open until 2026-10-15.'));
+  const open = T.ipoDigest({ markets: ['IN'], counts: {}, refreshed: {}, orderings: {}, issues: [{ name: 'X', market: 'IN', board: 'mainboard', stage: 'open', dates: 'bidding open until 15 Oct' }] });
+  assert.deepStrictEqual(open.split('\n').slice(0, 2), ['India: nothing open or coming up (calendar refreshed never).', 'X · mainboard · bidding open until 15 Oct']);
 });
 
 check('a wrong market, stage or board is refused before any query', async () => {
@@ -252,6 +325,9 @@ check('the rules: compare and never pick, premium unofficial and dated, one clos
   assert.ok(p.trimEnd().endsWith('"Educational only, not investment advice."'));
   // The prompt is evidence to the grounding check: a figure in it would vouch for the same figure in an answer.
   assert.ok(!/\d/.test(p));
+  // So is a tool result, and the answer shape goes out in one.
+  assert.ok(!/\d/.test(T.CALENDAR_SHAPE) && !/\d/.test(T.DETAIL_SHAPE));
+  assert.ok(/one issue to a line/.test(T.CALENDAR_SHAPE) && /follow it/.test(require('../server/services/qa').SYSTEM_PROMPT));
 });
 
 (async () => {

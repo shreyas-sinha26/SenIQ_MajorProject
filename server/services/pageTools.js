@@ -17,6 +17,7 @@
 
 const { QA, TIERS, INDIA_SMART_MONEY, FEATURES } = require('../config');
 const { INDIA_INVESTORS, INVESTOR_BY_SLUG } = require('../data/indiaInvestors');
+const { shortDay, todayIso } = require('./answerText');
 
 const TEASER_ROWS = 2;   // what a teaser plan sees on the smart-money pages (routes/smartMoney.js)
 const num = (v) => (v == null ? null : Number(v));
@@ -43,8 +44,17 @@ const unescape = (s) => String(s || '').replace(/&amp;/g, '&').replace(/&#39;|&a
 const rowCap = (ctx, n) => (TIERS[ctx.tier] && TIERS[ctx.tier].smartMoney === 'teaser' ? Math.min(n, TEASER_ROWS) : n);
 const teaserNote = (ctx) => (TIERS[ctx.tier] && TIERS[ctx.tier].smartMoney === 'teaser' ? { plan_limit: `This plan shows the first ${TEASER_ROWS} rows; the full list is on Plus and Pro.` } : {});
 
-const LAG_NOTE = 'Disclosed with a legal lag: a 13F is filed up to 45 days after the quarter ends, a congressional trade up to 45 days after it is made. Give each row its own dates, and repeat each action or change as written.';
+const LAG_NOTE = 'Disclosed with a legal lag: a 13F is filed up to 45 days after the quarter ends, a congressional trade up to 45 days after it is made. Repeat each action or change as written.';
 const INDIA_NOTE = 'Bulk and block deals are published by NSE the same evening, with the client named as the exchange reports it. Insider trades are SEBI disclosures by promoters, directors and key managers, usually within two trading days. India has no congressional-trade disclosures.';
+
+// How an answer from each page is laid out and how much it holds. Sent with the result, so
+// the rule arrives with the data it is for. No figures in them: a tool result is evidence to
+// the grounding check.
+const FUND_LIST_SHAPE = 'Name the funds in one sentence, each with its manager in brackets where one is given, the ones the user follows first. Nothing else about them unless asked: no dates, no values, no explanation of filings.';
+const FUND_SHAPE = 'Answer only what was asked. Asked what the fund holds: one line for the filing (quarter end, number of positions, total value), then its largest positions, one to a line as "company (ticker) · value · share of the fund" (the rows given, in their order). Asked what changed, or what it bought or sold: the counts from changes_vs_prior_quarter in one sentence with the quarter end, then the positions the question is about, one to a line as "company (ticker) · change · value" (for "bought", largest_new and largest_added; for "sold", largest_reduced; for "changed", all three; the rows given). Asked both what it holds and what changed: the holdings part, then the counts sentence, then only the first row of each change list. A value is the size of the position: never write that the fund bought or sold that amount, and do not explain that. Only when asked what it sold or exited, add in a few words that a position sold out completely does not appear in a filing. Leave out, unless asked: what a 13F is or covers, the filing lag, the filing date, and whether the user holds a position.';
+const CONGRESS_SHAPE = 'Answer only what was asked. A yes-or-no question is answered first, in a few words. Then the summary as written, with newest_disclosure as how recent the data is, in a few words. Then the trades the question is about, one to a line as "politician · action · ticker · amount · trade date" (the rows given, in their order; leave the politician out of the lines when the question named one). If not_shown is present, say how many more in a few words. Only when asked which stocks or which holdings were traded, or what is being bought or sold: give by_stock in one sentence in place of the lines; otherwise leave by_stock out. Leave out, unless asked: chamber and party, the reporting lag, whether a trade is in the user\'s holdings, and holdings that have no trades.';
+const ALERTS_SHAPE = 'Answer only what was asked. Asked about alerts: one sentence with the number unread and the number in the last seven days; then the alerts given, one to a line as "when · ticker or Markets · what it flagged", the message cut to its point; then a few words saying an alert is what was flagged then, not a reading of now. Asked about the brief: its date and its gist in at most three sentences; if there is none, one sentence saying so, and stop. Asked both: the alerts first, then the brief. Leave out, unless asked: whether an alert was read, how it was sent, its type and tone, how many were not shown, the brief when the question is about alerts, and events or news from another tool.';
+const INDIA_SHAPE = 'Answer only what was asked. Asked which investors SenIQ follows: name them from investors_tracked in one sentence, and stop. Otherwise first say in a few words how many deals and insider trades were found (or that there are none, and stop). If the result has across_the_market and the question did not say "my", read the whole market before answering. Then the rows the question is about, one to a line: a deal as "client · action · company · value · date", an insider trade as "person (category) · action · company · shares · value · date" (the rows given, in their order). If rows were not shown, say how many more in a few words. Leave out, unless asked: the price per share, how names are matched, when the exchange publishes, whether a row is in the user\'s holdings, what the rows not shown might hold, and stocks or investors with nothing on record.';
 
 // ── Pure ──
 
@@ -108,41 +118,59 @@ function holdingRow(h, total, heldSet) {
   };
 }
 
-// A congressional trade as Ask shows it. Pure.
-function congressRow(t, heldSet) {
+// A congressional trade as Ask shows it: who, what, how much and the day of the trade, the
+// day written as an answer says it. The day it was disclosed is on the result, once. Pure.
+function congressRow(t, heldSet, today = null) {
   return {
-    politician: t.politician, chamber: t.chamber, ...(t.party ? { party: t.party } : {}),
+    politician: t.politician,
     ticker: t.ticker || null, asset: t.ticker ? undefined : t.asset_description || null,
     action: t.transaction_type, amount: t.amount_range || null,
-    traded: t.transaction_date, disclosed: t.disclosure_date,
+    traded: shortDay(t.transaction_date, today),
     ...(t.ticker && heldSet.has(t.ticker) ? { held_by_user: true } : {}),
   };
 }
 
+// "6 trades: 5 sell, 1 buy" — counted here so an answer never counts rows. Pure.
+function tallyText(rows, field, noun = 'trades') {
+  const counts = Object.entries(tally(rows, field)).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${k}`);
+  return `${rows.length} ${rows.length === 1 ? noun.replace(/s$/, '') : noun}${counts.length ? `: ${counts.join(', ')}` : ''}`;
+}
+
+// The stocks most often traded among `rows`, each with its own tally: "NVDA 3 trades (3 sell); AAPL 3 trades (2 sell, 1 buy)". Pure.
+function byStock(rows, top = 5) {
+  const groups = new Map();
+  for (const t of rows) if (t.ticker) groups.set(t.ticker, [...(groups.get(t.ticker) || []), t]);
+  const ranked = [...groups.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  const line = ranked.slice(0, top).map(([ticker, ts]) => `${ticker} ${tallyText(ts, 'transaction_type').replace(/: /, ' (')})`).join('; ');
+  return ranked.length > top ? `${line}; and ${ranked.length - top} more ${ranked.length - top === 1 ? 'stock' : 'stocks'}` : line || null;
+}
+
 // An NSE bulk or block deal, and an insider trade, as Ask shows them. Pure.
-function dealRow(d, heldSet) {
+function dealRow(d, heldSet, today = null) {
   const investor = d.investor_slug && Object.hasOwn(INVESTOR_BY_SLUG, d.investor_slug) ? INVESTOR_BY_SLUG[d.investor_slug].name : null;
   return {
     client: d.client_name, ...(investor ? { investor } : {}), deal: d.deal_type, action: d.side,
     ticker: d.ticker, company: d.security_name || null,
     shares: num(d.quantity), price_inr: num(d.price), value: moneyText(d.value, 'INR'),
-    traded: d.deal_date,
+    traded: shortDay(d.deal_date, today),
     ...(heldSet.has(d.ticker) ? { held_by_user: true } : {}),
   };
 }
-function insiderRow(t, heldSet) {
+function insiderRow(t, heldSet, today = null) {
   return {
     person: t.person, category: t.category, how: t.mode, action: t.side, ticker: t.ticker, company: t.company || null,
-    shares: num(t.quantity), value: moneyText(t.value, 'INR'),
-    traded: t.trade_from, disclosed: t.disclosed_at,
+    // A transfer or a pledge is often filed with no value: that is "not given", not ₹0.
+    shares: num(t.quantity), value: Number(t.value) > 0 ? moneyText(t.value, 'INR') : null,
+    traded: shortDay(t.trade_from, today),
     ...(heldSet.has(t.ticker) ? { held_by_user: true } : {}),
   };
 }
 
 // An alert as Ask shows it. The leading emoji is the page's decoration, not part of the text. Pure.
-function alertRow(a) {
+function alertRow(a, today = null) {
+  const at = new Date(a.created_at).toISOString();
   return {
-    when: new Date(a.created_at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
+    when: `${shortDay(at, today)}, ${at.slice(11, 16)} UTC`,
     type: a.alert_type, ticker: a.ticker === 'MARKET' ? null : a.ticker, sentiment: a.sentiment_label || null,
     message: String(a.message || '').replace(/^[^\p{L}\p{N}"'(]+/u, '').slice(0, QA.PAGE_ALERT_CHARS),
     read: !!a.read, sent: a.delivery || null,
@@ -177,15 +205,19 @@ async function fundHoldings({ fund } = {}, ctx) {
       ORDER BY (fe.id IS NOT NULL) DESC, f.total_value DESC NULLS LAST, i.name`,
     [ctx.userId]
   );
-  const card = (f) => ({ fund: f.name, manager: f.manager || null, quarter_end: f.period_of_report, filed: f.filed_at ? f.filed_at.slice(0, 10) : null,
+  const today = todayIso();
+  const card = (f) => ({ fund: f.name, manager: f.manager || null, quarter_end: shortDay(f.period_of_report, today), filed: shortDay(f.filed_at, today),
     positions: f.holdings_count, total_value: moneyText(f.total_value, 'USD'), ...(f.following ? { followed_by_user: true } : {}) });
 
   if (!String(fund || '').trim()) {
-    return { kind: 'fund_holdings', funds: funds.slice(0, rowCap(ctx, funds.length)).map(card), ...teaserNote(ctx),
-      note: `These are the funds SenIQ tracks, the ones the user follows first. Pass a fund's name for its holdings. ${LAG_NOTE}` };
+    // A manager's name that is only the fund's own ("Two Sigma") is not a manager to name.
+    const named = (f) => ({ fund: f.name, ...(f.manager && !key(f.name).includes(key(f.manager)) ? { manager: f.manager } : {}), total_value: moneyText(f.total_value, 'USD'), ...(f.following ? { followed_by_user: true } : {}) });
+    return { kind: 'fund_holdings', funds_tracked: funds.length, funds: funds.slice(0, rowCap(ctx, funds.length)).map(named), ...teaserNote(ctx),
+      note: 'These are the funds SenIQ tracks from their 13F filings, the ones the user follows first, then the largest. Pass a fund\'s name for its holdings.',
+      answer_shape: FUND_LIST_SHAPE };
   }
   const found = pickNamed(fund, funds, (f) => [f.name, f.slug, f.manager]);
-  if (found.none) return { error: `not_found: SenIQ tracks no fund called "${String(fund).slice(0, 60)}". It tracks: ${funds.map((f) => f.name).join(', ')}. Say so; do not describe that fund's holdings from memory.` };
+  if (found.none) return { error: `not_found: SenIQ tracks no fund called "${String(fund).slice(0, 60)}". It tracks: ${funds.map((f) => f.name).join(', ')}. Say so in one sentence and stop; do not describe that fund's holdings from memory.` };
   if (found.matches) return { kind: 'fund_holdings', matches: found.matches.map((f) => ({ fund: f.name, manager: f.manager })), note: 'Several tracked funds match. Ask the user which one they mean.' };
   const f = found.item;
   if (!f.filing_id) return { kind: 'fund_holdings', ...card(f), holdings: [], note: 'SenIQ has no filing stored for this fund yet.' };
@@ -210,12 +242,14 @@ async function fundHoldings({ fund } = {}, ctx) {
     } : { changes_note: 'This is the first quarter SenIQ has for the fund, so there is no earlier one to compare.' }),
     filings_stored: prior.n,
     ...teaserNote(ctx),
-    note: `Top positions by value in the latest 13F, of ${f.holdings_count} in all. A 13F lists US-listed long positions only: no shorts, no cash, and a position sold out completely does not appear, so exits are not shown. ${LAG_NOTE}`,
+    note: `Top positions by value in the latest 13F, of ${f.holdings_count} in all. A position sold out completely does not appear in a 13F, so exits are not shown. ${LAG_NOTE}`,
+    answer_shape: FUND_SHAPE,
   };
 }
 
-// Congress: one politician's trades, or the user's (held tickers and followed politicians), or everyone's.
-async function politicianTrades({ politician, scope } = {}, ctx) {
+// Congress: one politician's trades, or the user's (held tickers and followed politicians), or
+// everyone's; `action` keeps only the buys or only the sells.
+async function politicianTrades({ politician, scope, action } = {}, ctx) {
   const { query } = require('../db');
   // Sample rows stand in only while there are no real disclosures; never mix the two.
   const live = (await query('SELECT count(*)::int AS n FROM congress_trades WHERE is_sample = false'))[0].n > 0;
@@ -225,16 +259,25 @@ async function politicianTrades({ politician, scope } = {}, ctx) {
        FROM congress_trades WHERE is_sample = $1
       ORDER BY disclosure_date DESC NULLS LAST, id DESC LIMIT 400`, [!live]);
   const sample = live ? {} : { sample_data: 'These are SAMPLE rows, not real disclosures: no live source is connected. Say so.' };
-  const out = (rows, extra) => {
-    const shown = rows.slice(0, rowCap(ctx, QA.PAGE_ROWS)).map((t) => congressRow(t, ctx.heldSet));
-    return { kind: 'politician_trades', ...extra, trades_found: rows.length, summary: tally(rows.map((t) => ({ action: t.transaction_type })), 'action'),
-      trades: shown, ...(rows.length > shown.length ? { not_shown: rows.length - shown.length } : {}), ...sample, ...teaserNote(ctx), note: LAG_NOTE };
+  const today = todayIso();
+  const side = ['buy', 'sell'].includes(String(action || '').toLowerCase()) ? String(action).toLowerCase() : null;
+  const out = (all, extra) => {
+    // "sell (partial)" is a sale: the filter reads how the action starts.
+    const rows = side ? all.filter((t) => String(t.transaction_type || '').toLowerCase().startsWith(side)) : all;
+    const shown = rows.slice(0, rowCap(ctx, QA.PAGE_ROWS)).map((t) => congressRow(t, ctx.heldSet, today));
+    return { kind: 'politician_trades', ...extra, ...(side ? { only: `${side} trades` } : {}), trades_found: rows.length,
+      summary: tallyText(rows, 'transaction_type'),
+      newest_disclosure: shortDay(rows.map((t) => t.disclosure_date).filter(Boolean).sort().pop(), today),
+      by_stock: byStock(rows),
+      trades: shown, ...(rows.length > shown.length ? { not_shown: rows.length - shown.length } : {}), ...sample, ...teaserNote(ctx),
+      note: 'A congressional trade is disclosed up to 45 days after it is made; the amount is the range the filing gives. Repeat each action as written.',
+      answer_shape: CONGRESS_SHAPE };
   };
 
   if (String(politician || '').trim()) {
     const people = [...new Map(recent.map((t) => [polKey(t.politician), { name: t.politician, chamber: t.chamber, party: t.party }])).values()];
     const found = pickNamed(politician, people, (p) => [p.name, ...p.name.split(/\s+/).slice(-1)]);
-    if (found.none) return { error: `not_found: none of the ${people.length} politicians in SenIQ's recent disclosures is called "${String(politician).slice(0, 60)}". Say so; do not describe their trades from memory.` };
+    if (found.none) return { error: `not_found: none of the ${people.length} politicians in SenIQ's recent disclosures is called "${String(politician).slice(0, 60)}". Say so in one sentence and stop: call no other tool for this name, and do not describe their trades from memory.` };
     if (found.matches) return { kind: 'politician_trades', matches: found.matches, note: 'Several politicians match. Ask the user which one they mean.' };
     return out(recent.filter((t) => polKey(t.politician) === polKey(found.item.name)), { politician: found.item.name, chamber: found.item.chamber, party: found.item.party });
   }
@@ -244,25 +287,33 @@ async function politicianTrades({ politician, scope } = {}, ctx) {
   return out(mine, { scope: 'trades in the user\'s holdings, and by the politicians they follow', politicians_followed: followed.size });
 }
 
-// India: one curated investor's deals, or the user's (held Indian stocks and followed investors), or the whole market's.
-async function indiaDeals({ investor, scope } = {}, ctx) {
+// India: one curated investor's deals, or the user's (held Indian stocks and followed investors), or the whole
+// market's. `action` keeps only the buys, the sells or the pledges; `insiders: 'promoters'` keeps only the
+// insider trades by promoters and the promoter group, and leaves the deals out.
+async function indiaDeals({ investor, scope, action, insiders: whose } = {}, ctx) {
   if (!FEATURES.INDIA_SMART_MONEY) return { kind: 'india_deals', available: false, note: 'The India side of the Institutions and Congress pages is not switched on for this installation, so there is nothing to read. Say so.' };
   const { query } = require('../db');
   const deals = await query(
     `SELECT deal_type, deal_date::text AS deal_date, ticker, security_name, client_name, investor_slug, side, quantity, price, value
        FROM india_deals ORDER BY deal_date DESC, value DESC, id DESC LIMIT $1`, [INDIA_SMART_MONEY.LIST_WINDOW]);
+  const today = todayIso();
   const cut = (rows, n = QA.PAGE_ROWS) => rows.slice(0, rowCap(ctx, n));
   const left = (rows, shown) => (rows.length > shown.length ? { not_shown: rows.length - shown.length } : {});
+  const side = ['buy', 'sell', 'pledge'].includes(String(action || '').toLowerCase()) ? String(action).toLowerCase() : null;
+  const promoters = String(whose || '').toLowerCase() === 'promoters';
+  const sided = (rows) => (side ? rows.filter((r) => String(r.side || '').toLowerCase() === side) : rows);
+  const only = [side && `${side} only`, promoters && 'insider trades by promoters and the promoter group only'].filter(Boolean).join('; ');
 
   if (String(investor || '').trim()) {
     const found = pickNamed(investor, INDIA_INVESTORS, (i) => [i.name, i.slug, ...i.match]);
-    if (found.none) return { error: `not_found: "${String(investor).slice(0, 60)}" is not one of the Indian investors SenIQ follows deals for. They are: ${INDIA_INVESTORS.map((i) => i.name).join(', ')}. Say so; do not describe that investor's deals from memory.` };
+    if (found.none) return { error: `not_found: "${String(investor).slice(0, 60)}" is not one of the Indian investors SenIQ follows deals for. They are: ${INDIA_INVESTORS.map((i) => i.name).join(', ')}. Say so in one sentence and stop; do not describe that investor's deals from memory.` };
     if (found.matches) return { kind: 'india_deals', matches: found.matches.map((i) => ({ investor: i.name, kind: i.kind })), note: 'Several investors match. Ask the user which one they mean.' };
-    const rows = deals.filter((d) => d.investor_slug === found.item.slug);
+    const rows = sided(deals.filter((d) => d.investor_slug === found.item.slug));
     const shown = cut(rows);
-    return { kind: 'india_deals', investor: found.item.name, investor_kind: found.item.kind, deals_found: rows.length,
-      deals: shown.map((d) => dealRow(d, ctx.heldSet)), ...left(rows, shown), ...teaserNote(ctx),
-      note: `A deal is this investor's when the client name NSE reports contains its name; a deal under another name is not attributed. Looked at the newest ${deals.length} stored deals. ${INDIA_NOTE}` };
+    return { kind: 'india_deals', investor: found.item.name, investor_kind: found.item.kind, ...(side ? { only: `${side} only` } : {}), deals_found: rows.length,
+      deals: shown.map((d) => dealRow(d, ctx.heldSet, today)), ...left(rows, shown), ...teaserNote(ctx),
+      note: `A deal is this investor's when the client name NSE reports contains its name; a deal under another name is not attributed. Looked at the newest ${deals.length} stored deals. ${INDIA_NOTE}`,
+      answer_shape: INDIA_SHAPE };
   }
 
   const insiders = await query(
@@ -271,6 +322,9 @@ async function indiaDeals({ investor, scope } = {}, ctx) {
   let myDeals = deals;
   let myInsiders = insiders;
   let label = 'the whole market, newest first and largest first within a day';
+  // What the same filters find across the market, said when the user's own holdings have nothing.
+  const promoterRows = (rows) => (String(whose || '').toLowerCase() === 'promoters' ? rows.filter((t) => /promoter/i.test(String(t.category || ''))) : rows);
+  const marketWide = { deals: String(whose || '').toLowerCase() === 'promoters' || side === 'pledge' ? 0 : sided(deals).length, insider_trades: sided(promoterRows(insiders)).length };
   if (scope !== 'all') {
     const heldIn = new Set((await query(
       `SELECT DISTINCT p.ticker FROM portfolio p LEFT JOIN companies c ON c.ticker = p.ticker
@@ -280,16 +334,25 @@ async function indiaDeals({ investor, scope } = {}, ctx) {
     myInsiders = insiders.filter((t) => heldIn.has(t.ticker));
     label = 'deals and insider trades in the user\'s Indian holdings, and deals by the investors they follow';
   }
+  // A pledge is an insider's, and so is a promoter's trade: neither is a bulk or block deal.
+  const insidersOnly = promoters || side === 'pledge';
+  myDeals = insidersOnly ? [] : sided(myDeals);
+  myInsiders = sided(promoters ? myInsiders.filter((t) => /promoter/i.test(String(t.category || ''))) : myInsiders);
   const half = Math.ceil(QA.PAGE_ROWS / 2);
   const shownDeals = cut(myDeals, half);
-  const shownInsiders = cut(myInsiders, half);
+  const shownInsiders = cut(myInsiders, insidersOnly ? QA.PAGE_ROWS : half);
   return {
-    kind: 'india_deals', scope: label,
-    deals_found: myDeals.length, deals: shownDeals.map((d) => dealRow(d, ctx.heldSet)),
+    kind: 'india_deals', scope: label, ...(only ? { only } : {}),
+    // The investors a deal can be looked up by; no list of them is kept anywhere else Ask reads.
+    investors_tracked: INDIA_INVESTORS.map((i) => i.name).join(', '),
+    ...(insidersOnly ? {} : { deals_found: myDeals.length, deals: shownDeals.map((d) => dealRow(d, ctx.heldSet, today)) }),
     ...(myDeals.length > shownDeals.length ? { deals_not_shown: myDeals.length - shownDeals.length } : {}),
-    insider_trades_found: myInsiders.length, insider_trades: shownInsiders.map((t) => insiderRow(t, ctx.heldSet)),
+    insider_trades_found: myInsiders.length, insider_trades: shownInsiders.map((t) => insiderRow(t, ctx.heldSet, today)),
     ...(myInsiders.length > shownInsiders.length ? { insider_trades_not_shown: myInsiders.length - shownInsiders.length } : {}),
-    ...teaserNote(ctx), note: INDIA_NOTE,
+    // Nothing in the user's own stocks is not nothing in the market.
+    ...(scope !== 'all' && !myDeals.length && !myInsiders.length && (marketWide.deals || marketWide.insider_trades)
+      ? { across_the_market: `${marketWide.deals} deals and ${marketWide.insider_trades} insider trades match across the whole market; call again with scope "all" to read them.` } : {}),
+    ...teaserNote(ctx), note: INDIA_NOTE, answer_shape: INDIA_SHAPE,
   };
 }
 
@@ -304,14 +367,16 @@ async function alertsAndBrief({ what } = {}, ctx) {
     const c = await queryOne(
       `SELECT count(*) FILTER (WHERE NOT read AND NOT dismissed)::int AS unread,
               count(*) FILTER (WHERE created_at > now() - interval '7 days')::int AS week FROM alerts WHERE user_id = $1`, [ctx.userId]);
-    Object.assign(out, { alerts_unread: c.unread, alerts_last_7_days: c.week, alerts: rows.map(alertRow),
+    Object.assign(out, { alerts_unread: c.unread, alerts_last_7_days: c.week, alerts: rows.map((a) => alertRow(a, todayIso())),
       alerts_note: `The newest ${rows.length} alerts not dismissed, newest first. An alert is what SenIQ flagged for this user when it was created; it is not a current reading.` });
   }
   if (what !== 'alerts') {
     Object.assign(out, briefCard(await queryOne(
       `SELECT brief_date::text AS brief_date, headline, narrative, writer FROM daily_briefs WHERE user_id = $1 ORDER BY brief_date DESC LIMIT 1`, [ctx.userId])));
   }
+  out.answer_shape = ALERTS_SHAPE;
   return out;
 }
 
-module.exports = { isPageQuestion, TRACKED_FUNDS, moneyText, pickNamed, holdingRow, congressRow, dealRow, insiderRow, alertRow, briefCard, fundHoldings, politicianTrades, indiaDeals, alertsAndBrief };
+module.exports = { isPageQuestion, TRACKED_FUNDS, moneyText, pickNamed, holdingRow, congressRow, tallyText, byStock, dealRow, insiderRow, alertRow, briefCard,
+  FUND_LIST_SHAPE, FUND_SHAPE, CONGRESS_SHAPE, INDIA_SHAPE, ALERTS_SHAPE, fundHoldings, politicianTrades, indiaDeals, alertsAndBrief };

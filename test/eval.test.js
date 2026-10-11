@@ -8,6 +8,7 @@ const path = require('path');
 const lib = require('../eval/ask/lib');
 const { TOOLS } = require('../server/services/qaTools');
 const { IPO_TOOLS } = require('../server/services/ipoTools');
+const { STRATEGY_TOOLS } = require('../server/services/strategyTools');
 
 let passed = 0;
 function check(name, fn) {
@@ -16,7 +17,7 @@ function check(name, fn) {
 }
 
 const doc = JSON.parse(fs.readFileSync(path.join(__dirname, '../eval/ask/cases.json'), 'utf8'));
-const toolNames = [...TOOLS, ...IPO_TOOLS].map((t) => t.name);
+const toolNames = [...TOOLS, ...STRATEGY_TOOLS, ...IPO_TOOLS].map((t) => t.name);
 const CASE = { id: 'x-01', tags: ['t'], question: 'Why is my portfolio down?', rubric: ['states the move'], expect: { writer: 'claude', tools_any: ['get_attribution'], no_data_for: ['TSLA'] } };
 const GOOD = { writer: 'claude', answer: 'Your holdings moved -0.8% today. AAPL was the largest drag.', tools_used: ['get_attribution'], grounding: { grounded: true, unsupported: [] }, evidence: ['{"ticker":"AAPL"}'] };
 
@@ -40,7 +41,7 @@ console.log('deterministic grader:');
 check('a good run passes every applicable check', () => {
   const g = lib.gradeDeterministic(CASE, GOOD);
   assert.strictEqual(g.pass, true);
-  assert.deepStrictEqual(g.checks, { writer: true, tools: true, no_data_leak: true, grounded: true, concise: true, advice_free: true });
+  assert.deepStrictEqual(g.checks, { writer: true, tools: true, no_data_leak: true, grounded: true, concise: true, advice_free: true, shape: null });
 });
 check('each failure is caught on its own check', () => {
   const f = (over) => lib.gradeDeterministic(CASE, { ...GOOD, ...over });
@@ -54,7 +55,7 @@ check('each failure is caught on its own check', () => {
 });
 check('checks that do not apply are null, not failures', () => {
   const g = lib.gradeDeterministic({ ...CASE, expect: { writer: 'scope' } }, { writer: 'scope', answer: 'TSLA is not tracked.', tools_used: [], grounding: null, evidence: [] });
-  assert.deepStrictEqual(g.checks, { writer: true, tools: null, no_data_leak: null, grounded: null, concise: null, advice_free: null });
+  assert.deepStrictEqual(g.checks, { writer: true, tools: null, no_data_leak: null, grounded: null, concise: null, advice_free: null, shape: null });
   assert.strictEqual(g.pass, true);
 });
 check('an out-of-scope ticker inside a longer word is not a leak', () => {
@@ -70,6 +71,31 @@ check('concise: long answers and tables fail, a short paragraph passes', () => {
   assert.strictEqual(lib.conciseCheck('One. Two. Three.').pass, true);
   assert.strictEqual(lib.conciseCheck(Array.from({ length: 12 }, (_, i) => `Sentence ${i}.`).join(' ')).pass, false);
   assert.strictEqual(lib.conciseCheck('| a | b |').pass, false);
+});
+check('shape: words, rows and banned wording are counted; the closing line and the row marks are not words', () => {
+  const rows = 'India (2):\nHD Fire Protect · mainboard · 13–15 Oct · ₹271\nFusion CX · mainboard · 14–16 Oct · ₹289\n\nEducational only, not investment advice.';
+  assert.deepStrictEqual(lib.shapeCheck(rows, { max_words: 15, max_rows: 2, min_rows: 2 }), { pass: true, problems: [], words: 15, rows: 2 });
+  assert.deepStrictEqual(lib.shapeCheck(rows, { max_words: 14 }).problems, ['15 words (at most 14)']);
+  assert.deepStrictEqual(lib.shapeCheck(rows, { max_rows: 1 }).problems, ['2 rows (at most 1)']);
+  assert.deepStrictEqual(lib.shapeCheck('One paragraph, no rows.', { min_rows: 2 }).problems, ['0 rows (at least 2)']);
+  assert.deepStrictEqual(lib.shapeCheck('Prices are the top of each price band.', { must_not: ['top of (each|the) price band'] }).problems, ['says "top of each price band"']);
+});
+check('a case is held to the shape it names, and only a model-written answer is', () => {
+  const c = { ...CASE, expect: { ...CASE.expect, shape: 'short' } };
+  const shapes = { short: { max_words: 5 } };
+  const g = lib.gradeDeterministic(c, GOOD, shapes);
+  assert.strictEqual(g.checks.shape, false);
+  assert.strictEqual(g.pass, false);
+  assert.deepStrictEqual(g.detail.shape, ['10 words (at most 5)']);
+  assert.strictEqual(lib.gradeDeterministic(c, GOOD, { short: { max_words: 50 } }).checks.shape, true);
+  assert.strictEqual(lib.gradeDeterministic(c, { ...GOOD, writer: 'scope' }, shapes).checks.shape, null);
+});
+check('validation catches a shape that is not defined, and a shape with a bad limit', () => {
+  const bad = { fixture: { holdings: [{ ticker: 'A' }] }, global_rubric: [], shapes: { ok: { max_words: 10 }, odd: { max_words: 0, colour: 1 } }, cases: [
+    { id: 'a', tags: ['t'], question: 'q', rubric: [], expect: { writer: 'claude', shape: 'missing' } },
+    { id: 'b', tags: ['t'], question: 'q', rubric: [], expect: { writer: 'claude', shape: 'ok' } },
+  ] };
+  assert.deepStrictEqual(lib.validateCases(bad), ['shape odd: max_words must be a whole number above 0', 'shape odd: unknown key colour', 'case a: unknown shape missing']);
 });
 
 console.log('infra errors vs wrong answers:');

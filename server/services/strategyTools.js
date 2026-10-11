@@ -22,6 +22,7 @@ const { callService, WARMUP_DAYS, MAX_WATCH_SYMBOLS, iso } = require('./strategy
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('./signalHistory');
 const { listPresets: listSeniqPresets } = require('./strategySignals');
 const { validateSpec, dataDepthNotes, INDICATORS, SENIQ_METRICS } = require('./strategySpec');
+const { shortDay, todayIso } = require('./answerText');
 
 const clip = (text, n) => {
   const t = String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -92,6 +93,24 @@ function describeStrategy(row, maxChars = 500) {
   return clip(parts.join('. '), maxChars);
 }
 
+/**
+ * A saved strategy's rules for a list: no factor table, each factor written where the rule
+ * uses it ("sma(20) crosses above sma(50)"), so the line is short enough to give whole. Pure.
+ */
+function plainRules(row, maxChars = 200) {
+  if (row.kind === 'registry') return describeStrategy(row, maxChars);
+  const s = row.spec || {};
+  const named = new Map((Array.isArray(s.factors) ? s.factors : []).map((f) => [
+    String(f.id),
+    f.source === 'seniq' ? `SenIQ ${f.metric}` : `${f.fn || 'indicator'}(${Object.values(f.params || {}).join(', ')})`,
+  ]));
+  const write = (rule) => describeRule(rule).split(' ').map((word) => {
+    const bare = word.replace(/[()]/g, '');
+    return named.has(bare) ? word.replace(bare, named.get(bare)) : word;
+  }).join(' ');
+  return clip([write(s.entry) && `Enter when ${write(s.entry)}`, write(s.exit) && `Exit when ${write(s.exit)}`].filter(Boolean).join('. '), maxChars);
+}
+
 /** Engine request for a paper replay — same construction as routes/paper.js. Pure apart from `now`. */
 function replayWindow(row, now = new Date()) {
   const deployed = new Date(row.deployed_at);
@@ -136,6 +155,15 @@ function presetCards(catalog) {
     params: (e.params || []).map((p) => `${p.name}=${p.default}`).join(', '),
   }));
 }
+
+// How an answer from each strategy tool is laid out and how much it holds. Sent with the
+// result, so the rule arrives with the data it is for, and only in v2 mode. No figures in
+// them: a tool result is evidence to the grounding check.
+const LIST_SHAPE = 'Answer only what was asked. One sentence with how many strategies are saved and how many are running (an active paper deployment, simulated). Then the saved strategies, one to a line as "name · preset or custom · its rules in a few plain words" (shorter than the rules given, never longer). Then, only if the question asks what is running or deployed, the running deployments, one to a line as "strategy · symbol · deployed date". Leave out, unless asked: stopped deployments, ids, watchlists, factor names and SenIQ signal names.';
+const PERFORMANCE_SHAPE = 'Answer only what was asked. One sentence first: these are paper (simulated) results, each over its own period, so they are not like-for-like. Then the deployments the question is about (all of them for "which did best"; only that symbol or strategy when one is named), best first, one to a line as "strategy on symbol · paper return · buy-and-hold over the same days · from date to date". When asked which did best, name the first line as ahead only with that caution, and say so when none has made a trade. Leave out, unless asked: drawdown, the number of trades, days, cash and equity figures, whether it is in a position, and why a strategy did or did not trade.';
+const SIGNAL_SHAPE = 'Answer only about the symbols asked about, in at most three sentences each: whether the strategy is long or flat and as of which date; its last signal (buy or sell) with its date; and the rule behind that in plain words, without factor ids. If seniq_evidence is present, add at most two of its stories or disclosures, one to a line as "outlet, date · headline", and say they are the picture now, not on the signal date. Leave out, unless asked: the last close, whether the signal fired on the latest bar, the other rules, how close an exit is, and what the tool does not show.';
+const PRESETS_SHAPE = 'Name at most three templates that fit what was asked, one to a line as "template name · what its rule does, in plain words" (for a SenIQ template add its data_depth). Then one sentence: test them in Backtest against buy-and-hold; you cannot run, save or deploy one. Leave out the other templates (say how many more there are in a few words), parameter names, and any view on which is better.';
+const DRAFT_SHAPE = 'Lay the draft out as: one line starting "Entry:" and one starting "Exit:", the rules in plain words; one line starting "Assumed:" only for choices the user did not state (leave out sizing left at its default and restatements of the rules); each data_depth_notes line as written, if there are any; then one sentence that the draft is untested and is theirs to review in the Strategy Builder and backtest. If the user asked for a backtest, say first, in a few words, that you cannot run one. Leave out the draft\'s name, who validated it and that there were no notes.';
 
 // ── Tool definitions (appended to Ask's tools in v2 mode — keep order stable for caching) ──
 const STRATEGY_TOOLS = [
@@ -271,18 +299,21 @@ const STRATEGY_EXECUTORS = {
       : [];
     // Rules are spelled out only for a short list; a long one would overflow the tool result.
     const withRules = strategies.length <= QA.STRATEGY_RULES_INLINE;
+    const today = todayIso();
     return {
+      answer_shape: LIST_SHAPE,
       saved_count: strategies.length,
       running_count: deployments.filter((d) => d.status === 'active').length,
       running_means: 'an active paper deployment (simulated, virtual money)',
       strategies: strategies.map((r) => ({
         id: r.id, name: clip(r.name, 32), kind: r.kind === 'registry' ? 'preset' : 'custom',
-        ...(withRules ? { rules: describeStrategy(r, 160) } : {}),
+        ...(withRules ? { rules: plainRules(r) } : {}),
         watchlist: (r.symbols || []).map((s) => s.symbol),
         ...(seniqMetricsOf(r).length ? { seniq_signals: seniqMetricsOf(r) } : {}),
       })),
       ...(withRules ? {} : { rules_note: 'Rules omitted for length — call explain_strategy_signal with an id to see one.' }),
-      deployments: deployments.map((d) => ({ id: d.id, strategy: clip(d.name, 32), symbol: d.symbol, deployed: day(d.deployed_at), status: d.status, stopped: day(d.stopped_at) })),
+      running: deployments.filter((d) => d.status === 'active').map((d) => ({ id: d.id, strategy: clip(d.name, 32), symbol: d.symbol, deployed: shortDay(day(d.deployed_at), today) })),
+      stopped: deployments.filter((d) => d.status !== 'active').map((d) => ({ id: d.id, strategy: clip(d.name, 32), symbol: d.symbol, deployed: shortDay(day(d.deployed_at), today), stopped: shortDay(day(d.stopped_at), today) })),
       ...(canPaper ? {} : { deployments_note: 'Paper trading is a Pro feature, so deployments are not shown for this account.' }),
     };
   },
@@ -300,9 +331,12 @@ const STRATEGY_EXECUTORS = {
     if (results.every((r) => r.status === 503)) throw new ScopeError(ENGINE_OFFLINE);
     const ok = results.filter((r) => r.status === 200).map((r) => r.summary);
     const failed = rows.filter((_, i) => results[i].status !== 200).map((r) => ({ id: r.id, name: r.name, symbol: r.symbol }));
+    const today = todayIso();
     return {
       basis: 'Paper trading: simulated fills on virtual money, from each deploy date to today (or to its stop date). Not a backtest, not a forecast. Each row covers a different period, so the returns are not like-for-like.',
-      deployments: rankPerformance(ok),
+      answer_shape: PERFORMANCE_SHAPE,
+      // Dates as an answer says them; the figures are the replay's own.
+      deployments: rankPerformance(ok).map((r) => ({ ...r, from: shortDay(r.from, today), to: shortDay(r.to, today) })),
       ...(failed.length ? { could_not_compute: failed } : {}),
     };
   },
@@ -352,19 +386,22 @@ const STRATEGY_EXECUTORS = {
         }
         if (metrics.some((m) => m.startsWith('congress'))) {
           const sm = await DATA_EXECUTORS.get_smart_money({ ticker: t }, ctx);
-          e.congress = sm.congress.slice(0, 4).map((c) => ({ politician: c.politician, action: c.action, traded: c.traded, disclosed: c.disclosed }));
+          e.congress = sm.congress.slice(0, 4).map((c) => ({ politician: c.politician, action: c.action, traded: c.traded }));
         }
         evidence.push(e);
       }
     }
     const notHeld = symbols.map((s) => s.symbol).filter((s) => !ctx.heldSet.has(s));
 
+    const today = todayIso();
+    const said = (d) => shortDay(d, today) || d || null;
     return {
+      answer_shape: SIGNAL_SHAPE,
       strategy: { id: row.id, name: row.name, kind: row.kind === 'registry' ? 'preset' : 'custom', rules: describeStrategy(row) },
       signals: ((out.data && out.data.signals) || []).map((s) => ({
-        symbol: s.symbol, state: s.state ?? null, as_of: s.as_of ?? null, last_close: num(s.last_close),
+        symbol: s.symbol, state: s.state ?? null, as_of: said(s.as_of), last_close: num(s.last_close),
         fired_on_latest_bar: s.fired_on_latest_bar ?? null,
-        last_signal: s.last_signal ? { side: s.last_signal.side, date: s.last_signal.date, reason: clip(s.last_signal.reason, 140) } : null,
+        last_signal: s.last_signal ? { side: s.last_signal.side, date: said(s.last_signal.date), reason: clip(s.last_signal.reason, 140) } : null,
         ...(s.error ? { error: clip(s.error, 100) } : {}),
       })),
       seniq_signals: metrics,
@@ -402,6 +439,7 @@ const STRATEGY_EXECUTORS = {
     if (Array.isArray(ctx.drafts)) ctx.drafts.push(draft);
     const { spec: _spec, ...summary } = draft;
     return {
+      answer_shape: DRAFT_SHAPE,
       ...summary,
       next_steps: 'The draft is attached to this answer. The user can open it in the Strategy Builder, review the rules, then run a backtest against buy-and-hold themselves. You cannot save or test it.',
     };
@@ -416,6 +454,7 @@ const STRATEGY_EXECUTORS = {
       remember('catalog', catalog);
     }
     return {
+      answer_shape: PRESETS_SHAPE,
       presets: presetCards(catalog).slice(0, QA.STRATEGY_PRESETS_MAX),
       // Templates that use SenIQ signals. data_depth is how much history the signal really has
       // — pass it on whenever you mention one.
@@ -436,9 +475,15 @@ Strategies (this account has the strategy features):
 - Paper results are simulated. Whenever you quote a return, say it is a paper result and give its dates. Deployments cover different periods; say so before calling one "best". Never present a paper or past result as what will happen.
 - If asked what kind of strategy might suit them, you may name up to three templates from list_strategy_presets that fit what they described, explain each rule in plain words, and tell them to test it in Backtest against buy-and-hold. Do not say a template will be profitable, do not recommend deploying one, and do not suggest a specific trade. End such an answer with: "Educational only, not investment advice."
 - If the user describes rules in words ("buy when the 20-day average crosses above the 50-day and sentiment is positive, sell on the reverse cross or an 8% loss"), you may turn them into a draft with draft_strategy. Draft what they described, nothing more. If draft_strategy returns errors, fix the spec and call it again. In your answer: restate the rules in plain words, list anything you assumed, pass on every data_depth_notes line as written, and say the draft is untested and is theirs to review and backtest. If they only state a goal ("make me money", "a safe strategy") without rules, do not invent one: ask what should trigger a buy and a sell, or offer the templates. Never say a draft will be profitable. End with: "Educational only, not investment advice."
-- You cannot run a backtest, save, edit or deploy a strategy from here; point to the Strategy Builder, Backtest or Paper Trade page instead.`;
+- You cannot run a backtest, save, edit or deploy a strategy from here. Asked to do one of these, say so in the first sentence and name the page that does it (Strategy Builder, Backtest or Paper Trade); draft the rules with draft_strategy only if the user described them, and give no result of your own.
+- Each of these tools sends an answer_shape with its result: follow it for the layout and for how much to say.`;
+
+// The strategy tools whose answers end with the closing line (qa.js puts it on): the two
+// that point the user at something to try.
+const CLOSING_TOOLS = ['list_strategy_presets', 'draft_strategy'];
 
 module.exports = {
-  STRATEGY_TOOLS, STRATEGY_EXECUTORS, STRATEGY_PROMPT, DRAFT_GRAMMAR,
-  describeRule, describeFactors, describeStrategy, seniqMetricsOf, summarizeReplay, rankPerformance, presetCards, replayWindow,
+  STRATEGY_TOOLS, STRATEGY_EXECUTORS, STRATEGY_PROMPT, DRAFT_GRAMMAR, CLOSING_TOOLS,
+  LIST_SHAPE, PERFORMANCE_SHAPE, SIGNAL_SHAPE, PRESETS_SHAPE, DRAFT_SHAPE,
+  describeRule, describeFactors, describeStrategy, plainRules, seniqMetricsOf, summarizeReplay, rankPerformance, presetCards, replayWindow,
 };

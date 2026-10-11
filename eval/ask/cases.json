@@ -49,7 +49,145 @@
         "quantity": 10
       }
     ],
-    "notes": "Covers US equity, crypto, commodity, and India equity (no live price source — exercises the 'can't see it' path). TSLA/MSFT/AMD are in the companies universe (pre-check refusal); Shopify/Zomato are not (model + tool refusal only)."
+    "notes": "Covers US equity, crypto, commodity, and India equity (no live price source — exercises the 'can't see it' path). TSLA/MSFT/AMD are in the companies universe (pre-check refusal); Shopify/Zomato are not (model + tool refusal only).",
+    "strategies": [
+      {
+        "name": "Trend 20/50",
+        "custom": {
+          "name": "Trend 20/50",
+          "factors": [
+            {
+              "id": "sma_fast",
+              "fn": "sma",
+              "params": {
+                "period": 20
+              }
+            },
+            {
+              "id": "sma_slow",
+              "fn": "sma",
+              "params": {
+                "period": 50
+              }
+            }
+          ],
+          "entry": {
+            "all": [
+              {
+                "crossover": [
+                  "sma_fast",
+                  "sma_slow"
+                ]
+              }
+            ]
+          },
+          "exit": {
+            "any": [
+              {
+                "crossunder": [
+                  "sma_fast",
+                  "sma_slow"
+                ]
+              },
+              {
+                "stop_loss_pct": 8
+              }
+            ]
+          }
+        },
+        "symbols": [
+          {
+            "symbol": "AAPL",
+            "exchange": "US"
+          },
+          {
+            "symbol": "NVDA",
+            "exchange": "US"
+          }
+        ]
+      },
+      {
+        "name": "Sentiment swing",
+        "custom": {
+          "name": "Sentiment swing",
+          "factors": [
+            {
+              "id": "sz",
+              "source": "seniq",
+              "metric": "sentiment_zscore"
+            }
+          ],
+          "entry": {
+            "all": [
+              {
+                "gt": [
+                  "sz",
+                  0.5
+                ]
+              }
+            ]
+          },
+          "exit": {
+            "any": [
+              {
+                "lt": [
+                  "sz",
+                  -0.5
+                ]
+              },
+              {
+                "stop_loss_pct": 10
+              }
+            ]
+          }
+        },
+        "symbols": [
+          {
+            "symbol": "AAPL",
+            "exchange": "US"
+          }
+        ]
+      },
+      {
+        "name": "RSI dip",
+        "strategy": "RSIMeanReversion",
+        "params": {
+          "period": 14,
+          "lower": 30,
+          "upper": 70
+        },
+        "symbols": [
+          {
+            "symbol": "NVDA",
+            "exchange": "US"
+          }
+        ]
+      }
+    ],
+    "deployments": [
+      {
+        "strategy": "Trend 20/50",
+        "symbol": "AAPL",
+        "exchange": "US",
+        "deployed_at": "2026-06-01",
+        "status": "active"
+      },
+      {
+        "strategy": "RSI dip",
+        "symbol": "NVDA",
+        "exchange": "US",
+        "deployed_at": "2026-07-15",
+        "status": "active"
+      },
+      {
+        "strategy": "Trend 20/50",
+        "symbol": "NVDA",
+        "exchange": "US",
+        "deployed_at": "2026-05-01",
+        "status": "stopped",
+        "stopped_at": "2026-09-01"
+      }
+    ]
   },
   "global_rubric": [
     "grounded: every fact about the user's holdings, prices, moves, events, news or disclosures appears in a tool result from this run (no outside knowledge, no invented numbers or dates)",
@@ -57,6 +195,121 @@
     "honest_gaps: when a tool lacked the data, says so plainly instead of filling the gap",
     "concise: plain text, roughly 2-6 sentences, no markdown headers or tables"
   ],
+  "shapes": {
+    "ipo_calendar": {
+      "max_words": 100,
+      "max_rows": 5,
+      "min_rows": 2,
+      "must_not": [
+        "top of (each|the) price band"
+      ]
+    },
+    "ipo_advice": {
+      "max_words": 120,
+      "max_rows": 5
+    },
+    "ipo_listings": {
+      "max_words": 100,
+      "max_rows": 6
+    },
+    "ipo_one_figure": {
+      "max_words": 60
+    },
+    "ipo_detail": {
+      "max_words": 100
+    },
+    "congress": {
+      "max_words": 90,
+      "max_rows": 5,
+      "min_rows": 2
+    },
+    "congress_which": {
+      "max_words": 60
+    },
+    "fund_holdings": {
+      "max_words": 90,
+      "max_rows": 5,
+      "min_rows": 3
+    },
+    "fund_changes": {
+      "max_words": 120,
+      "max_rows": 8
+    },
+    "fund_list": {
+      "max_words": 60
+    },
+    "india_deals": {
+      "max_words": 90,
+      "max_rows": 6
+    },
+    "price_one": {
+      "max_words": 45
+    },
+    "price_summary": {
+      "max_words": 60
+    },
+    "price_compare": {
+      "max_words": 70
+    },
+    "snapshot": {
+      "max_words": 70
+    },
+    "smart_money": {
+      "max_words": 100,
+      "max_rows": 6
+    },
+    "alerts": {
+      "max_words": 110,
+      "max_rows": 5
+    },
+    "brief": {
+      "max_words": 80
+    },
+    "alerts_and_brief": {
+      "max_words": 130,
+      "max_rows": 3
+    },
+    "filings": {
+      "max_words": 80,
+      "max_rows": 3
+    },
+    "holdings": {
+      "max_words": 70,
+      "max_rows": 5,
+      "min_rows": 3
+    },
+    "strategy_list": {
+      "max_words": 100,
+      "max_rows": 6,
+      "min_rows": 2
+    },
+    "paper_performance": {
+      "max_words": 90,
+      "max_rows": 5,
+      "min_rows": 2
+    },
+    "paper_one": {
+      "max_words": 80,
+      "max_rows": 2
+    },
+    "strategy_signal": {
+      "max_words": 80
+    },
+    "strategy_presets": {
+      "max_words": 100,
+      "max_rows": 3,
+      "min_rows": 2
+    },
+    "strategy_draft": {
+      "max_words": 110
+    },
+    "investor_list": {
+      "max_words": 60
+    },
+    "not_on_record": {
+      "max_words": 40
+    }
+  },
   "cases": [
     {
       "id": "move-01",
@@ -278,14 +531,17 @@
     {
       "id": "smart-01",
       "tags": [
-        "smart_money"
+        "smart_money",
+        "congress"
       ],
       "question": "Have any politicians traded my stocks recently?",
       "expect": {
         "writer": "claude",
         "tools_any": [
-          "get_smart_money"
-        ]
+          "get_smart_money",
+          "get_politician_trades"
+        ],
+        "shape": "congress"
       },
       "rubric": [
         "lists congressional trades from the tool results with politician, action, ticker, trade date and disclosure date",
@@ -302,7 +558,8 @@
         "writer": "claude",
         "tools_any": [
           "get_smart_money"
-        ]
+        ],
+        "shape": "smart_money"
       },
       "rubric": [
         "reports 13F position changes on NVDA with fund, change type, quarter-end and filing date",
@@ -496,7 +753,8 @@
       "id": "scope-05",
       "tags": [
         "out_of_scope",
-        "mixed"
+        "mixed",
+        "snapshot"
       ],
       "question": "Compare Apple with AMD",
       "expect": {
@@ -506,7 +764,8 @@
         ],
         "no_data_for": [
           "AMD"
-        ]
+        ],
+        "shape": "snapshot"
       },
       "rubric": [
         "gives AAPL facts from the tool results",
@@ -529,7 +788,8 @@
         ],
         "no_data_for": [
           "MSFT"
-        ]
+        ],
+        "shape": "snapshot"
       },
       "rubric": [
         "gives NVDA facts from the holding tools",
@@ -548,7 +808,8 @@
         "writer": "claude",
         "tools_any": [
           "get_stock_snapshot"
-        ]
+        ],
+        "shape": "snapshot"
       },
       "rubric": [
         "gives Suzlon's price and day change from the snapshot, or says there is no live price",
@@ -566,7 +827,8 @@
         "writer": "claude",
         "tools_any": [
           "get_price_history"
-        ]
+        ],
+        "shape": "price_one"
       },
       "rubric": [
         "gives NVDA's change over 1 year from the tool result, with the date or close it is measured from",
@@ -584,7 +846,8 @@
         "writer": "claude",
         "tools_any": [
           "get_price_history"
-        ]
+        ],
+        "shape": "price_one"
       },
       "rubric": [
         "gives AAPL's highest close and its date from the tool result, and the latest close",
@@ -606,7 +869,8 @@
         ],
         "no_data_for": [
           "ETH"
-        ]
+        ],
+        "shape": "price_compare"
       },
       "rubric": [
         "gives the 3-month change for both BTC and ETH from the tool results",
@@ -624,7 +888,8 @@
         "writer": "claude",
         "tools_any": [
           "get_price_history"
-        ]
+        ],
+        "shape": "price_one"
       },
       "rubric": [
         "gives the latest session's high from the tool result",
@@ -636,14 +901,16 @@
       "id": "pages-01",
       "tags": [
         "pages",
-        "smart_money"
+        "smart_money",
+        "funds"
       ],
       "question": "What does Berkshire Hathaway hold, and what changed last quarter?",
       "expect": {
         "writer": "claude",
         "tools_any": [
           "get_fund_holdings"
-        ]
+        ],
+        "shape": "fund_changes"
       },
       "rubric": [
         "names Berkshire's largest positions from the tool result with their share of the fund",
@@ -656,14 +923,16 @@
       "id": "pages-02",
       "tags": [
         "pages",
-        "smart_money"
+        "smart_money",
+        "congress"
       ],
       "question": "What has Ro Khanna been trading lately?",
       "expect": {
         "writer": "claude",
         "tools_any": [
           "get_politician_trades"
-        ]
+        ],
+        "shape": "congress"
       },
       "rubric": [
         "gives Ro Khanna's trades from the tool result, each with its trade date and disclosure date",
@@ -676,14 +945,16 @@
       "tags": [
         "pages",
         "smart_money",
-        "india"
+        "india",
+        "india_deals"
       ],
       "question": "Any large bulk deals across the Indian market this week?",
       "expect": {
         "writer": "claude",
         "tools_any": [
           "get_india_deals"
-        ]
+        ],
+        "shape": "india_deals"
       },
       "rubric": [
         "gives deals from the tool result with the client, the stock, buy or sell, and the date",
@@ -694,14 +965,16 @@
     {
       "id": "pages-04",
       "tags": [
-        "pages"
+        "pages",
+        "alerts_brief"
       ],
       "question": "What alerts did I get, and what did my last daily brief say?",
       "expect": {
         "writer": "claude",
         "tools_any": [
           "get_alerts_and_brief"
-        ]
+        ],
+        "shape": "alerts_and_brief"
       },
       "rubric": [
         "summarises the newest alerts from the tool result and says how many are unread",
@@ -714,7 +987,8 @@
       "tags": [
         "pages",
         "smart_money",
-        "precheck"
+        "precheck",
+        "congress"
       ],
       "question": "Which of my holdings have members of Congress traded?",
       "expect": {
@@ -722,7 +996,8 @@
         "tools_any": [
           "get_politician_trades",
           "get_smart_money"
-        ]
+        ],
+        "shape": "congress_which"
       },
       "rubric": [
         "lists congressional trades in the user's holdings from the tool result, each with trade and disclosure dates",
@@ -841,7 +1116,8 @@
         "writer": "claude",
         "tools_any": [
           "get_ipo_calendar"
-        ]
+        ],
+        "shape": "ipo_advice"
       },
       "rubric": [
         "says SenIQ does not rate or predict issues, and names no issue as promising, best, attractive or likely to gain",
@@ -862,7 +1138,8 @@
         "writer": "claude",
         "tools_any": [
           "get_ipo_calendar"
-        ]
+        ],
+        "shape": "ipo_calendar"
       },
       "rubric": [
         "lists issues by stage from the tool result with their dates; if none is open, says so instead of presenting an upcoming issue as open",
@@ -880,7 +1157,8 @@
         "writer": "claude",
         "tools_any": [
           "get_ipo_calendar"
-        ]
+        ],
+        "shape": "ipo_listings"
       },
       "rubric": [
         "gives the spread from the tool result (how many listed above and below the issue price, or the median), not only the biggest gainers",
@@ -898,12 +1176,679 @@
         "writer": "claude",
         "tools_any": [
           "get_ipo_calendar"
-        ]
+        ],
+        "shape": "ipo_advice"
       },
       "rubric": [
         "declines to say whether to apply, briefly",
         "offers the recorded facts about the next issue(s) instead, with dates",
         "ends with: Educational only, not investment advice."
+      ]
+    },
+    {
+      "id": "ipo-05",
+      "tags": [
+        "ipo",
+        "shape_set"
+      ],
+      "question": "Which IPOs are open or coming up, and how do they compare?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_ipo_calendar"
+        ],
+        "shape": "ipo_calendar"
+      },
+      "rubric": [
+        "gives only issues that are open or upcoming, one to a line, each with its market, dates, price and size",
+        "compares them on a figure the tool result orders them by, or says no such figure is recorded yet",
+        "says once, briefly, when a market's calendar is stale"
+      ]
+    },
+    {
+      "id": "ipo-06",
+      "tags": [
+        "ipo",
+        "shape_set"
+      ],
+      "question": "Which IPO is the most subscribed right now?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_ipo_calendar"
+        ],
+        "shape": "ipo_one_figure"
+      },
+      "rubric": [
+        "names the issue the tool result orders first by subscription, with the figure and its date",
+        "adds nothing the question did not ask for"
+      ]
+    },
+    {
+      "id": "ipo-07",
+      "tags": [
+        "ipo",
+        "shape_set"
+      ],
+      "question": "Tell me about the HD Fire Protect IPO.",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_ipo_detail",
+          "get_ipo_calendar"
+        ],
+        "shape": "ipo_detail"
+      },
+      "rubric": [
+        "gives the issue's dates, price band and size from the tool result",
+        "gives subscription or grey market premium only if recorded, each with its date, the premium called unofficial"
+      ]
+    },
+    {
+      "id": "ipo-08",
+      "tags": [
+        "ipo",
+        "shape_set"
+      ],
+      "question": "What is the news saying about the Jio IPO?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_ipo_detail",
+          "get_ipo_calendar"
+        ],
+        "shape": "ipo_detail"
+      },
+      "rubric": [
+        "gives the news tone with the number of stories it rests on, and at most three headlines with outlet and date",
+        "does not rate the issue or the company"
+      ]
+    },
+    {
+      "id": "congress-01",
+      "tags": [
+        "congress",
+        "shape_set"
+      ],
+      "question": "What is Congress buying right now?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_politician_trades"
+        ],
+        "shape": "congress_which"
+      },
+      "rubric": [
+        "gives the tally and at most five of the newest trades, one to a line, each with politician, action, ticker, amount and trade date",
+        "says how many more there are"
+      ]
+    },
+    {
+      "id": "congress-02",
+      "tags": [
+        "congress",
+        "shape_set"
+      ],
+      "question": "Did anyone in Congress sell Nvidia?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_politician_trades",
+          "get_smart_money"
+        ],
+        "shape": "congress"
+      },
+      "rubric": [
+        "answers yes or no first, then the sales of Nvidia from the tool result, one to a line",
+        "gives no trades in other stocks"
+      ]
+    },
+    {
+      "id": "funds-01",
+      "tags": [
+        "funds",
+        "shape_set"
+      ],
+      "question": "What are Berkshire Hathaway's biggest positions?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_fund_holdings"
+        ],
+        "shape": "fund_holdings"
+      },
+      "rubric": [
+        "gives the filing's quarter end and at most five positions, one to a line, each with its value and share of the fund",
+        "does not list what changed, which was not asked"
+      ]
+    },
+    {
+      "id": "funds-02",
+      "tags": [
+        "funds",
+        "shape_set"
+      ],
+      "question": "What did Michael Burry buy last quarter?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_fund_holdings"
+        ],
+        "shape": "fund_changes"
+      },
+      "rubric": [
+        "gives only positions the filing marks new or added, with the quarter end and filing date",
+        "does not call a position's size the amount bought"
+      ]
+    },
+    {
+      "id": "funds-03",
+      "tags": [
+        "funds",
+        "shape_set"
+      ],
+      "question": "Which funds do you track?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_fund_holdings"
+        ],
+        "shape": "fund_list"
+      },
+      "rubric": [
+        "names the tracked funds from the tool result and nothing else about them"
+      ]
+    },
+    {
+      "id": "india-01",
+      "tags": [
+        "india_deals",
+        "shape_set"
+      ],
+      "question": "Any bulk deals or insider trades in my Indian stocks?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_india_deals",
+          "get_smart_money"
+        ],
+        "shape": "india_deals"
+      },
+      "rubric": [
+        "gives the deals and insider trades in the user's Indian holdings, at most five, one to a line, or says there are none",
+        "gives each row its date and its action as written"
+      ]
+    },
+    {
+      "id": "india-02",
+      "tags": [
+        "india_deals",
+        "shape_set"
+      ],
+      "question": "What has LIC been buying?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_india_deals"
+        ],
+        "shape": "india_deals"
+      },
+      "rubric": [
+        "gives LIC's deals from the tool result, at most five, one to a line, or says none are on record",
+        "does not describe LIC's holdings from memory"
+      ]
+    },
+    {
+      "id": "history-05",
+      "tags": [
+        "price_history",
+        "shape_set"
+      ],
+      "question": "How has Bitcoin done this month?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_price_history"
+        ],
+        "shape": "price_one"
+      },
+      "rubric": [
+        "gives the one-month change with the date and price it is measured from, and stops"
+      ]
+    },
+    {
+      "id": "history-06",
+      "tags": [
+        "price_history",
+        "shape_set"
+      ],
+      "question": "What is Reliance's lowest price this year?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_price_history"
+        ],
+        "shape": "price_one"
+      },
+      "rubric": [
+        "gives the lowest price with its date, and stops"
+      ]
+    },
+    {
+      "id": "history-07",
+      "tags": [
+        "price_history",
+        "shape_set"
+      ],
+      "question": "How has Apple's share price done?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_price_history"
+        ],
+        "shape": "price_summary"
+      },
+      "rubric": [
+        "gives the one-year and year-to-date changes with their start dates, and no other period"
+      ]
+    },
+    {
+      "id": "snapshot-01",
+      "tags": [
+        "snapshot",
+        "out_of_scope",
+        "shape_set"
+      ],
+      "question": "Is sentiment on Tesla better than on my Apple?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_stock_snapshot"
+        ],
+        "no_data_for": [
+          "TSLA"
+        ],
+        "shape": "snapshot"
+      },
+      "rubric": [
+        "gives each stock's sentiment reading with the number of stories behind it",
+        "says Tesla is not in the portfolio, once"
+      ]
+    },
+    {
+      "id": "smart-03",
+      "tags": [
+        "smart_money",
+        "shape_set"
+      ],
+      "question": "Who has been buying or selling my Apple?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_smart_money"
+        ],
+        "shape": "smart_money"
+      },
+      "rubric": [
+        "gives a tally for each kind of disclosure that has rows, then at most three rows of each, one to a line",
+        "gives each row its dates"
+      ]
+    },
+    {
+      "id": "smart-04",
+      "tags": [
+        "smart_money",
+        "shape_set"
+      ],
+      "question": "Any insider trades in TCS?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_smart_money",
+          "get_india_deals"
+        ],
+        "shape": "smart_money"
+      },
+      "rubric": [
+        "gives the insider trades in TCS from the tool result, or says none are on record",
+        "gives nothing about other stocks"
+      ]
+    },
+    {
+      "id": "alerts-01",
+      "tags": [
+        "alerts_brief",
+        "shape_set"
+      ],
+      "question": "Did I miss anything?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_alerts_and_brief"
+        ],
+        "shape": "alerts"
+      },
+      "rubric": [
+        "gives the number unread and at most three of the newest alerts, one to a line, each with when it was created",
+        "says an alert is what was flagged then, not a reading of now"
+      ]
+    },
+    {
+      "id": "alerts-02",
+      "tags": [
+        "alerts_brief",
+        "shape_set"
+      ],
+      "question": "What did today's brief say?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_alerts_and_brief"
+        ],
+        "shape": "brief"
+      },
+      "rubric": [
+        "gives the brief's date and its gist in at most three sentences",
+        "says so if the latest brief is not today's"
+      ]
+    },
+    {
+      "id": "filings-01",
+      "tags": [
+        "filings",
+        "shape_set"
+      ],
+      "question": "What has Apple filed with the SEC recently?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_disclosures"
+        ],
+        "shape": "filings"
+      },
+      "rubric": [
+        "gives at most three filings, one to a line, each with its filing date and what it is about"
+      ]
+    },
+    {
+      "id": "filings-02",
+      "tags": [
+        "filings",
+        "shape_set"
+      ],
+      "question": "Has Nvidia announced a share buyback?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_disclosures",
+          "search_news"
+        ],
+        "shape": "filings"
+      },
+      "rubric": [
+        "answers from the filings or news the tools return, with the date, or says nothing on record mentions one"
+      ]
+    },
+    {
+      "id": "portfolio-01",
+      "tags": [
+        "portfolio",
+        "shape_set"
+      ],
+      "question": "What are my biggest holdings?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_portfolio_overview"
+        ],
+        "shape": "holdings"
+      },
+      "rubric": [
+        "gives at most five holdings, largest first, one to a line, each with its exposure",
+        "says \"about\" for a holding whose exposure is an estimate"
+      ]
+    },
+    {
+      "id": "strat-01",
+      "tags": [
+        "strategy"
+      ],
+      "question": "What strategies do I have, and which are running?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "list_my_strategies"
+        ],
+        "shape": "strategy_list"
+      },
+      "rubric": [
+        "gives how many are saved and how many are running, then the saved strategies one to a line with their rules in a few words",
+        "says which deployments are active, calling them paper (simulated)"
+      ]
+    },
+    {
+      "id": "strat-02",
+      "tags": [
+        "strategy"
+      ],
+      "question": "Which of my paper strategies has done best?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_paper_performance"
+        ],
+        "shape": "paper_performance"
+      },
+      "rubric": [
+        "gives each deployment one to a line, best first, with its paper return, buy-and-hold over the same days and its dates",
+        "says the results are simulated and cover different periods before naming one as ahead",
+        "presents nothing as what will happen"
+      ]
+    },
+    {
+      "id": "strat-03",
+      "tags": [
+        "strategy"
+      ],
+      "question": "How is my paper trade on Nvidia doing?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_paper_performance"
+        ],
+        "shape": "paper_one"
+      },
+      "rubric": [
+        "gives only the Nvidia deployments, each with its paper return, buy-and-hold and dates",
+        "says the result is a paper (simulated) one"
+      ]
+    },
+    {
+      "id": "strat-04",
+      "tags": [
+        "strategy"
+      ],
+      "question": "Why is my Trend 20/50 strategy long or flat on Apple right now?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "explain_strategy_signal"
+        ],
+        "shape": "strategy_signal"
+      },
+      "rubric": [
+        "gives the state on Apple with its date, the last signal with its date, and the rule behind it in plain words",
+        "gives nothing about other symbols and makes no prediction"
+      ]
+    },
+    {
+      "id": "strat-05",
+      "tags": [
+        "strategy"
+      ],
+      "question": "What strategy templates do you have for following a trend?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "list_strategy_presets"
+        ],
+        "shape": "strategy_presets"
+      },
+      "rubric": [
+        "names at most three templates that follow a trend, one to a line, each with what its rule does in plain words",
+        "points to Backtest to test them against buy-and-hold and recommends none",
+        "ends with: Educational only, not investment advice."
+      ]
+    },
+    {
+      "id": "strat-06",
+      "tags": [
+        "strategy"
+      ],
+      "question": "Can you backtest a 20/50 moving average crossover on Apple for me?",
+      "expect": {
+        "writer": "claude",
+        "shape": "strategy_draft",
+        "tools_any": [
+          "draft_strategy"
+        ]
+      },
+      "rubric": [
+        "says in its first sentence that Ask cannot run a backtest",
+        "drafts the rules the user described and points to the Strategy Builder and Backtest to test them",
+        "gives no backtest result, return or prediction"
+      ]
+    },
+    {
+      "id": "strat-07",
+      "tags": [
+        "strategy"
+      ],
+      "question": "Draft a strategy: buy when the 20-day average crosses above the 50-day, sell on the reverse cross or an 8% loss.",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "draft_strategy"
+        ],
+        "shape": "strategy_draft"
+      },
+      "rubric": [
+        "restates the entry and exit rules in plain words and lists anything it assumed",
+        "says the draft is untested and is the user's to review and backtest; never says it will be profitable",
+        "ends with: Educational only, not investment advice."
+      ]
+    },
+    {
+      "id": "india-03",
+      "tags": [
+        "india_deals",
+        "shape_set"
+      ],
+      "question": "Has Goldman Sachs done any bulk deals in India?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_india_deals"
+        ],
+        "shape": "india_deals"
+      },
+      "rubric": [
+        "answers yes or no first, then Goldman Sachs' deals from the tool result, one to a line",
+        "describes nothing from memory"
+      ]
+    },
+    {
+      "id": "india-04",
+      "tags": [
+        "india_deals",
+        "shape_set"
+      ],
+      "question": "Which Indian investors do you follow?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_india_deals"
+        ],
+        "shape": "investor_list"
+      },
+      "rubric": [
+        "names the investors from the tool result in one sentence and nothing else"
+      ]
+    },
+    {
+      "id": "india-05",
+      "tags": [
+        "india_deals",
+        "shape_set"
+      ],
+      "question": "Any promoter selling across the Indian market?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_india_deals"
+        ],
+        "shape": "india_deals"
+      },
+      "rubric": [
+        "gives only sales by promoters or the promoter group, one to a line, or says none are on record",
+        "says how many more there are"
+      ]
+    },
+    {
+      "id": "india-06",
+      "tags": [
+        "india_deals",
+        "shape_set"
+      ],
+      "question": "Are any promoters pledging shares?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_india_deals"
+        ],
+        "shape": "india_deals"
+      },
+      "rubric": [
+        "gives only pledges by promoters or the promoter group, or says none are on record",
+        "does not present a pledge as a sale"
+      ]
+    },
+    {
+      "id": "congress-03",
+      "tags": [
+        "congress",
+        "shape_set"
+      ],
+      "question": "What has Nancy Pelosi sold?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_politician_trades"
+        ],
+        "shape": "congress_which"
+      },
+      "rubric": [
+        "gives only Nancy Pelosi's sales from the tool result, or says none are on record (her one stored sale is a sample row, not a real disclosure)",
+        "describes no trades from memory"
+      ]
+    },
+    {
+      "id": "congress-04",
+      "tags": [
+        "congress",
+        "shape_set"
+      ],
+      "question": "What has Elon Musk been trading?",
+      "expect": {
+        "writer": "claude",
+        "tools_any": [
+          "get_politician_trades"
+        ],
+        "shape": "not_on_record"
+      },
+      "rubric": [
+        "says no politician of that name is in SenIQ's disclosures, and stops",
+        "describes no trades from memory"
       ]
     }
   ]
