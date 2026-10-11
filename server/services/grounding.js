@@ -107,13 +107,17 @@ async function topHoldings(userId, limit = REPORTS.TOP_HOLDINGS, raw = null) {
 // Recent smart-money activity touching the user's holdings (light, capped).
 async function smartMoneyContext(userId) {
   const { query } = require('../db');
+  // Sample rows stand in only while there are no real disclosures, as on the Congress page:
+  // the two are never mixed, and sample rows are said to be samples.
+  const real = await query('SELECT count(*)::int AS n FROM congress_trades WHERE is_sample = false');
+  const live = Number(real[0] && real[0].n) > 0;
   const congress = await query(
     `SELECT c.politician, c.transaction_type, c.ticker, c.transaction_date::text AS transaction_date
        FROM congress_trades c
-      WHERE c.ticker IN (SELECT ticker FROM portfolio WHERE user_id = $1)
+      WHERE c.ticker IN (SELECT ticker FROM portfolio WHERE user_id = $1) AND c.is_sample = $2
       ORDER BY c.disclosure_date DESC NULLS LAST, c.transaction_date DESC NULLS LAST
       LIMIT 3`,
-    [userId]
+    [userId, !live]
   );
   const institutions = await query(
     `SELECT i.name, h.ticker, h.change_type
@@ -129,6 +133,7 @@ async function smartMoneyContext(userId) {
   const india = await indiaSmartMoneyContext(userId);
   return {
     congress: congress.map((c) => ({ politician: c.politician, action: c.transaction_type, ticker: c.ticker, date: c.transaction_date })),
+    ...(live || !congress.length ? {} : { congress_sample_data: 'These congressional rows are SAMPLE rows, not real disclosures: no live source is connected. Say so.' }),
     institutions: institutions.map((r) => ({ name: r.name, ticker: r.ticker, change: r.change_type })),
     ...india,
   };
