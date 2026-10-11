@@ -15,7 +15,7 @@
  * user's own alerts and brief.
  */
 
-const { QA, SENTIMENT } = require('../config');
+const { QA, SENTIMENT, DISCLOSURES } = require('../config');
 const { scoreTicker, explainSentiment, labelFor } = require('./sentimentScoring');
 const { getImpactFeed } = require('./impactScoring');
 const { searchNews, getStory } = require('./newsSearch');
@@ -23,6 +23,7 @@ const { listDisclosures, getDisclosure } = require('./disclosures');
 const { findCompany, snapshot } = require('./stockSnapshot');
 const { priceHistory } = require('./priceHistory');
 const pages = require('./pageTools');
+const { shortDay, todayIso } = require('./answerText');
 
 const round = (n, d = 2) => (n == null ? null : Math.round(n * 10 ** d) / 10 ** d);
 const day = (t) => (t ? new Date(t).toISOString().slice(0, 10) : null);
@@ -91,11 +92,11 @@ function rankHoldings(rows, key = 'exposure_pct') {
 }
 
 // "4 trades: 3 sell, 1 buy" — the tally a reader would otherwise count by hand. Pure.
-function tallyBy(rows, field) {
+function tallyBy(rows, field, noun = 'rows') {
   const counts = {};
   for (const r of rows) counts[String(r[field] || 'unknown').toLowerCase()] = (counts[String(r[field] || 'unknown').toLowerCase()] || 0) + 1;
   const parts = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${k}`);
-  return `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}${parts.length ? `: ${parts.join(', ')}` : ''}`;
+  return `${rows.length} ${rows.length === 1 ? noun.replace(/s$/, '') : noun}${parts.length ? `: ${parts.join(', ')}` : ''}`;
 }
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -166,6 +167,12 @@ function outOfScopeAnswer(outside) {
   return `${list} ${verb} in your portfolio, so SenIQ doesn't track ${outside.length === 1 ? 'it' : 'them'} for you. Add ${outside.length === 1 ? 'it' : 'them'} to your portfolio to get news, sentiment and impact — then ask again.`;
 }
 
+// How a get_smart_money answer is laid out and how much it holds; sent with the result. No
+// figures in it: a tool result is evidence to the grounding check.
+const FILINGS_SHAPE = 'Answer only what was asked. Asked what was filed: the filings given, newest first, one to a line as "filing date · what it is about" (three at most), and nothing more. Asked whether something was announced (a buyback, a departure, a deal): yes or no first; if yes, the filing\'s date and one sentence from its excerpt; if no, one sentence saying no filing on record mentions it, and stop without listing other filings. Asked about one filing: at most three sentences from its excerpt. Leave out, unless asked: form types and item numbers, event dates, links, and what filings do not cover.';
+const OVERVIEW_SHAPE = 'Only when the question asks to list the holdings or which are the biggest: one holding to a line as "name (ticker) · exposure", largest first (five at most, "about" before an estimated exposure), then how many more in a few words; price, day change and sentiment only if the question asks for them. Any other question: use what it needs from this result in sentences, and leave the rest out.';
+const SMART_MONEY_SHAPE = 'Answer only the kind of disclosure the question asks about: funds, Congress, Indian deals or insiders; all of them only when it asks who has been buying or selling. A yes-or-no question is answered first, in a few words. For each kind asked about that has rows: its summary as written, then the rows given, one to a line, in their order: Congress as "politician · action · ticker · trade date"; funds as "fund · change · position value"; an Indian deal as "client · action · ticker · value · date"; an insider trade as "person (category) · action · ticker · value · date". Say how many more in a few words where a not_shown count is present, and give the funds\' quarter end once when the rows share it. A kind asked about that has no rows: say so in a few words. Never write that a fund bought or sold its position value. Leave out, unless asked: the reporting lag, filing and disclosure dates, share counts, kinds the question did not ask about, and other stocks.';
+
 // ── Tool definitions (static: part of the cached prompt prefix — keep order stable) ──
 const tickerProp = { type: 'string', description: 'A ticker from the user\'s holdings, e.g. "AAPL".' };
 const daysProp = { type: 'integer', description: `Look-back window in days (1–${QA.NEWS_DAYS_MAX}, default ${QA.NEWS_DAYS_DEFAULT}).` };
@@ -203,7 +210,7 @@ const TOOLS = [
   },
   {
     name: 'get_smart_money',
-    description: 'Congressional trades and institutional 13F position changes touching the user\'s holdings (or one held ticker); for Indian stocks, NSE bulk/block deals and insider (promoter, director) trades. Disclosures lag the trades — always state the dates.',
+    description: 'Congressional trades and institutional 13F position changes (each fund\'s latest filing) touching the user\'s holdings (or one held ticker); for Indian stocks, NSE bulk/block deals and insider (promoter, director) trades. Disclosures lag the trades — state each trade\'s date.',
     input_schema: { type: 'object', properties: { ticker: { ...tickerProp, description: 'Optional: limit to one held ticker.' } } },
   },
   {
@@ -263,14 +270,17 @@ const TOOLS = [
     input_schema: { type: 'object', properties: {
       politician: { type: 'string', description: 'Optional: the politician\'s name as the user wrote it.' },
       scope: { type: 'string', enum: ['mine', 'all'], description: 'Optional: "mine" (default) or "all" for the whole of Congress.' },
+      action: { type: 'string', enum: ['buy', 'sell'], description: 'Optional: only the buys or only the sells, when the question asks for one of them.' },
     } },
   },
   {
     name: 'get_india_deals',
-    description: 'The India side of the Institutions and Congress pages: NSE bulk and block deals, and insider (promoter, director) trades. With no arguments, those in the user\'s Indian holdings and deals by the Indian investors they follow. With an investor named (LIC, SBI Mutual Fund, Rekha Jhunjhunwala…), that investor\'s deals in any stock. With scope "all", the newest deals and insider trades across the market — only when the question asks about the market as a whole.',
+    description: 'The India side of the Institutions and Congress pages: NSE bulk and block deals, and insider (promoter, director) trades. With no arguments, those in the user\'s Indian holdings and deals by the Indian investors they follow: use that only when the question is about the user\'s own stocks ("my Indian stocks"). With an investor named (LIC, SBI Mutual Fund, Rekha Jhunjhunwala…), that investor\'s deals in any stock. With scope "all", the newest deals and insider trades across the market: use it when the question is about the market or names no stock of the user\'s ("any promoter selling?", "are promoters pledging shares?", "the biggest bulk deals"). The result also names the investors SenIQ follows.',
     input_schema: { type: 'object', properties: {
       investor: { type: 'string', description: 'Optional: the investor\'s name as the user wrote it.' },
-      scope: { type: 'string', enum: ['mine', 'all'], description: 'Optional: "mine" (default) or "all" for the whole market.' },
+      scope: { type: 'string', enum: ['mine', 'all'], description: 'Optional: "mine" (default, the user\'s own stocks) or "all" for the whole market.' },
+      action: { type: 'string', enum: ['buy', 'sell', 'pledge'], description: 'Optional: only the buys, the sells or the pledges, when the question asks for one of them.' },
+      insiders: { type: 'string', enum: ['promoters'], description: 'Optional: "promoters" for only the insider trades by promoters and the promoter group.' },
     } },
   },
   {
@@ -333,6 +343,7 @@ const EXECUTORS = {
     return {
       as_of: new Date().toISOString(),
       ...rankHoldings(out),
+      answer_shape: OVERVIEW_SHAPE,
       note: 'Holdings are listed largest first; rank 1 is the largest exposure. exposure_pct is the holding\'s share of the portfolio, as the Portfolio page shows it. A holding marked exposure_estimated has no live price or no quantity, so its share is an estimate (it is counted at the average size of the priced holdings); say "about". A holding in "unpriced" has no live price, so its day change is unknown.',
     };
   },
@@ -434,13 +445,23 @@ const EXECUTORS = {
   async get_smart_money({ ticker } = {}, ctx) {
     const tickers = ticker ? [requireHeld(ctx, ticker)] : [...ctx.heldSet];
     const { query } = require('../db');
+    const today = todayIso();
+    const d = (iso) => shortDay(iso, today);
+    // Each kind is read QA.SMART_MONEY_READ deep for its tally and shown QA.SMART_MONEY_ROWS deep.
+    const shown = (rows) => rows.slice(0, QA.SMART_MONEY_ROWS);
+    const more = (rows) => (rows.length > QA.SMART_MONEY_ROWS ? rows.length - QA.SMART_MONEY_ROWS : undefined);
+    // Sample rows stand in only while there are no real disclosures, as on the Congress page:
+    // the two are never mixed, and sample rows are said to be samples.
+    const real = await query('SELECT count(*)::int AS n FROM congress_trades WHERE is_sample = false');
+    const live = Number(real[0] && real[0].n) > 0;
     const congress = await query(
       `SELECT politician, chamber, party, transaction_type, ticker,
               transaction_date::text AS transaction_date, disclosure_date::text AS disclosure_date
-         FROM congress_trades WHERE ticker = ANY($1)
-        ORDER BY disclosure_date DESC NULLS LAST, transaction_date DESC NULLS LAST LIMIT 10`,
-      [tickers]
+         FROM congress_trades WHERE ticker = ANY($1) AND is_sample = $3
+        ORDER BY disclosure_date DESC NULLS LAST, transaction_date DESC NULLS LAST LIMIT $2::int`,
+      [tickers, QA.SMART_MONEY_READ, !live]
     );
+    // Each fund's latest filing only: a change in an older quarter is not what it did last.
     const institutions = await query(
       `SELECT i.name, h.ticker, h.change_type, h.shares, h.value,
               f.period_of_report::text AS period_of_report, f.filed_at::text AS filed_at
@@ -448,38 +469,44 @@ const EXECUTORS = {
          JOIN institution_filings f ON f.id = h.filing_id
          JOIN institutions i ON i.id = f.institution_id
         WHERE h.ticker = ANY($1) AND h.change_type IN ('new','added','reduced')
-        ORDER BY f.filed_at DESC NULLS LAST, h.value DESC NULLS LAST LIMIT 10`,
-      [tickers]
+          AND f.id = (SELECT l.id FROM institution_filings l WHERE l.institution_id = i.id
+                       ORDER BY l.period_of_report DESC NULLS LAST, l.id DESC LIMIT 1)
+        ORDER BY f.filed_at DESC NULLS LAST, h.value DESC NULLS LAST LIMIT $2::int`,
+      [tickers, QA.SMART_MONEY_READ]
     );
-    const congressRows = congress.map((c) => ({ politician: c.politician, chamber: c.chamber, party: c.party, action: c.transaction_type, ticker: c.ticker, traded: day(c.transaction_date), disclosed: day(c.disclosure_date) }));
-    const institutionRows = institutions.map((r) => ({ fund: r.name, ticker: r.ticker, change: r.change_type, shares: Number(r.shares), value_usd: Number(r.value), quarter_end: day(r.period_of_report), filed: day(r.filed_at) }));
+    const congressRows = congress.map((c) => ({ politician: c.politician, action: c.transaction_type, ticker: c.ticker, traded: d(c.transaction_date) }));
+    const institutionRows = institutions.map((r) => ({ fund: r.name, ticker: r.ticker, change: r.change_type, position_value: pages.moneyText(r.value, 'USD'), quarter_end: d(r.period_of_report) }));
     // India: NSE bulk/block deals and insider trades. The keys appear only when there are rows.
     const deals = await query(
       `SELECT deal_type, deal_date::text AS deal_date, ticker, client_name, side, quantity, price, value
          FROM india_deals WHERE ticker = ANY($1)
-        ORDER BY deal_date DESC, value DESC LIMIT 10`,
-      [tickers]
+        ORDER BY deal_date DESC, value DESC LIMIT $2::int`,
+      [tickers, QA.SMART_MONEY_READ]
     );
     const insiders = await query(
       `SELECT ticker, person, category, mode, side, quantity, value, trade_from::text AS trade_from, disclosed_at::text AS disclosed_at
          FROM india_insider_trades WHERE ticker = ANY($1) AND side IN ('buy','sell')
-        ORDER BY disclosed_at DESC NULLS LAST, value DESC NULLS LAST LIMIT 10`,
-      [tickers]
+        ORDER BY disclosed_at DESC NULLS LAST, value DESC NULLS LAST LIMIT $2::int`,
+      [tickers, QA.SMART_MONEY_READ]
     );
-    const dealRows = deals.map((d) => ({ client: d.client_name, deal: d.deal_type, action: d.side, ticker: d.ticker, shares: Number(d.quantity), price_inr: Number(d.price), value_inr: Number(d.value), traded: d.deal_date }));
-    const insiderRows = insiders.map((t) => ({ person: t.person, category: t.category, how: t.mode, action: t.side, ticker: t.ticker, shares: t.quantity == null ? null : Number(t.quantity), value_inr: t.value == null ? null : Number(t.value), traded: t.trade_from, disclosed: t.disclosed_at }));
+    const dealRows = deals.map((x) => ({ client: x.client_name, deal: x.deal_type, action: x.side, ticker: x.ticker, value: pages.moneyText(x.value, 'INR'), traded: d(x.deal_date) }));
+    const insiderRows = insiders.map((t) => ({ person: t.person, category: t.category, action: t.side, ticker: t.ticker, shares: t.quantity == null ? null : Number(t.quantity), value: pages.moneyText(t.value, 'INR'), traded: d(t.trade_from) }));
     const india = dealRows.length || insiderRows.length ? {
       india_note: 'Indian stocks: bulk/block deals are large trades NSE publishes the same day with the client named; insider trades are SEBI disclosures by promoters, directors and key managers, usually within two trading days. India has no congressional-trade disclosures.',
-      india_deals: dealRows,
-      india_insider_trades_summary: tallyBy(insiderRows, 'action'),
-      india_insider_trades: insiderRows,
+      india_deals_summary: tallyBy(dealRows, 'action', 'deals'),
+      india_deals: shown(dealRows), india_deals_not_shown: more(dealRows),
+      india_insider_trades_summary: tallyBy(insiderRows, 'action', 'insider trades'),
+      india_insider_trades: shown(insiderRows), india_insider_trades_not_shown: more(insiderRows),
     } : {};
     return {
-      note: 'Disclosures lag the actual trades (13F up to 45 days after quarter end; congress up to 45 days after the trade). Each row\'s "action"/"change" is exactly what was disclosed — repeat it as written. For a fund, shares and value_usd are the SIZE OF ITS POSITION at the quarter end, not the amount it bought or sold; a 13F does not give that amount.',
-      congress_summary: tallyBy(congressRows, 'action'),
-      congress: congressRows,
-      institutions_summary: tallyBy(institutionRows, 'change'),
-      institutions: institutionRows,
+      note: 'Disclosures lag the actual trades (13F up to 45 days after quarter end; congress up to 45 days after the trade). Each row\'s "action"/"change" is exactly what was disclosed — repeat it as written. For a fund, position_value is the SIZE OF ITS POSITION at the quarter end, not the amount it bought or sold; a 13F does not give that amount.',
+      answer_shape: SMART_MONEY_SHAPE,
+      congress_summary: tallyBy(congressRows, 'action', 'trades'),
+      newest_congress_disclosure: d(congress.map((c) => c.disclosure_date).filter(Boolean).sort().pop()) || undefined,
+      congress: shown(congressRows), congress_not_shown: more(congressRows),
+      ...(live || !congressRows.length ? {} : { congress_sample_data: 'These congressional rows are SAMPLE rows, not real disclosures: no live source is connected. Say so.' }),
+      institutions_summary: tallyBy(institutionRows, 'change', 'funds'),
+      institutions: shown(institutionRows), institutions_not_shown: more(institutionRows),
       ...india,
     };
   },
@@ -514,13 +541,17 @@ const EXECUTORS = {
     if (id != null && String(id).trim()) {
       const one = await getDisclosure({ id, tickers: [...ctx.heldSet] });
       if (!one) throw new ScopeError(`filing_not_found: no filing "${String(id).slice(0, 24)}" for this portfolio. Use an id from get_disclosures results.`);
-      return { source: 'SEC EDGAR (primary source)', filing: one };
+      return { source: 'SEC EDGAR (primary source)', filing: one, answer_shape: FILINGS_SHAPE };
     }
     const r = await listDisclosures({ tickers, query: q ? String(q).slice(0, 200) : '', days });
     const uncovered = tickers.filter((t) => !r.covered.includes(t));
+    const today = todayIso();
     return {
       source: 'SEC EDGAR 8-K filings (primary source). `filed` is when it became public.',
-      filings: r.results,
+      // The days looked back over, so an answer that names the window has it from a result.
+      window_days: Math.max(1, Math.min(DISCLOSURES.LOOKBACK_DAYS, Number(days) || DISCLOSURES.LOOKBACK_DAYS)),
+      answer_shape: FILINGS_SHAPE,
+      filings: r.results.map((f) => ({ ...f, filed: shortDay(f.filed, today) || f.filed })),
       covered_holdings: r.covered,
       ...(uncovered.length ? { no_filings_available_for: uncovered, why: 'Filings exist only for US-listed stocks SenIQ has already checked; Indian stocks, crypto and commodities have none here, and a newly added US stock is picked up on the next poll.' } : {}),
     };
@@ -558,4 +589,4 @@ async function runTool(block, ctx, executors = EXECUTORS) {
   return { type: 'tool_result', tool_use_id: block.id, content, ...(isError ? { is_error: true } : {}) };
 }
 
-module.exports = { TOOLS, EXECUTORS, ScopeError, runTool, computeAttribution, rankHoldings, tallyBy, findMentionedTickers, scopeCheck, outOfScopeAnswer, requireHeld };
+module.exports = { TOOLS, EXECUTORS, SMART_MONEY_SHAPE, FILINGS_SHAPE, OVERVIEW_SHAPE, ScopeError, runTool, computeAttribution, rankHoldings, tallyBy, findMentionedTickers, scopeCheck, outOfScopeAnswer, requireHeld };

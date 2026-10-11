@@ -155,7 +155,9 @@ check('average volume: the recent sessions and the period; none when the source 
   const company = { ticker: 'HEROMOTOCO', name: 'Hero MotoCorp', asset_class: 'equity', exchange: 'NSE' };
   check('it fits the tool-result allowance with room to spare, and says what not to do with it', () => {
     const r = H.buildHistory(company, { currency: 'INR', bars: sessions('2025-10-09', 262, (i) => 4000.55 + i * 3.37, (i) => 500000 + i * 997), volumeUnit: 'shares a day' });
-    assert.ok(JSON.stringify(r).length < QA.MAX_TOOL_RESULT_CHARS * 0.75, String(JSON.stringify(r).length));
+    // The result carries its answer shape as well as its note.
+    assert.ok(JSON.stringify(r).length < QA.MAX_TOOL_RESULT_CHARS * 0.85, String(JSON.stringify(r).length));
+    assert.ok(/Answer only the period or figure asked about/.test(r.answer_shape));
     assert.deepStrictEqual([r.kind, r.ticker, r.held, r.currency, r.volume_unit], ['price_history', 'HEROMOTOCO', false, 'INR', 'shares a day']);
     assert.ok(/do not call a trend, forecast/.test(r.note) && /do not work out a change over any other period/.test(r.note));
     assert.ok(JSON.stringify(r).startsWith('{"kind":"price_history"'));    // the eval's leak check reads this

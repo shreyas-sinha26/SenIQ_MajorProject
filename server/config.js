@@ -496,12 +496,14 @@ const QA = {
   SNAPSHOT_MAX_NAMES: 3,             // names snapshotted in one code-written answer; the rest are named as not shown
   SNAPSHOT_MATCHES: 5,               // companies offered back when a typed name fits several
   // What the other pages show, read by Ask (services/pageTools.js). Each result must fit MAX_TOOL_RESULT_CHARS.
+  SMART_MONEY_ROWS: 3,               // rows of each kind (Congress, funds, Indian deals, insiders) in one get_smart_money result
+  SMART_MONEY_READ: 50,              // rows of each kind read for its tally
   PAGE_MATCHES: 5,                   // funds, politicians or investors offered back when a name fits several
-  PAGE_ROWS: 10,                     // trades or deals in one result
-  PAGE_FUND_TOP: 10,                 // a fund's largest positions
+  PAGE_ROWS: 5,                      // trades or deals in one result, as many as an answer lists; the rest are counted
+  PAGE_FUND_TOP: 5,                  // a fund's largest positions
   PAGE_FUND_CHANGES: 3,              // its largest new, added and reduced positions
-  PAGE_ALERTS: 10,                   // newest alerts, asked for on their own
-  PAGE_ALERTS_WITH_BRIEF: 6,         // and when the brief shares the result
+  PAGE_ALERTS: 5,                    // newest alerts, asked for on their own: as many as an answer lists
+  PAGE_ALERTS_WITH_BRIEF: 3,         // and when the brief shares the result
   PAGE_ALERT_CHARS: 140,             // one alert's text
   PAGE_BRIEF_CHARS: 1100,            // the daily brief's text
   // Price history (services/priceHistory.js): daily bars fetched when asked, never stored.
@@ -512,7 +514,7 @@ const QA = {
   PRICE_HISTORY_TTL_MS: 15 * 60 * 1000,
   PRICE_HISTORY_TIMEOUT_MS: 8000,
   // IPO Watch tools (services/ipoTools.js, only with FEATURES.IPO_WATCH) — the calendar, read-only.
-  IPO_MAX_ISSUES: 10,                // issue cards in one get_ipo_calendar result; fewer when they would not fit MAX_TOOL_RESULT_CHARS
+  IPO_MAX_ISSUES: 5,                 // issue cards in one get_ipo_calendar result, as many as an answer lists; the rest are counted
   IPO_RANK_TOP: 5,                   // names in an ordering (most subscribed, highest premium)
   IPO_DETAIL_STORIES: 5,             // latest stories in get_ipo_detail
   IPO_DETAIL_DAYS: 7,                // days of news tone, and of grey market premium readings, in get_ipo_detail
