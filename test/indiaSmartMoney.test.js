@@ -14,7 +14,7 @@ const state = {};
 function resetDb() {
   Object.assign(state, {
     deals: [], insiders: [], sync: new Set(), alerts: [], filings: new Map(), tracked: [],
-    contextCalls: [], contextDeals: [], contextInsiders: [],
+    contextCalls: [], contextDeals: [], contextInsiders: [], congress: [],
     holders: {},      // ticker → [userId] holding it as an Indian stock
     followers: {},    // investor slug → [userId]
   });
@@ -45,8 +45,11 @@ async function run(sql, params = []) {
     const ids = new Set(params[0].flatMap((slug) => state.followers[slug] || []));
     return [...ids].map((user_id) => ({ user_id }));
   }
-  // grounding.smartMoneyContext — the US side is empty here; the India rows are what is under test.
-  if (/FROM congress_trades c/.test(q) || /FROM institution_holdings h/.test(q)) return [];
+  // grounding.smartMoneyContext — the US side: no fund rows; congress rows as stored, kept to
+  // one kind only where the statement asks for one. The India rows are what is mostly under test.
+  if (q.startsWith('SELECT count(*)::int AS n FROM congress_trades WHERE is_sample = false')) return [{ n: state.congress.filter((t) => !t.is_sample).length }];
+  if (/FROM congress_trades c/.test(q)) return state.congress.filter((t) => !/c\.is_sample = \$2/.test(q) || t.is_sample === params[1]).slice(0, 3);
+  if (/FROM institution_holdings h/.test(q)) return [];
   if (/FROM india_deals WHERE ticker IN/.test(q)) { state.contextCalls.push({ table: 'deals', sql: q, params }); return state.contextDeals; }
   if (/FROM india_insider_trades WHERE ticker IN/.test(q)) { state.contextCalls.push({ table: 'insiders', sql: q, params }); return state.contextInsiders; }
   if (q.startsWith('SELECT count(*)::int AS n FROM alerts')) return [{ n: 0 }];
@@ -493,6 +496,30 @@ check('deals in held Indian stocks and insider trades that pass the alert rule, 
     assert.ok(insiders.sql.includes(part), part);
   for (const c of [deals, insiders]) assert.ok(/p\.user_id = \$1/.test(c.sql) && /IN \('NSE', 'BSE'\)/.test(c.sql));
   assert.ok(/deal_date::text AS deal_date/.test(deals.sql) && /disclosed_at::text AS disclosed_at/.test(insiders.sql));
+});
+// The US side of the same packet. Sample rows are made-up stand-ins for a database with no
+// live source; the brief and Ask's fallback must never give one as a real disclosure.
+const REAL_TRADE = { politician: 'Jane Doe', transaction_type: 'purchase', ticker: 'AAPL', transaction_date: '2026-06-01', is_sample: false };
+const SAMPLE_TRADE = { politician: 'Sample Member', transaction_type: 'sale', ticker: 'AAPL', transaction_date: '2026-05-20', is_sample: true };
+check('congress: with real disclosures stored, sample rows are left out', async () => {
+  resetDb();
+  state.congress = [SAMPLE_TRADE, REAL_TRADE, { ...SAMPLE_TRADE, ticker: 'NVDA' }];
+  const r = await require('../server/services/grounding').smartMoneyContext(9);
+  assert.deepStrictEqual(r.congress, [{ politician: 'Jane Doe', action: 'purchase', ticker: 'AAPL', date: '2026-06-01' }]);
+  assert.ok(!('congress_sample_data' in r));
+});
+check('congress: with no real disclosures, the sample rows are used and said to be samples', async () => {
+  resetDb();
+  state.congress = [SAMPLE_TRADE];
+  const r = await require('../server/services/grounding').smartMoneyContext(9);
+  assert.deepStrictEqual(r.congress, [{ politician: 'Sample Member', action: 'sale', ticker: 'AAPL', date: '2026-05-20' }]);
+  assert.ok(/SAMPLE rows, not real disclosures/.test(r.congress_sample_data));
+});
+check('congress: no rows at all carries no sample note', async () => {
+  resetDb();
+  const r = await require('../server/services/grounding').smartMoneyContext(9);
+  assert.deepStrictEqual(r.congress, []);
+  assert.ok(!('congress_sample_data' in r));
 });
 
 (async () => {
