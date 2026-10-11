@@ -26,7 +26,7 @@ async function heldAndWatched(query) {
 
 async function status() {
   const { query } = require('../server/db');
-  const { FEATURES, US_NEWS } = require('../server/config');
+  const { FEATURES, FINNHUB } = require('../server/config');
   const usNews = require('../server/services/usNews');
   const held = await heldAndWatched(query);
   const s = await usNews.status(held);
@@ -39,7 +39,7 @@ async function status() {
   const queue = (label, names, places) => `${places} ${label}` + (places && names ? ` (each about every ${(names / places / 6).toFixed(1)} hours)` : '');
   console.log(`${held.length} held ticker(s), so a run takes ${perRun} name(s)` + (perRun
     ? `: ${queue('curated', s.curated, curated)} and ${queue('of the rest', s.names - s.curated, perRun - curated)}`
-    : ` (the run's ${US_NEWS.CALLS_PER_RUN} calls are used up)`));
+    : ` (the run's ${FINNHUB.NEWS_CALLS_PER_RUN} news calls are used up)`));
 }
 
 async function tryBatch(flags) {
@@ -62,7 +62,8 @@ async function tryBatch(flags) {
   )).map((r) => r.ticker);
 
   const started = Date.now();
-  const r = await fetchRotation(names);
+  // As a run would: through the gate's background lane, one call every FINNHUB.BACKGROUND_GAP_MS.
+  const r = await require('../server/services/finnhubGate').background(() => fetchRotation(names));
   const stories = dedupe(r.articles);
   const resolver = await loadIndex();
   const heldNames = held.map((ticker) => ({ ticker }));

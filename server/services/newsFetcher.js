@@ -22,9 +22,10 @@ function enrichWithLexicon(articles) {
   });
 }
 
-// Back-compat signature (apiKey is now read from env inside the orchestrator).
+// Back-compat signature (apiKey is now read from env inside the orchestrator). This is the
+// on-demand path (someone opened a ticker), so its Finnhub call is logged as a lookup.
 async function fetchNewsForTickers(tickers /* , apiKey */) {
-  const { articles } = await gatherArticles(tickers);
+  const { articles } = await gatherArticles(tickers, [], [], { purpose: 'lookup' });
   return enrichWithLexicon(articles);
 }
 
