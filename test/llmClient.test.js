@@ -35,6 +35,8 @@ const TOOLS = [{ name: 'get_news', description: 'News for a ticker', input_schem
     });
     assert.strictEqual(body.model, 'anthropic/claude-haiku-5.5');   // the router's model, whatever the caller named
     assert.strictEqual(body.max_tokens, 500);
+    assert.ok(!('reasoning_effort' in body), 'no effort asked for, none sent');
+    assert.strictEqual(toChatRequest({ model: 'claude-haiku-5-5', max_tokens: 500, messages: [{ role: 'user', content: 'Hi' }], output_config: { effort: 'low' } }).reasoning_effort, 'low');
     assert.deepStrictEqual(body.messages, [{ role: 'system', content: 'You are an analyst.' }, { role: 'user', content: 'Hi' }]);
     assert.deepStrictEqual(body.tools, [{ type: 'function', function: { name: 'get_news', description: 'News for a ticker', parameters: TOOLS[0].input_schema } }]);
     assert.strictEqual(body.tool_choice, 'auto');

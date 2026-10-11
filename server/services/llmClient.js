@@ -26,7 +26,7 @@ function llmConfigured() {
 }
 
 // ── Pure: Anthropic request → OpenAI chat/completions body ──
-function toChatRequest({ model, max_tokens, system, messages, tools, tool_choice }) {
+function toChatRequest({ model, max_tokens, system, messages, tools, tool_choice, output_config }) {
   const out = [];
   const systemText = Array.isArray(system) ? system.map((b) => b.text || '').join('\n') : (system || '');
   if (systemText) out.push({ role: 'system', content: systemText });
@@ -53,6 +53,9 @@ function toChatRequest({ model, max_tokens, system, messages, tools, tool_choice
   }
 
   const body = { model: LLM.ROUTER.MODEL || model, max_tokens, messages: out };
+  // Effort goes as the chat-completions field `reasoning_effort`: sent as "low", the router
+  // returned no reasoning tokens where it returned about 90 without (one call, 2026-10-11).
+  if (output_config && output_config.effort) body.reasoning_effort = output_config.effort;
   if (tools && tools.length) {
     body.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } }));
     body.tool_choice = tool_choice && tool_choice.type === 'none' ? 'none' : 'auto';

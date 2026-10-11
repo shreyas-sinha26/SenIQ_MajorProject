@@ -453,6 +453,10 @@ const QA = {
   // A model that thinks (Claude Haiku 5.5 and later) spends this limit on its thinking too:
   // at 1,000 two of six answers were cut off before or in the middle of the text.
   MAX_OUTPUT_TOKENS: 3000,
+  // How much the model thinks before it answers: low, medium, high, xhigh or max. Unset, the
+  // model's own default applies (medium on Claude Haiku 5.5). ASK_EFFORT in the environment
+  // sets it, so a level can be tried on the eval before it is made the default here.
+  EFFORT: ['low', 'medium', 'high', 'xhigh', 'max'].includes(process.env.ASK_EFFORT) ? process.env.ASK_EFFORT : null,
   PER_USER_DAILY_QUESTIONS: 10,  // fallback only — the real cap is TIERS[tier].qaPerDay (Plus 10 / Pro 30)
   MAX_QUESTION_CHARS: 500,       // clamp the (untrusted) question before prompting
   TOP_EVENTS: 10,                // extended grounding: fuller impact feed than the daily brief
@@ -729,11 +733,13 @@ const INDIA_SMART_MONEY = {
 };
 
 // ─── US coverage (services/usNews.js) ────────────────────────
-// The US shares nobody holds are taken through Finnhub's company news in turn. About 1,500
-// names at 30 a run and a run every 10 minutes: each is visited about every 8 hours, and a
-// visit asks for 7 days, so nothing is missed between two.
+// The US shares nobody holds are taken through Finnhub's company news in turn, 30 a run and
+// a run every 10 minutes, in two queues: about 100 curated names at 5 a run, each visited
+// about every 3 hours, and about 1,400 others at 25 a run, each about every 9 hours. A visit
+// asks for 7 days, so nothing is missed between two.
 const US_NEWS = {
   PER_RUN: 30,
+  CURATED_PER_RUN: 5,      // of those 30, the curated queue's places
   // Finnhub's free plan allows 60 calls a minute, and US quotes use the same key. A run's
   // news calls (held tickers, IPO Watch's, the rotation) stay within this many, so the
   // rotation shrinks as holdings grow and stops when they alone reach it.

@@ -93,29 +93,60 @@ function priceText(price, currency) {
 }
 const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
 
-// One snapshot as a sentence or two. Pure.
-function snapshotLine(s) {
+// What a question asks for, so the code-written answer gives that and stops: "What was
+// Tesla's high today?" gets the high, not the price, the low and the sentiment reading as
+// well. null when it asks for nothing in particular ("How is Tesla doing?", "Any news on
+// Tesla?"), and the whole snapshot is then the answer. Pure.
+const PRICE_ASKED = /\b(price[ds]?|quote[ds]?|ltp|cmp|(?:trading|trades?|quoting)\s+at|how\s+much\s+(?:is|are|does|do)|worth)\b/i;
+const SENTIMENT_ASKED = /\b(sentiment|mood|tone|bullish|bearish|z-?score)\b/i;
+function asksFor(question) {
+  const q = String(question || '');
+  const range = /\b(range|highs?\s+(?:and|or|&)\s+lows?)\b/i.test(q);
+  const parts = {
+    price: PRICE_ASKED.test(q),
+    high: range || /\bhigh(?:est)?\b/i.test(q),
+    low: range || /\blow(?:est)?\b/i.test(q),
+    sentiment: SENTIMENT_ASKED.test(q),
+  };
+  return Object.values(parts).some(Boolean) ? parts : null;
+}
+
+// One snapshot in sentences. `parts` (asksFor) keeps it to what was asked; without it, the
+// price and the sentiment reading. `withHistory`: the past is given on the next line
+// (historyLine), so the line here is the price alone, or nothing when the question asked
+// for the period's high or low. Pure.
+function snapshotLine(s, parts = null, withHistory = false) {
   const who = s.name && s.name !== s.ticker ? `${s.name} (${s.ticker})` : s.ticker;
-  let price;
-  if (s.price == null) price = 'There is no live price for it right now.';
-  else {
-    const c = s.day_change_pct;
-    const move = c == null ? 'day change not available' : c === 0 ? 'unchanged today' : `${c > 0 ? 'up' : 'down'} ${Math.abs(c).toFixed(2)}% today`;
-    const range = s.session_high != null ? ` Its latest session's high was ${priceText(s.session_high, s.currency)} and its low ${priceText(s.session_low, s.currency)}.` : '';
-    price = `Price ${priceText(s.price, s.currency)}, ${move}.${range}`;
+  const want = parts || { price: true, sentiment: !withHistory };
+  const out = [];
+  if (want.price || (withHistory && !want.sentiment && !want.high && !want.low)) {
+    if (s.price == null) out.push('There is no live price for it right now.');
+    else {
+      const c = s.day_change_pct;
+      const move = c == null ? 'day change not available' : c === 0 ? 'unchanged today' : `${c > 0 ? 'up' : 'down'} ${Math.abs(c).toFixed(2)}% today`;
+      out.push(`Price ${priceText(s.price, s.currency)}, ${move}.`);
+    }
   }
-  let tone;
-  if (!s.sentiment) {
-    tone = s.sentiment_note && s.sentiment_note.startsWith('not tracked')
-      ? 'SenIQ does not read the news for it yet, so there is no sentiment reading.'
-      : `No sentiment reading: SenIQ has no stories on it from the last ${SENTIMENT.ACUTE_WINDOW_HOURS} hours.`;
-  } else {
-    const basis = s.sentiment.z_vs_90d != null
-      ? `z-score ${s.sentiment.z_vs_90d} against its own 90-day normal`
-      : 'too little history to compare with its usual level';
-    tone = `News sentiment ${s.sentiment.label} (${Number(s.sentiment.score).toFixed(2)} on a 0 to 1 scale, 0.5 is neutral) from ${plural(s.sentiment.stories, 'story', 'stories')} in the last ${s.sentiment.window_hours} hours; ${basis}.`;
+  if ((want.high || want.low) && !withHistory) {
+    const high = priceText(s.session_high ?? 0, s.currency);
+    const low = priceText(s.session_low ?? 0, s.currency);
+    if (s.session_high == null) out.push('SenIQ has no session high or low for it right now.');
+    else if (want.high && want.low) out.push(`Its latest session's high was ${high} and its low ${low}.`);
+    else out.push(`Its latest session's ${want.high ? `high was ${high}` : `low was ${low}`}.`);
   }
-  return `${who}: ${price} ${tone}`;
+  if (want.sentiment) {
+    if (!s.sentiment) {
+      out.push(s.sentiment_note && s.sentiment_note.startsWith('not tracked')
+        ? 'SenIQ does not read the news for it yet, so there is no sentiment reading.'
+        : `No sentiment reading: SenIQ has no stories on it from the last ${SENTIMENT.ACUTE_WINDOW_HOURS} hours.`);
+    } else {
+      const basis = s.sentiment.z_vs_90d != null
+        ? `z-score ${s.sentiment.z_vs_90d} against its own 90-day normal`
+        : 'too little history to compare with its usual level';
+      out.push(`News sentiment ${s.sentiment.label} (${Number(s.sentiment.score).toFixed(2)} on a 0 to 1 scale, 0.5 is neutral) from ${plural(s.sentiment.stories, 'story', 'stories')} in the last ${s.sentiment.window_hours} hours; ${basis}.`);
+    }
+  }
+  return `${who}:${out.length ? ` ${out.join(' ')}` : ''}`;
 }
 
 // A question that asks what to do, or what a price will do. Pure.
@@ -135,35 +166,49 @@ const HISTORY_ASKED = /\b(histor\w*|past\s+(week|month|quarter|year|few)|last\s+
 const asksAboutHistory = (question) => HISTORY_ASKED.test(String(question || ''));
 
 const LABEL = { '1_week': '1 week', '1_month': '1 month', '3_months': '3 months', '6_months': '6 months', '1_year': '1 year', year_to_date: 'this calendar year' };
-// A price-history result (priceHistory.buildHistory) as one line. Pure.
-function historyLine(h) {
+// A price-history result (priceHistory.buildHistory) as one line. Asked for the high or
+// the low (`parts`, asksFor), it is that figure and its date and no more. Pure.
+function historyLine(h, parts = null) {
   if (!h || !h.changes) return 'There is no price history for it right now.';
+  const from = h.history_starts ? ` (its history here starts ${h.history_starts})` : '';
+  const traded = !!h.highest_price;
+  const top = traded ? h.highest_price : h.highest_close;
+  const bottom = traded ? h.lowest_price : h.lowest_close;
+  const at = (x) => `${priceText(traded ? x.price : x.close, h.currency)} on ${x.date}`;
+  if (parts && (parts.high || parts.low)) {
+    const what = traded ? 'price' : 'close';
+    const asked = [parts.high && `highest ${what} ${at(top)}`, parts.low && `lowest ${what} ${at(bottom)}`].filter(Boolean).join(', ');
+    return `In the year to ${h.last_close.date}${from}: ${asked}.`;
+  }
   const moves = Object.entries(h.changes).filter(([, c]) => c)
     .map(([k, c]) => `${LABEL[k] || k} ${c.change_pct > 0 ? '+' : ''}${c.change_pct.toFixed(2)}%`);
-  const from = h.history_starts ? ` (its history here starts ${h.history_starts})` : '';
-  const extremes = h.highest_price
-    ? `Highest price in the period ${priceText(h.highest_price.price, h.currency)} on ${h.highest_price.date}, lowest ${priceText(h.lowest_price.price, h.currency)} on ${h.lowest_price.date}.`
-    : `Highest close in the period ${priceText(h.highest_close.close, h.currency)} on ${h.highest_close.date}, lowest ${priceText(h.lowest_close.close, h.currency)} on ${h.lowest_close.date}.`;
-  return `Closing prices to ${h.last_close.date}${from}: ${moves.join(', ')}. ${extremes}`;
+  return `Closing prices to ${h.last_close.date}${from}: ${moves.join(', ')}. Highest ${traded ? 'price' : 'close'} in the period ${at(top)}, lowest ${at(bottom)}.`;
 }
 
 /**
  * The code-written answer to a question only about stocks the user does not hold. Pure.
  * `left` = tickers named in the question beyond the ones snapshotted. `advice`: the question
  * asked what to do, so the answer says it does not advise. `histories` = price-history
- * results by ticker, given when the question asked about the past.
+ * results by ticker, given when the question asked about the past. `parts` = what the
+ * question asked for (asksFor): given, the answer is that and nothing around it. A question
+ * that asked for nothing in particular gets the price and the sentiment reading, and one
+ * closing line on what a holding would add.
  */
-function snapshotAnswer(snapshots, left = [], { advice = false, histories = null } = {}) {
+function snapshotAnswer(snapshots, left = [], { advice = false, histories = null, parts = null } = {}) {
   if (!snapshots.length) return null;
   const many = snapshots.length + left.length > 1;
   const names = snapshots.map((s) => s.ticker).concat(left).join(', ');
   const lines = [
     ...(advice ? ['SenIQ doesn\'t give buy, sell or hold advice, or predictions. Here is what it has.'] : []),
-    `${names} ${many ? "aren't" : "isn't"} in your portfolio, so SenIQ has only ${many ? 'their' : 'its'} price and sentiment reading${histories ? ', and what the price did over the past year' : ''}.`,
-    ...snapshots.flatMap((s) => [snapshotLine(s), ...(histories ? [historyLine(histories[s.ticker])] : [])]),
+    ...snapshots.flatMap((s) => {
+      const line = snapshotLine(s, parts, !!histories);
+      if (!histories) return [line];
+      const past = historyLine(histories[s.ticker], parts);
+      return line.endsWith(':') ? [`${line} ${past}`] : [line, past];   // nothing but the past was asked for
+    }),
   ];
   if (left.length) lines.push(`Not shown here: ${left.join(', ')}. Ask about ${left.length === 1 ? 'it' : 'them'} separately.`);
-  lines.push(`Add ${many ? 'them' : 'it'} to your portfolio (Portfolio page, "Add Asset") for news, smart money and the impact on your holdings.`);
+  if (!parts && !histories) lines.push(`${names} ${many ? "aren't" : "isn't"} in your portfolio. Add ${many ? 'them' : 'it'} on the Portfolio page ("Add Asset") to see ${many ? 'their' : 'its'} stories, smart money and impact on your holdings.`);
   return lines.join('\n');
 }
 
@@ -222,7 +267,7 @@ async function outsideAnswer(tickers, question = '') {
     histories = {};
     for (const s of snaps) histories[s.ticker] = await priceHistory(byTicker.get(s.ticker));
   }
-  return snapshotAnswer(snaps, tickers.filter((t) => !shown.has(t)), { advice: asksForAdvice(question), histories });
+  return snapshotAnswer(snaps, tickers.filter((t) => !shown.has(t)), { advice: asksForAdvice(question), histories, parts: asksFor(question) });
 }
 
-module.exports = { pickCompany, buildSnapshot, snapshotLine, snapshotAnswer, historyLine, asksForAdvice, asksAboutHistory, priceText, searchCompanies, findCompany, snapshot, outsideAnswer };
+module.exports = { pickCompany, buildSnapshot, snapshotLine, snapshotAnswer, historyLine, asksFor, asksForAdvice, asksAboutHistory, priceText, searchCompanies, findCompany, snapshot, outsideAnswer };
