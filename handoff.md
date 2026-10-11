@@ -61,11 +61,11 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ## 3. Current state
 
-- **Unmerged: branch `qa-fixes-v1.17`** *(2026-10-12; local only, not pushed, no pull
-  request)*. Cut from `main` at `ee4b844`; it holds the fixes for the QA pass of 2026-10-11
-  ("Next, in order", item 6): every High and Medium finding of both reports but one, and
-  the Lows that code can settle. No migration, no new switch. `main` itself is unchanged.
-  What a reader of `main` should know the branch changes:
+- **Merged 2026-10-12: pull request #20 (`qa-fixes-v1.17`), tagged `v1.18` / `v2.19` on
+  `3dae799`.** Nine commits: the fixes for the QA pass of 2026-10-11 and then the items
+  that pass left open ("Next, in order", item 6). Two migrations (`0046`, `0047`), no new
+  switch. **With an email provider set up, a new account must open the link sent to it
+  before it can sign in.** What it changes:
   - **Signing out reloads the page**, so the next person on the browser sees nothing of the
     last (their profile, their Ask answer, the password in the sign-in form).
   - **Only `/app` loads the app**; any other unknown path is a 404 page. `GET
@@ -87,12 +87,17 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
     /api/strategies/check`), a `range_note`, and dates for a daily run's times. The engine
     as it was is in the macOS Trash as `seniq-engine-pre_qa_2026-10-12`. The branch works
     with the older engine too, without those three things.
-  - **Tests on the branch:** `npm test`, 35 files, 904 checks; the engine's own, 69.
-  - **Next, at Annas's word:** push the branch and open the pull request; whether the two
-    QA reports go with it is still his to say.
-- **Git** *(checked 2026-10-11, evening)*: everything is on `main` and pushed. Latest tags
-  **`v1.17`** and **`v2.18`**, both on `13c70bf`, the merge of pull request #19. The
-  one commit after it on `main` puts that hash into this file. Before it: `v1.16` /
+  - **Sign-up is confirmed by email, an account can change its address and delete itself,
+    `/terms` and `/privacy` are pages**, the Congress source is live again in the local
+    `.env`, and the stored 13F filings were read again (item 6 has each).
+  - **Tests:** `npm test`, 36 files, 930 checks; the engine's own, 69.
+  - **Still open from the QA pass:** GDELT has not been seen returning a story, and 22
+    moderate `npm audit` advisories remain in `@sentry/node` 8. The two QA reports are
+    still untracked: whether they go to GitHub is his to say.
+- **Git** *(checked 2026-10-12)*: everything is on `main` and pushed. Latest tags
+  **`v1.18`** and **`v2.19`**, both on `3dae799`, the merge of pull request #20. The
+  one commit after it on `main` puts that hash into this file. Before it: `v1.17` /
+  `v2.18` on `13c70bf` (pull request #19), `v1.16` /
   `v2.17` on `91f53fb` (pull request #18), `v1.15` /
   `v2.16` on `75fcb2f` (pull request #17, the plan of 2026-10-10), `v1.14` / `v2.15` on
   `d0aa0ca` (pull request #16, IPO Watch's "Show all" button, §5) and `v1.13` / `v2.14`
@@ -367,7 +372,7 @@ Finnhub work below was started at his word the same day and is built, not yet ru
      which the app can already do with `ANTHROPIC_API_KEY`), fewer tool definitions a
      question, streaming, shorter answers.
 
-6. **The QA pass of 2026-10-11: fixed on branch `qa-fixes-v1.17`, waiting to be pushed.**
+6. **The QA pass of 2026-10-11: fixed, merged as pull request #20 (`v1.18` / `v2.19`).**
    Two sessions tested `v1.16` / `v2.17` and then `v1.17` / `v2.18` end to end, report
    only, and wrote two files at the repo root, **untracked and not pushed**:
    `QA_REPORT_v1.md` and `QA_REPORT_v2.md`. On 2026-10-12 a third session fixed what they
@@ -388,8 +393,9 @@ Finnhub work below was started at his word the same day and is built, not yet ru
      database (code fix only); a scratch server and engine could be started for the check;
      all the groups in one go. Of the Lows that are features, only "quantity and cost shown
      and editable" was built.
-   - **The closing pass, later on 2026-10-12, on the same branch.** Annas answered each
-     open item, and all but two are now closed (the v1 report's "Closing pass" section has
+   - **The closing pass, later on 2026-10-12, on the same branch** (pushed and merged that
+     day at his word: "push commit merge everything done now and tag the new v1 and v2
+     versions"). Annas answered each open item, and all but two are now closed (the v1 report's "Closing pass" section has
      the table and how it was checked; `npm test` is 36 files, 930 checks):
      - **H2:** `CONGRESS_TRADES_URL` is in the local `.env` (FMP, Senate and House). One
        server start on the dev database, with Claude and email off, stored 159 real
