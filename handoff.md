@@ -158,6 +158,30 @@ Each of the first three needs Annas's word, and so does any paid run.
    predates the filings tool); the judge is not shown the tool descriptions or today's
    date, which the model is.
 
+5. **How long an answer takes** *(started 2026-10-11 at Annas's word; branch
+   `ask-to-the-point`, uncommitted; `npm test` passes: 33 files, 811 checks)*. In the two
+   whole runs a round cost about 9 to 10 seconds on Claude Haiku 5.5 and most questions
+   took two (20.1 seconds an answer against 13.6 on Haiku 4.5, 877 output tokens against
+   249).
+   - **Built:** each model call and each round of tool calls is timed (`timing` in Ask's
+     trace and in the eval's `results.jsonl`); `ASK_EFFORT` sets the model's effort for
+     Ask (`QA.EFFORT`, unset by default, so nothing changes until it is set), sent to
+     Anthropic as `output_config.effort` and to the router as `reasoning_effort`.
+   - **Seen, one call each:** with `reasoning_effort: "low"` the router's reply had 0
+     reasoning tokens where it had 91 and 97 without. The router lists the model with
+     "explicit-caching", so a cache marker may be accepted there; not tried.
+   - **Not measured: the six cases at low effort.** On 2026-10-11 the router was too
+     slow to measure anything: of fourteen small calls eight gave no answer in 45
+     seconds, and the six that did took 19 to 113 seconds, on Haiku 4.5 as well as 5.5
+     (a one-word reply took 19 and 36 seconds). Its model list answered in 0.3 seconds,
+     so the wait was behind the router. $0.0003 spent.
+   - **Next:** when the router answers normally,
+     `ASK_EFFORT=low node eval/ask/run.js --run --yes-spend --max-usd 0.2 --only move-01,scope-05,history-02,pages-03,pages-04,ipo-04`
+     and the same without `ASK_EFFORT`, then compare `timing`. The other levers, in
+     order: one round where two are used now, caching (or calling Anthropic directly,
+     which the app can already do with `ANTHROPIC_API_KEY`), fewer tool definitions a
+     question, streaming, shorter answers.
+
 Unchanged: **retention stays off**; nothing new goes on `/mcp` or `/v1` (every new tool is
 Ask only); hosting choices wait until there is a deployment to make.
 
@@ -1452,6 +1476,22 @@ machine before the date fix that day had lookahead; do not reuse older figures.
   even where the app has its price and its sentiment. On the branch `ask-tools` (2026-10-11)
   it answers with that price and sentiment reading instead; news detail, smart money and
   impact are still for holdings only.
+- **The snapshot answer gives what the question asked for and stops** *(2026-10-11, at
+  Annas's word after he asked "What was Tesla's high today?" and got the price, the low,
+  the sentiment reading and two lines about his portfolio around it; branch
+  `ask-to-the-point`, uncommitted; `npm test` passes: 33 files, 811 checks)*. The
+  question is read by word lists (`asksFor` in `stockSnapshot.js`) for four things: the
+  price, the session's high, its low, the sentiment reading. Asked for one, the answer
+  is that one sentence ("Tesla (TSLA): Its latest session's high was $388.56."); asked
+  for two, both. Asked about the past it is the price and the history line, and asked
+  for the year's high or low, that figure and its date alone. A question that asks for
+  nothing in particular ("How is Tesla doing?", "Any news on Tesla?") gets the price and
+  the reading, then one closing line on adding the stock. The opening line "…so SenIQ
+  has only its price and sentiment reading" is gone: the answer went on to give more
+  than that. The session's high and low are no longer in the general answer. **Limits:**
+  a question worded outside the lists gets the general answer; a coin has no session, so
+  "Bitcoin's high today" answers that there is none; the tool the model calls
+  (`get_stock_snapshot`) is unchanged and still returns everything.
 - **The snapshot answer declines advice in words when the question asks for it** (added
   2026-10-11 at Annas's word): "Should I buy Hero MotoCorp?" opens with "SenIQ doesn't give
   buy, sell or hold advice, or predictions." The question is read by a word list
