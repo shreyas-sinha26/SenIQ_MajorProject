@@ -61,6 +61,35 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ## 3. Current state
 
+- **Unmerged: branch `qa-fixes-v1.17`** *(2026-10-12; local only, not pushed, no pull
+  request)*. Cut from `main` at `ee4b844`; it holds the fixes for the QA pass of 2026-10-11
+  ("Next, in order", item 6): every High and Medium finding of both reports but one, and
+  the Lows that code can settle. No migration, no new switch. `main` itself is unchanged.
+  What a reader of `main` should know the branch changes:
+  - **Signing out reloads the page**, so the next person on the browser sees nothing of the
+    last (their profile, their Ask answer, the password in the sign-in form).
+  - **Only `/app` loads the app**; any other unknown path is a 404 page. `GET
+    /api/news/sentiment/:ticker` is removed; `GET /api/auth/session` (always a 200) and
+    `PUT /api/portfolio/:ticker` (quantity and cost per unit) are new.
+  - **Sample congressional rows are hidden everywhere** while real ones exist (the Congress
+    tab and the company brief were the two readers left). The tab says how old its data is.
+  - **The three v2 limits hold under parallel requests** (`db.locked`: an advisory lock
+    around the count and the insert). A backtest and the robustness check are checked in one
+    place for the page, `/v1` and `/mcp` (`services/strategyRuns.js`).
+  - **Ask with no model** answers by what the question is about, and no longer says "turn
+    on the AI writer".
+  - **GDELT is asked one query at a time** (5.5 seconds apart, a 20-second limit, a
+    150-second budget a run). It gave 0 stories a run because a run's queries went out
+    together; it has not yet been seen returning stories under the new code, because GDELT
+    refused this machine's requests during the check.
+  - **The local engine changed again** (`strategy-service/`, not under git): the price cache
+    is safe under parallel requests, and `app.py` has a new route (`POST
+    /api/strategies/check`), a `range_note`, and dates for a daily run's times. The engine
+    as it was is in the macOS Trash as `seniq-engine-pre_qa_2026-10-12`. The branch works
+    with the older engine too, without those three things.
+  - **Tests on the branch:** `npm test`, 35 files, 904 checks; the engine's own, 69.
+  - **Next, at Annas's word:** push the branch and open the pull request; whether the two
+    QA reports go with it is still his to say.
 - **Git** *(checked 2026-10-11, evening)*: everything is on `main` and pushed. Latest tags
   **`v1.17`** and **`v2.18`**, both on `13c70bf`, the merge of pull request #19. The
   one commit after it on `main` puts that hash into this file. Before it: `v1.16` /
@@ -338,25 +367,27 @@ Finnhub work below was started at his word the same day and is built, not yet ru
      which the app can already do with `ANTHROPIC_API_KEY`), fewer tool definitions a
      question, streaming, shorter answers.
 
-6. **The QA pass of 2026-10-11: its findings are not dealt with, bar half of one.** A
-   session tested `v1.16` / `v2.17` end to end on 2026-10-11, report only, and wrote two
-   files at the repo root, **untracked and not pushed**: `QA_REPORT_v1.md` (3 high, 14
-   medium, 23 low) and `QA_REPORT_v2.md` (7 medium, 12 low). Each finding says where it
-   is and how to reproduce it. The three high ones, and where each stands after
-   `v1.17` / `v2.18`:
-   - **H1, invented congressional trades shown as real.** The database has 12 sample
-     rows beside 225 real ones. **Fixed in two of the four readers:** Ask's
-     `get_smart_money` (`fd7e3db`) and the daily brief's packet (`4d19d5d`) now use
-     sample rows only while there are no real ones. **Still open:** the Congress tab
-     lists them with no label (the route returns `is_sample`, the page ignores it), and
-     the company brief (`loadSmartMoney` in `onboarding.js`) does not filter
-     them. Removing the 12 rows from the dev database is a deletion, so it waits for
-     Annas to ask.
-   - **H2, the congressional data stopped on 2026-06-30:** `CONGRESS_TRADES_URL` is not
-     in the local `.env`. Open. Ask now says how recent the data is
-     (`newest_disclosure`), which is all that changed.
-   - **H3, after sign-out the next person on the same browser sees the last user's
-     data** (the Ask answer on screen, and the password still in the sign-in box). Open.
+6. **The QA pass of 2026-10-11: fixed on branch `qa-fixes-v1.17`, waiting to be pushed.**
+   Two sessions tested `v1.16` / `v2.17` and then `v1.17` / `v2.18` end to end, report
+   only, and wrote two files at the repo root, **untracked and not pushed**:
+   `QA_REPORT_v1.md` and `QA_REPORT_v2.md`. On 2026-10-12 a third session fixed what they
+   list, at Annas's word ("using the QA reports fix all the defects"), and rewrote both
+   files in place: each finding keeps its number, its status line says where it stands,
+   and a "Fix pass, 2026-10-12" section at the top of each says what was done and how it
+   was checked (tests, then a live pass on a scratch copy of the database with Claude off
+   and no email; the copy was dropped).
+   - **Fixed:** v1 H1 (invented congressional trades shown as real) and H3 (the next
+     person on a browser sees the last user's data), every v1 Medium, v2 H1 (parallel
+     requests corrupt the engine's price cache) and every v2 Medium and Low.
+   - **Still open, each for a reason the v1 report gives:** H2 (the congressional data
+     stops at 2026-06-29 until `CONGRESS_TRADES_URL` is in `.env`), and parts of six Lows:
+     the landing page's mock figures, deleting an account or changing its email, GDELT not
+     yet seen working, Renaissance listed under Jim Simons, `npm audit fix` not run, and
+     stored 13F filings that still count options as shares until they are read again.
+   - **His answers at the start** *(2026-10-12)*: the 12 sample rows stay in the dev
+     database (code fix only); a scratch server and engine could be started for the check;
+     all the groups in one go. Of the Lows that are features, only "quantity and cost shown
+     and editable" was built.
 7. **Two decisions waiting on Annas** *(asked on 2026-10-11, not answered)*:
    - **News answers as rows or as sentences.** After the answer shapes, four of the 22
      news-type answers set their headlines out one to a line ("headline · outlet ·
@@ -365,8 +396,9 @@ Finnhub work below was started at his word the same day and is built, not yet ru
      back into sentences (a stronger line in the prompt and four questions run again,
      about $0.01).
    - **Whether the two QA reports go to GitHub.** They were left out of pull request #19:
-     they list faults that are not fixed, H3 among them, and a file pushed to the shared
-     repo stays in its history.
+     they listed faults that were not fixed, H3 among them, and a file pushed to the shared
+     repo stays in its history. *(2026-10-12: nearly all of it is fixed on
+     `qa-fixes-v1.17`, and the reports say so; the question stands.)*
 
 Unchanged: **retention stays off**; nothing new goes on `/mcp` or `/v1` (every new tool is
 Ask only); hosting choices wait until there is a deployment to make.
