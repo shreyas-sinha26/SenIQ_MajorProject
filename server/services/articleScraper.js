@@ -20,6 +20,19 @@ function stripHtml(html) {
     .trim();
 }
 
+// Why a fetched reply cannot be read as an article, or null when it can: its declared type
+// is not a page of text, or (with no type declared) its bytes are not text. Pure.
+const TEXT_TYPES = /^(text\/html|application\/xhtml\+xml|text\/plain)\b/i;
+function notAnArticle(contentType, body) {
+  const type = String(contentType || '').split(';')[0].trim();
+  if (type && !TEXT_TYPES.test(type)) return `that link is a ${type} file, not an article`;
+  const sample = String(body || '').slice(0, 2000);
+  // Bytes that are not text decode to the replacement character and to control characters.
+  const junk = (sample.match(/[\uFFFD\u0000-\u0008\u000E-\u001F]/g) || []).length;
+  if (sample.length && junk / sample.length > 0.05) return 'that link is not a page of text';
+  return null;
+}
+
 // The URL comes from a user, so it goes through safeFetch: public addresses only, checked
 // again on every redirect, and a capped body.
 async function scrapeArticle(url) {
@@ -32,6 +45,10 @@ async function scrapeArticle(url) {
   });
 
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  // A link to a picture, a PDF or a download is not an article: its bytes used to be read
+  // as text, summarised and matched to tickers.
+  const problem = notAnArticle(res.headers && res.headers.get ? res.headers.get('content-type') : '', res.text);
+  if (problem) throw new Error(problem);
 
   const html = res.text;
 
@@ -55,4 +72,4 @@ async function scrapeArticle(url) {
   return { title, text: truncated, metaDesc };
 }
 
-module.exports = { isUrl, scrapeArticle };
+module.exports = { isUrl, scrapeArticle, notAnArticle };

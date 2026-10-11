@@ -187,6 +187,52 @@ check('deterministicAnswer leads with most important event', () => {
 check('deterministicAnswer with no holdings is graceful', () => {
   assert.ok(/add a few/i.test(deterministicAnswer('anything?', { portfolio: { holdings: [] } })));
 });
+// M13 of the QA pass on v1.17: every one of these used to get the same portfolio summary.
+const askCtx = {
+  portfolio: { holdings: [
+    { ticker: 'NVDA', name: 'NVIDIA', exposure_pct: 40, sentiment_label: 'positive', sentiment_acute: 0.62 },
+    { ticker: 'BTC', name: 'Bitcoin', exposure_pct: 35, sentiment_label: 'neutral', sentiment_acute: null },
+    { ticker: 'MSFT', name: 'Microsoft', exposure_pct: 25, sentiment_label: 'negative', sentiment_acute: 0.31 },
+  ] },
+  most_important: { title: 'Chip export rules tighten', exposure_pct: 40, direction: 'negative', impact_score: 0.3 },
+  smart_money: { congress: [{ politician: 'Jane Doe', action: 'sell', ticker: 'NVDA', date: '2026-06-01' }], institutions: [{ name: 'Citadel Advisors', ticker: 'NVDA', change: 'reduced' }] },
+};
+const quotes = { NVDA: { price: 131.5, currency: 'USD', change_pct: 2.38, asset_class: 'equity' }, BTC: { price: 64000, currency: 'USD', change_pct: -1.2, asset_class: 'crypto' }, MSFT: { price: null } };
+const summary = deterministicAnswer('how is my portfolio?', askCtx);
+check('the code-written answer: a held name asked about gets its own figures, not the summary', () => {
+  const a = deterministicAnswer('How is Microsoft doing?', askCtx, { mentioned: ['MSFT'], quotes });
+  assert.strictEqual(a, 'Microsoft (MSFT): no live price right now; 25% of your portfolio; news reads negative (score 31 of 100).');
+  const b = deterministicAnswer('price of bitcoin', askCtx, { mentioned: ['BTC'], quotes });
+  assert.strictEqual(b, 'Bitcoin (BTC): price $64,000.00, down 1.20% over the last 24 hours; 35% of your portfolio; no scored news on it lately.');
+  assert.ok(![a, b].includes(summary) && !/Chip export/.test(a));
+});
+check('the code-written answer: asked whether to sell, it says it does not advise, then what is on record', () => {
+  const a = deterministicAnswer('Should I sell my Nvidia shares?', askCtx, { mentioned: ['NVDA'], quotes });
+  assert.ok(a.startsWith('SenIQ does not say whether to buy, sell or hold. What is on record: NVIDIA (NVDA): price $131.50, up 2.38% in its last session; 40% of your portfolio; news reads positive (score 62 of 100).'), a);
+  assert.ok(/does not say whether to buy/.test(deterministicAnswer('What should I buy next?', askCtx)));
+});
+check('the code-written answer: a SenIQ term is explained; a question SenIQ does not cover is told so', () => {
+  assert.ok(/how unusual a holding's news sentiment is against its own last 90 days/.test(deterministicAnswer('What is a z-score?', askCtx)));
+  assert.ok(/from 0 \(all negative\) to 100 \(all positive\)/.test(deterministicAnswer('how is the sentiment score calculated?', askCtx)));
+  const poem = deterministicAnswer('Write me a poem about cats', askCtx);
+  assert.ok(/outside what SenIQ can answer/.test(poem) && !/NVDA|Chip export/.test(poem));
+});
+check('the code-written answer: a question for the Congress page gets the disclosures on record', () => {
+  const a = deterministicAnswer('What did Nancy Pelosi buy?', askCtx);
+  assert.ok(/Congressional trades in your holdings, newest first: Jane Doe sell NVDA \(traded 2026-06-01\)/.test(a) && /Citadel Advisors reduced NVDA/.test(a) && /Congress pages list every fund and every disclosure/.test(a), a);
+  assert.ok(!/Pelosi/.test(a)); // it names only what is on record
+  const none = deterministicAnswer('any congress trades?', { ...askCtx, smart_money: {} });
+  assert.ok(/No congressional trades, fund changes or Indian deals are on record for your holdings/.test(none));
+});
+check('the code-written answer: no line tells the user to turn on something they cannot', () => {
+  for (const q of ['how is my portfolio?', 'what is my biggest risk?', 'why is my portfolio down?', 'What is a z-score?'])
+    assert.ok(!/turn on the AI writer/i.test(deterministicAnswer(q, askCtx)), q);
+});
+check('the code-written answer: a market-wide story\'s reach is worded as weighted, not as a share', () => {
+  const wide = { ...askCtx, most_important: { title: 'Hardware wallet flaw', exposure_pct: 31.6, direction: 'negative', impact_score: 0.2, market_wide: true } };
+  assert.ok(/"Hardware wallet flaw" — market-wide, weighted reach 31\.6%, negative/.test(deterministicAnswer('how is my portfolio?', wide)));
+  assert.ok(/"Chip export rules tighten" — 40% of your exposure, negative/.test(summary));
+});
 
 // The Claude path end to end, with the model's reply stood in: the reply is the one Claude
 // Haiku 4.5 gave on 2026-10-10 (the word HEADLINE on its own line, and "$25.9B" made out of

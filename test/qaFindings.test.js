@@ -259,6 +259,27 @@ check('a filed US issue with only an expected listing day shows it as expected, 
   assert.deepStrictEqual(page.ipoUsDate({ stage: 'listed', first_trade_date: '2026-10-02', listing_date: '2026-10-01' }), ['2026-10-02', '']);
 });
 
+section('v1 M8 / M9 — the headline analyzer:');
+check('a link to a picture or a download is refused; a page of text is read', () => {
+  const { notAnArticle } = require('../server/services/articleScraper');
+  assert.strictEqual(notAnArticle('image/png', '\uFFFDPNG\r\n'), 'that link is a image/png file, not an article');
+  assert.strictEqual(notAnArticle('application/pdf', '%PDF-1.7'), 'that link is a application/pdf file, not an article');
+  assert.strictEqual(notAnArticle('text/html; charset=utf-8', '<html><title>Nvidia beats</title></html>'), null);
+  assert.strictEqual(notAnArticle('application/xhtml+xml', '<html/>'), null);
+  assert.strictEqual(notAnArticle('', '<html><body>Plain page with no type header</body></html>'), null);
+  assert.strictEqual(notAnArticle('', '\uFFFD\uFFFD\u0000\u0001'.repeat(50)), 'that link is not a page of text');
+});
+check('a headline is matched by the news pipeline\'s resolver: "Plan V is ready" is not Visa', () => {
+  const { buildResolver } = require('../server/services/entityResolver');
+  const r = buildResolver([{ ticker: 'V', name: 'Visa', aliases: [], sector: 'Financials', asset_class: 'equity' },
+    { ticker: 'NVDA', name: 'NVIDIA', aliases: ['Nvidia'], sector: 'Technology', asset_class: 'equity' }], []);
+  assert.deepStrictEqual(r.resolve('Plan V is ready', '').tickers.filter((t) => t !== '__MARKET__'), []);
+  assert.deepStrictEqual(r.resolve('Nvidia beats estimates as Visa lags', '').tickers.filter((t) => t !== '__MARKET__').sort(), ['NVDA', 'V']);
+  // And the analyzer route is wired to it.
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '../server/routes/news.js'), 'utf8');
+  assert.ok(/resolveEntities\(articleTitle \|\| inputText/.test(src));
+});
+
 (async () => {
   for (const step of pending) await step();
   console.log(`\n${passed} QA-finding checks passed`);

@@ -21,6 +21,7 @@
  */
 
 const { REPORTS, DISCLAIMER } = require('../config');
+const { reachText } = require('./answerText');
 
 const DIR_WORD = { positive: 'positive', negative: 'negative', neutral: 'mixed' };
 
@@ -29,7 +30,7 @@ function deterministicHeadline(packet) {
   const m = packet.most_important;
   if (!m) return 'A quiet day across your holdings — nothing material to flag.';
   const dir = DIR_WORD[m.direction] || 'mixed';
-  return `${m.title} — ${m.exposure_pct}% of your exposure, ${dir}.`;
+  return `${m.title} — ${reachText(m)}, ${dir}.`;
 }
 
 function deterministicNarrative(packet) {
@@ -38,14 +39,14 @@ function deterministicNarrative(packet) {
   const m = packet.most_important;
 
   if (m) {
-    lines.push(`Today's most important event for your portfolio is "${m.title}" — it touches ${m.exposure_pct}% of your exposure and reads ${DIR_WORD[m.direction] || 'mixed'} (impact ${m.impact_score}).`);
+    lines.push(`Today's most important event for your portfolio is "${m.title}" — ${m.market_wide ? `it is ${reachText(m)},` : `it touches ${reachText(m)}`} and reads ${DIR_WORD[m.direction] || 'mixed'} (impact ${m.impact_score}).`);
   } else {
     lines.push('No event cleared the materiality bar for your holdings today.');
   }
 
   if (ch.has_prior) {
     if (ch.new_events && ch.new_events.length) {
-      lines.push(`New since yesterday: ${ch.new_events.slice(0, 3).map((e) => `"${e.title}" (${e.exposure_pct}% exposure)`).join('; ')}.`);
+      lines.push(`New since yesterday: ${ch.new_events.slice(0, 3).map((e) => `"${e.title}" (${e.market_wide ? reachText(e) : `${e.exposure_pct}% exposure`})`).join('; ')}.`);
     }
     if (ch.sentiment_swings && ch.sentiment_swings.length) {
       lines.push(`Sentiment shifted on ${ch.sentiment_swings.slice(0, 3).map((s) => `${s.ticker} (${s.from_label}→${s.to_label})`).join(', ')}.`);
@@ -59,7 +60,7 @@ function deterministicNarrative(packet) {
 
   const others = (packet.top_events || []).slice(1, 4);
   if (others.length) {
-    lines.push(`Also on the radar: ${others.map((e) => `"${e.title}" (${e.exposure_pct}%)`).join('; ')}.`);
+    lines.push(`Also on the radar: ${others.map((e) => `"${e.title}" (${e.market_wide ? reachText(e) : `${e.exposure_pct}%`})`).join('; ')}.`);
   }
 
   const sm = packet.smart_money || {};

@@ -33,7 +33,7 @@ function buildDiff(today, prev) {
 
   const new_events = todayEvents
     .filter((e) => !prevById.has(e.event_id))
-    .map((e) => ({ event_id: e.event_id, title: e.title, impact_score: e.impact_score, exposure_pct: e.exposure_pct, direction: e.direction }));
+    .map((e) => ({ event_id: e.event_id, title: e.title, impact_score: e.impact_score, exposure_pct: e.exposure_pct, direction: e.direction, ...(e.market_wide ? { market_wide: true } : {}) }));
 
   const dropped_events = prevEvents
     .filter((e) => !todayById.has(e.event_id))
@@ -68,6 +68,10 @@ function buildDiff(today, prev) {
 
   return { has_prior: !!prev, new_events, dropped_events, rank_changes, sentiment_swings };
 }
+
+// A market-wide story reaches holdings through their market, not by naming them; the packet
+// says so, so that its exposure figure is worded as a weighted reach (answerText.reachText).
+const isMarketWide = (e) => ['market', 'world'].includes(e && e.relevance_tier);
 
 function clamp(text, n = REPORTS.MAX_NEWS_CHARS) {
   if (!text) return '';
@@ -198,6 +202,7 @@ async function buildGroundingPacket(userId, prevPacket = null, now = new Date())
     impact_score: round(Number(e.impact_score)),
     exposure_pct: round(Number(e.exposure_pct), 1),
     direction: e.direction,
+    ...(isMarketWide(e) ? { market_wide: true } : {}),
     source: e.source,
     last_seen: e.published_at,
   }));
@@ -233,6 +238,7 @@ async function buildQAContext(userId, raw = null) {
     impact_score: round(Number(e.impact_score)),
     exposure_pct: round(Number(e.exposure_pct), 1),
     direction: e.direction,
+    ...(isMarketWide(e) ? { market_wide: true } : {}),
     last_seen: e.published_at,
   }));
   const holdings = await topHoldings(userId, QA.MAX_HOLDINGS, raw);
@@ -248,4 +254,4 @@ async function buildQAContext(userId, raw = null) {
   };
 }
 
-module.exports = { smartMoneyContext, indiaSmartMoneyContext, buildGroundingPacket, buildQAContext, buildDiff, clamp, topHoldings };
+module.exports = { smartMoneyContext, indiaSmartMoneyContext, buildGroundingPacket, buildQAContext, buildDiff, clamp, topHoldings, isMarketWide };

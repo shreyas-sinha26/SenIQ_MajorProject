@@ -43,7 +43,9 @@ const { QA, REPORTS, FEATURES } = require('../config');
 const { buildQAContext } = require('./grounding');
 const { guardCheck, estimateCost } = require('./reports');
 const { TOOLS, EXECUTORS, runTool, scopeCheck, outOfScopeAnswer, findMentionedTickers } = require('./qaTools');
-const { outsideAnswer } = require('./stockSnapshot');
+const { outsideAnswer, asksForAdvice, priceText } = require('./stockSnapshot');
+const pages = require('./pageTools');
+const { reachText } = require('./answerText');
 const { STRATEGY_TOOLS, STRATEGY_EXECUTORS, STRATEGY_PROMPT, CLOSING_TOOLS: STRATEGY_CLOSING_TOOLS } = require('./strategyTools');
 const { IPO_TOOLS, IPO_EXECUTORS, IPO_PROMPT, isIpoQuestion, ipoFallbackAnswer } = require('./ipoTools');
 const { checkGrounding } = require('./answerCheck');
@@ -82,24 +84,125 @@ function sanitizeHistory(raw) {
 
 const DIR_WORD = { positive: 'positive', negative: 'negative', neutral: 'mixed' };
 
+// ── The answer written by code, when no model can write one ──
+// It used to answer every question with the same portfolio summary: "Should I sell my Nvidia
+// shares?", "What is a z-score?" and "Write me a poem about cats" all got the largest
+// exposures. Now the question is read for what it is about, in this order: a SenIQ term to
+// explain, holdings named in it, a question for the smart-money pages, something SenIQ does
+// not cover, and only then the portfolio-wide summaries.
+
+const ADVICE_LINE = 'SenIQ does not say whether to buy, sell or hold.';
+const OFF_TOPIC = 'That is outside what SenIQ can answer. It reads your portfolio: the holdings, the news and sentiment on them, your alerts, smart-money disclosures and IPO Watch. Ask about one of those.';
+
+// SenIQ's own terms, as the Analytics page explains them.
+const DEFINITION_ASKED = /\b(what(?:'s| is| are| does)|define|explain|meaning of|how (?:is|are) .{0,40}(?:calculated|computed|worked out|scored))\b/i;
+const GLOSSARY = [
+  [/\bz[-\s]?scores?\b/i, 'A z-score says how unusual a holding\'s news sentiment is against its own last 90 days. Around 0 is its normal; about +2 or -2 is a real surprise for it. It compares a stock with itself, not with other stocks, and shows n/a until enough history has built up.'],
+  [/\bsentiment\b/i, 'The sentiment score is how the recent news on a holding reads, from 0 (all negative) to 100 (all positive): above 60 counts as positive, below 40 as negative, in between as neutral. Newer articles, more credible sources and clearer readings count for more. It describes the coverage; it is not a forecast of price.'],
+  [/\bimpact\b/i, 'The impact score ranks a story by how much it matters to your portfolio: how important the story is, and how much of your portfolio it reaches. The first story in the feed is the one that matters most for you now.'],
+  [/\bexposure\b/i, 'Exposure is the share of your portfolio a holding makes up, or the share a story touches. A holding with no quantity or no price is counted at the average size of the others and marked as an estimate.'],
+];
+// What a code-written answer can speak to. A question with none of it is told so.
+const SENIQ_TOPICS = /\b(portfolio|holdings?|stocks?|shares?|positions?|exposure|exposed|risk\w*|sentiment|news|headlines?|stor(?:y|ies)|events?|alerts?|brief|prices?|market|sectors?|impact|own|hold|invest\w*|gain\w*|loss\w*|losing|winning|up|down|drop\w*|fall\w*|lower|red|mov\w*|improv\w*|recover\w*|better|worse|biggest|largest|worst|best|safe|worried|important|happen\w*)\b/i;
+const PORTFOLIO_WIDE = /\b(portfolio|holdings|all (?:of )?my|overall|everything)\b/i;
+// A person's name (two capitalised words) beside what they did with a stock.
+const PERSON_TRADES = /\b[A-Z][a-z]+ [A-Z][a-z]+\b.*\b(buy\w*|bought|sell\w*|sold|trad\w+|own\w*|hold\w*)\b/;
+
 /**
- * Best-effort grounded answer with no LLM — a data digest assembled from the context.
- * Pure. Addresses the common intents (risk / down / improving) by ranking holdings, and
- * always leads with the most important event. Clearly not a reasoned answer; cites numbers.
+ * A politician named in full in the question, answered from the Congress page's own read
+ * when no model can write: their trades on record, counted and listed. Only a full name as
+ * disclosed is matched (a surname alone is how one politician was answered with another's
+ * trades). null when the question names nobody on record.
  */
-function deterministicAnswer(question, ctx) {
+async function namedPoliticianAnswer(question, ctx) {
+  const { query } = require('../db');
+  const flat = (text) => ` ${String(text || '').toLowerCase().replace(/[^a-z]+/g, ' ').trim()} `;
+  const asked = flat(question);
+  const people = await query('SELECT DISTINCT politician FROM congress_trades');
+  const hit = people.map((p) => p.politician).find((name) => flat(name).trim().includes(' ') && asked.includes(flat(name)));
+  if (!hit) return null;
+  const r = await pages.politicianTrades({ politician: hit }, ctx);
+  if (!r || r.error || r.matches) return null;
+  const rows = (r.trades || []).map((t) => `${t.action} ${t.ticker || t.asset || 'an asset'}${t.amount ? ` ${t.amount}` : ''}, traded ${t.traded}`);
+  return [
+    `${r.politician}: ${r.summary}${r.newest_disclosure ? `, newest disclosure ${r.newest_disclosure}` : ''}.`,
+    rows.length ? `${rows.join('; ')}.` : '',
+    r.not_shown ? `${r.not_shown} more on the Congress page.` : '',
+    r.sample_data ? 'These are sample rows, not real disclosures.' : 'A trade is disclosed up to 45 days after it is made.',
+  ].filter(Boolean).join(' ');
+}
+
+// One holding, as the pages show it: its price and last move, its share, how its news reads.
+function holdingLine(h, quote) {
+  const who = h.name && h.name !== h.ticker ? `${h.name} (${h.ticker})` : h.ticker;
+  const parts = [];
+  if (quote && quote.price != null) {
+    const c = quote.change_pct;
+    const span = quote.asset_class === 'crypto' ? 'over the last 24 hours' : 'in its last session';
+    parts.push(`price ${priceText(quote.price, quote.currency)}${c == null ? '' : c === 0 ? `, unchanged ${span}` : `, ${c > 0 ? 'up' : 'down'} ${Math.abs(c).toFixed(2)}% ${span}`}`);
+  } else {
+    parts.push('no live price right now');
+  }
+  if (h.exposure_pct != null) parts.push(`${h.exposure_pct}% of your portfolio`);
+  parts.push(h.sentiment_acute == null
+    ? 'no scored news on it lately'
+    : `news reads ${h.sentiment_label} (score ${Math.round(h.sentiment_acute * 100)} of 100)`);
+  return `${who}: ${parts.join('; ')}.`;
+}
+
+// The smart-money rows already in the packet, for a question that is for those pages.
+function smartMoneyLines(sm = {}) {
+  const lines = [];
+  const congress = sm.congress || [];
+  const funds = sm.institutions || [];
+  if (congress.length) lines.push(`Congressional trades in your holdings, newest first: ${congress.map((c) => `${c.politician} ${c.action} ${c.ticker} (traded ${c.date})`).join('; ')}.${sm.congress_sample_data ? ' These are sample rows, not real disclosures.' : ''}`);
+  if (funds.length) lines.push(`Tracked funds, latest filing: ${funds.map((f) => `${f.name} ${f.change} ${f.ticker}`).join('; ')}.`);
+  if ((sm.india_deals || []).length) lines.push(`Bulk and block deals in your Indian holdings: ${sm.india_deals.map((d) => `${d.client} ${d.action} ${d.ticker} (${d.date})`).join('; ')}.`);
+  if ((sm.india_insiders || []).length) lines.push(`Insider trades in your Indian holdings: ${sm.india_insiders.map((t) => `${t.person} ${t.action} ${t.ticker} (disclosed ${t.disclosed})`).join('; ')}.`);
+  if (!lines.length) lines.push('No congressional trades, fund changes or Indian deals are on record for your holdings.');
+  lines.push('This covers your own holdings only. The Institutions and Congress pages list every fund and every disclosure, and can be searched by name.');
+  return lines;
+}
+
+/**
+ * Best-effort grounded answer with no LLM, assembled from the context. Pure. It reads what
+ * the question is about (see above) and answers that; it cites numbers and reasons nothing.
+ *   mentioned — the held tickers the question names (findMentionedTickers ∩ holdings)
+ *   quotes    — { TICKER: { price, currency, change_pct, asset_class } } for those lines
+ */
+function deterministicAnswer(question, ctx, { mentioned = [], quotes = {} } = {}) {
   const holdings = (ctx.portfolio && ctx.portfolio.holdings) || [];
   if (!holdings.length) return "I don't have any holdings on file for you yet — add a few and ask again.";
 
   const q = (question || '').toLowerCase();
+  const advice = asksForAdvice(question);
+
+  // A SenIQ term asked about, with no holding named: its definition.
+  const named = mentioned.map((t) => holdings.find((h) => h.ticker === t)).filter(Boolean).slice(0, QA.SNAPSHOT_MAX_NAMES);
+  if (!named.length && DEFINITION_ASKED.test(q)) {
+    const term = GLOSSARY.find(([re]) => re.test(q));
+    if (term) return term[1];
+  }
+  // Holdings named, and not a question about the whole portfolio: their own figures.
+  if (named.length && !PORTFOLIO_WIDE.test(q)) {
+    const lines = named.map((h) => holdingLine(h, quotes[h.ticker]));
+    return (advice ? `${ADVICE_LINE} What is on record: ` : '') + lines.join(' ');
+  }
+  // A question for the smart-money pages: one that names them, or asks what a named person
+  // bought, sold or holds ("What did Nancy Pelosi buy?").
+  if (pages.isPageQuestion(question) || PERSON_TRADES.test(String(question || ''))) return smartMoneyLines(ctx.smart_money).join(' ');
+  // Nothing SenIQ covers.
+  if (!advice && !SENIQ_TOPICS.test(q)) return OFF_TOPIC;
+
   const byExposure = holdings.slice().sort((a, b) => (b.exposure_pct ?? 0) - (a.exposure_pct ?? 0));
   const negatives = holdings.filter((h) => h.sentiment_label === 'negative').sort((a, b) => (b.exposure_pct ?? 0) - (a.exposure_pct ?? 0));
   const positives = holdings.filter((h) => h.sentiment_label === 'positive').sort((a, b) => (b.exposure_pct ?? 0) - (a.exposure_pct ?? 0));
   const attr = ctx.attribution;
 
   const lines = [];
+  if (advice) lines.push(`${ADVICE_LINE} What is on record:`);
   const m = ctx.most_important;
-  if (m) lines.push(`Most important right now: "${m.title}" — ${m.exposure_pct}% of your exposure, ${DIR_WORD[m.direction] || 'mixed'} (impact ${m.impact_score}).`);
+  if (m) lines.push(`Most important right now: "${m.title}" — ${reachText(m)}, ${DIR_WORD[m.direction] || 'mixed'} (impact ${m.impact_score}).`);
 
   if (/risk|exposed|exposure|worried|safe/.test(q)) {
     const risk = negatives.length ? negatives : byExposure;
@@ -107,7 +210,8 @@ function deterministicAnswer(question, ctx) {
   } else if (/down|drop|fall|lower|red|losing|bad/.test(q)) {
     if (attr && attr.portfolio_change_pct != null) {
       const drags = attr.contributions.filter((c) => c.contribution_pct < 0).slice(0, 3);
-      lines.push(`Today your priced holdings moved ${attr.portfolio_change_pct}%.` + (drags.length
+      // Each holding's move is its last session's (24 hours for a coin): "today" was wrong on a weekend.
+      lines.push(`Over their last session your priced holdings moved ${attr.portfolio_change_pct}%.` + (drags.length
         ? ` Biggest drags: ${drags.map((c) => `${c.ticker} (${c.change_pct}% × ${c.priced_weight_pct}% of priced holdings = ${c.contribution_pct} pts)`).join(', ')}.`
         : ' Nothing was a meaningful drag.'));
     }
@@ -122,7 +226,8 @@ function deterministicAnswer(question, ctx) {
     lines.push(`Your largest exposures: ${byExposure.slice(0, 4).map((h) => `${h.ticker} (${h.exposure_pct}%, ${h.sentiment_label})`).join(', ')}.`);
   }
 
-  lines.push('(Auto-generated from your data — turn on the AI writer for a fuller answer.)');
+  // No "turn on the AI writer" line: a user cannot, and the page already marks the answer
+  // as written by code from their data.
   return lines.join(' ');
 }
 
@@ -486,7 +591,7 @@ async function answerQuestion(userId, rawQuestion, rawHistory = [], { client, da
   }
   // An IPO question with no model to answer it gets the calendar as a digest: the user's
   // own data packet below says nothing about public issues.
-  if (writer === 'deterministic' && ipoQuestion) answer = await ipoFallbackAnswer();
+  if (writer === 'deterministic' && ipoQuestion) answer = await ipoFallbackAnswer(question);
   if (writer === 'deterministic' && !answer) {
     const qaCtx = await buildQAContext(userId, holdings);
     if (FEATURES.ASK_OLLAMA && holdings.length) {
@@ -499,7 +604,13 @@ async function answerQuestion(userId, rawQuestion, rawHistory = [], { client, da
         console.error('QA Ollama fallback failed, using the data summary:', err.message);
       }
     }
-    if (writer === 'deterministic') answer = deterministicAnswer(question, qaCtx);
+    if (writer === 'deterministic') {
+      answer = await namedPoliticianAnswer(question, ctx).catch((err) => { console.error('Ask politician read failed:', err.message); return null; });
+    }
+    if (writer === 'deterministic' && !answer) {
+      const quotes = Object.fromEntries(holdings.map((h) => [h.ticker, { price: h.price, currency: h.currency, change_pct: h.change_pct, asset_class: h.asset_class }]));
+      answer = deterministicAnswer(question, qaCtx, { mentioned: findMentionedTickers(question, universe).filter((t) => ctx.heldSet.has(t)), quotes });
+    }
   }
 
   // ── Grounding audit (model-written answers only; measured, never blocking) ──

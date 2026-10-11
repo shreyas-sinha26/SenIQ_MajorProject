@@ -258,29 +258,58 @@ const MARKET_HEADS = { IN: 'India', US: 'US' };
 const digestRow = (i) => [i.name, i.market === 'IN' ? i.board : null, i.dates, i.price, i.size].filter(Boolean).join(' · ');
 
 /**
- * The no-model answer to an IPO question, from a get_ipo_calendar result: for each market what
- * is open or coming up, one issue to a line, then the orderings. A data digest, not a reasoned
- * answer. Pure.
+ * What a question asks of the calendar, read without a model: which market, and whether it
+ * is about what is open now, about the grey market premium, about subscription, or asks
+ * whether to apply. With the model off every IPO question used to get the one digest, India
+ * first: "Which IPO has the highest GMP?" and "Tell me about the upcoming IPOs in the US"
+ * were answered word for word alike. Pure.
  */
-function ipoDigest(cal) {
+function ipoAsk(question) {
+  const q = String(question || '');
+  const us = /\b(US|U\.S\.|USA|America\w*|United States|Nasdaq|NYSE|Wall Street)\b/.test(q);
+  const india = /\b(india\w*|NSE|BSE|SME|mainboard|grey[- ]market|gmp|sensex|nifty)\b/i.test(q);
+  return {
+    market: us && !india ? 'US' : india && !us ? 'IN' : null,
+    open: /\b(open|opened|bid(?:ding)?|apply(?:ing)? (?:now|today)|right now|currently)\b/i.test(q),
+    gmp: /\b(gmp|grey[- ]market|premium)\b/i.test(q),
+    subscription: /\b(subscri\w+|oversubscri\w+|demand)\b/i.test(q),
+    advice: /\b(worth|should|shall|good|promising|best|recommend\w*|safe|risky|apply for|invest in)\b/i.test(q),
+  };
+}
+
+/**
+ * The no-model answer to an IPO question, from a get_ipo_calendar result: for each market what
+ * is open or coming up, one issue to a line, then the orderings. `ask` (ipoAsk) puts first
+ * what the question was about: that SenIQ does not advise on applying, that nothing is open,
+ * the ordering asked for. A data digest, not a reasoned answer. Pure.
+ */
+function ipoDigest(cal, ask = {}) {
   const lines = [];
+  if (ask.advice) lines.push('SenIQ does not rate issues or say whether to apply for one. What is on record:');
+  const o = cal.orderings || {};
+  // The figure the question asked about leads; it is not repeated in the comparison below.
+  const led = new Set();
+  if (ask.gmp) { lines.push(o.by_gmp_pct ? `Grey market premium, highest first: ${o.by_gmp_pct}. It is an unofficial figure, not a forecast.` : 'No grey market premium is on record for any issue right now.'); led.add('gmp'); }
+  if (ask.subscription) { lines.push(o.by_subscription ? `Most subscribed: ${o.by_subscription}.` : 'No subscription figure is on record for any issue right now.'); led.add('subscription'); }
   for (const m of cal.markets) {
     const c = cal.counts[m] || {};
     const ahead = AHEAD.filter((s) => c[s]).map((s) => `${c[s]} ${s}`);
-    lines.push(`${MARKET_HEADS[m] || m}: ${ahead.length ? ahead.join(', ') : 'nothing open or coming up'} (calendar refreshed ${shortDay(cal.refreshed[m], cal.as_of) || 'never'}).`);
+    // Asked what is open: say outright when nothing is, before listing what is coming.
+    const noneOpen = ask.open && !c.open ? ' No issue is open for bidding right now.' : '';
+    lines.push(`${MARKET_HEADS[m] || m}: ${ahead.length ? ahead.join(', ') : 'nothing open or coming up'} (calendar refreshed ${shortDay(cal.refreshed[m], cal.as_of) || 'never'}).${noneOpen}`);
     for (const i of cal.issues.filter((x) => x.market === m)) lines.push(digestRow(i));
   }
   if (cal.not_shown) lines.push(cal.not_shown.replace(/;.*$/, '.'));
-  const o = cal.orderings || {};
   const first = (ordering) => ordering.split('; ')[0].replace(/^1\. /, '');   // the rows above already list the rest
   const compare = [
-    o.by_subscription && `Most subscribed: ${o.by_subscription}.`,
-    o.by_gmp_pct && `Grey market premium: ${o.by_gmp_pct}.`,
+    !led.has('subscription') && o.by_subscription && `Most subscribed: ${o.by_subscription}.`,
+    !led.has('gmp') && o.by_gmp_pct && `Grey market premium: ${o.by_gmp_pct}.`,
     o.by_size_india && `Largest in India: ${first(o.by_size_india)}.`,
     o.by_size_us && `Largest in the US: ${first(o.by_size_us)}.`,
   ].filter(Boolean);
   if (compare.length) lines.push('', ...compare);
-  lines.push('', '(Auto-generated from IPO Watch — turn on the AI writer for a fuller answer.) Educational only, not investment advice.');
+  // No "turn on the AI writer" line, and no notice of its own: a user cannot turn it on, and
+  // the page already marks the answer as written by code and as informational.
   return lines.join('\n');
 }
 
@@ -411,8 +440,9 @@ const IPO_EXECUTORS = {
 
 // The answer when no model is available: the calendar as a digest. null when the calendar
 // cannot be read, and the caller falls back to its portfolio summary.
-async function ipoFallbackAnswer() {
-  try { return ipoDigest(await IPO_EXECUTORS.get_ipo_calendar({})); }
+async function ipoFallbackAnswer(question = '') {
+  const ask = ipoAsk(question);
+  try { return ipoDigest(await IPO_EXECUTORS.get_ipo_calendar(ask.market ? { market: ask.market } : {}), ask); }
   catch (err) { console.error('IPO Watch digest failed:', err.message); return null; }
 }
 
@@ -433,6 +463,6 @@ IPO Watch (this account has the IPO Watch section):
 
 module.exports = {
   IPO_TOOLS, IPO_EXECUTORS, IPO_PROMPT, MARKETS, BOARDS, STAGES,
-  isIpoQuestion, issueCard, orderIssues, orderings, stageCounts, fitIssues, matchIssues, newsBlock, ipoDigest, ipoFallbackAnswer,
+  isIpoQuestion, issueCard, orderIssues, orderings, stageCounts, fitIssues, matchIssues, newsBlock, ipoDigest, ipoAsk, ipoFallbackAnswer,
   CALENDAR_SHAPE, DETAIL_SHAPE, shortDay, daySpan, datesText, staleLine,
 };
