@@ -388,6 +388,34 @@ Finnhub work below was started at his word the same day and is built, not yet ru
      database (code fix only); a scratch server and engine could be started for the check;
      all the groups in one go. Of the Lows that are features, only "quantity and cost shown
      and editable" was built.
+   - **The closing pass, later on 2026-10-12, on the same branch.** Annas answered each
+     open item, and all but two are now closed (the v1 report's "Closing pass" section has
+     the table and how it was checked; `npm test` is 36 files, 930 checks):
+     - **H2:** `CONGRESS_TRADES_URL` is in the local `.env` (FMP, Senate and House). One
+       server start on the dev database, with Claude and email off, stored 159 real
+       trades; the newest disclosure is 2026-10-08. A free FMP key gives only the newest
+       100 rows a chamber, so 30 Jun to 31 Aug (Senate) and to 24 Sep (House) were not
+       fetched. The source is asked every 3 hours (`CONGRESS_FETCH_MINUTES`) and a
+       disclosure over 7 days old when first seen raises no alert (`CONGRESS_ALERT_DAYS`).
+     - **Sign-up is confirmed by email** (his choice over leaving "Email already
+       registered"). With an email provider: `POST /api/auth/signup` answers 202 with no
+       session, the same for a known address; the account cannot be signed in to until its
+       link is opened (`users.confirm_required`, migration `0047`). Accounts that existed
+       before are left alone (his choice). With no provider it works as before.
+     - **An account can change its address and delete itself** (profile page;
+       `POST /api/auth/change-email`, `GET /api/auth/confirm-email-change`,
+       `POST /api/auth/delete-account`).
+     - **`/terms` and `/privacy` are pages** (`server/pages/`, `services/legalPages.js`;
+       `CONTACT_EMAIL` is the address they give, else `EMAIL_FROM`'s). He asked for
+       finished text, not placeholders; it was written here, not by a lawyer. The landing
+       page says its figures are sample data.
+     - **Renaissance is listed under Peter Brown** (migration `0046`).
+     - **The 48 stored 13F filings were read again** (`scripts/reread_13f.js`, §9).
+     - **Still open: GDELT** (the gap now runs from each answer; GDELT refused this
+       machine most of the time and answered two queries with nothing), **and 22 of the 25
+       `npm audit` advisories**, all in `@sentry/node` 8, which loads only with
+       `SENTRY_DSN`; the fix is `@sentry/node` 11, first released 2026-09-23. Express went
+       to 4.22.3 and node-cron to 4 (`engines` is Node 20).
 7. **Two decisions waiting on Annas** *(asked on 2026-10-11, not answered)*:
    - **News answers as rows or as sentences.** After the answer shapes, four of the 22
      news-type answers set their headlines out one to a line ("headline · outlet ·
@@ -1134,6 +1162,7 @@ Two migrations share the number `0016`. This is harmless; do not rename an appli
 | `node scripts/retag_executives.js [--write --backup <file>]` | Remove stored company tags that came only from an executive's other venture (SpaceX stories on Tesla) |
 | `node scripts/retag_roundups.js [--write --backup <file>]` | Remove stored company tags from roundup stories and re-grade them |
 | `node scripts/reread_companies.js [--tuning] [--write --backup <file>]` | Re-read stored multi-company stories per company (needs `FINBERT_CLASSIFY=1`) |
+| `node scripts/reread_13f.js [--write --backup <file>]` | Read every stored 13F filing again from EDGAR and replace its holdings (dry run without `--write`) |
 | `node scripts/sentiment_label_sheet.js <file> [--exclude <earlier.csv>] [--whole-store]` | Write a sheet of (story, company) pairs to hand-label |
 | `.venv/bin/python training/train_target_sentiment.py [--base <folder>]` | Fine-tune FinBERT on SEntFiN to read for one company (experimental; needs `training/data/SEntFiN.csv`) |
 | `node scripts/score_sentiment_labels.js <file>` | Score each way of reading against the hand labels |
@@ -1171,7 +1200,8 @@ All the write scripts are dry runs without their flag.
 | `UPSTOX_ANALYTICS_TOKEN` | empty | Unused; the launch-grade source for Indian prices |
 | `RESEND_API_KEY` | not set | Takes over from SMTP; needs a verified domain |
 | `HF_API_TOKEN`, `NEWS_EMBEDDINGS` | not set | Vector news search (also needs pgvector) |
-| `CONGRESS_TRADES_URL` | not set locally | Live congress data; without it the bundled sample is used |
+| `CONGRESS_TRADES_URL` | set locally since 2026-10-12 (FMP, Senate and House) | Live congress data; without it the bundled sample is used |
+| `CONTACT_EMAIL` | not set locally | The address `/terms` and `/privacy` give; without it, the one in `EMAIL_FROM` |
 | `GOOGLE_*`, `GITHUB_*` client id/secret | not set | OAuth buttons stay hidden until set |
 | `REDDIT_CLIENT_ID/SECRET` | not set | Reddit ingest |
 | `SENTRY_DSN`, `OLLAMA_URL`, `OLLAMA_MODEL`, `ASK_OLLAMA`, `DISCLOSURES` | not set | Error monitoring; local-model fallbacks; `DISCLOSURES=0` stops 8-K fetching |
@@ -1931,6 +1961,8 @@ Changes made by hand to the dev database on 2026-10-08, with backups in `samples
 | 5 `event_outcomes` rows for Indian tickers had a pre-fix `price_at_event` blanked | none |
 | Account 36 rebalanced; marked verified by hand | none |
 | 2 of 11 stored Tesla tags removed: stories about SpaceX and Starlink, tagged through Elon Musk (2026-10-10, `scripts/retag_executives.js --write`) | `removed-executive-tags-2026-10-10.json` |
+| The holdings of all 48 stored 13F filings replaced by a second reading that leaves option rows out: 73,898 rows became 70,142 (2026-10-12, `scripts/reread_13f.js --write`) | `13f-holdings-before-2026-10-12.json` |
+| Migrations `0046` (Renaissance's manager) and `0047` (`users.confirm_required`, `users.pending_email`); 159 congressional trades from FMP; one pipeline run with Claude and email off (2026-10-12) | none needed |
 
 `samples/` also holds a sample report PDF built from account 36, and
 `sentiment-labels-2026-10-08.csv` and `sentiment-labels-2-2026-10-08.csv`: the two
