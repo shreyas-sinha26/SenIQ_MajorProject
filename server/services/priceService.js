@@ -24,6 +24,7 @@
  */
 
 const { NON_EQUITY_ASSETS, coingeckoIdFor } = require('./assetRegistry');
+const finnhubGate = require('./finnhubGate');
 
 const PRICE_TTL_FAST = 60_000;      // CoinGecko / Finnhub — generous limits
 const PRICE_TTL_FMP = 5 * 60_000;   // FMP — protect the shared daily quota
@@ -60,15 +61,15 @@ function setCached(ticker, q, ttl) {
 }
 
 // ─── Finnhub (equities) ──────────────────────────────────────
-async function fetchFinnhub(ticker, apiKey) {
-  try {
-    const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`);
-    if (!res.ok) return null;
-    const d = await res.json();
-    // c = current price, dp = percent change. c:0 → can't price (e.g. non-US on free tier).
-    // h / l = the session's high and low (0 when Finnhub has none).
-    return d && d.c ? { price: d.c, currency: 'USD', changePct: d.dp ?? null, dayHigh: d.h || null, dayLow: d.l || null } : null;
-  } catch { return null; }
+// Through the gate (finnhubGate.js): a scheduled job's quote takes its place in the
+// background lane; a page's is sent at once, or not sent when the minute's share is used up.
+// null either way when there is no price, and the caller goes to Yahoo.
+async function fetchFinnhub(ticker) {
+  const { ok, data: d } = await finnhubGate.get('/quote', { symbol: ticker }, { purpose: 'quote' });
+  if (!ok) return null;
+  // c = current price, dp = percent change. c:0 → can't price (e.g. non-US on free tier).
+  // h / l = the session's high and low (0 when Finnhub has none).
+  return d && d.c ? { price: d.c, currency: 'USD', changePct: d.dp ?? null, dayHigh: d.h || null, dayLow: d.l || null } : null;
 }
 
 // ─── Yahoo Finance (Indian equities, commodities, FX) ────────
@@ -212,7 +213,7 @@ async function getQuotes(holdings) {
         yahooFetches.push(fetchIndian(ticker, inMarket).then((q) => { out[ticker] = q; setCached(ticker, q, PRICE_TTL_SLOW); }));
       } else if (finnhubKey) {
         finnhubFetches.push((async () => {
-          let q = await fetchFinnhub(ticker, finnhubKey);
+          let q = await fetchFinnhub(ticker);
           let ttl = PRICE_TTL_FAST;
           if (!q) { q = await fetchYahoo(ticker); ttl = PRICE_TTL_SLOW; }
           out[ticker] = q; setCached(ticker, q, ttl);

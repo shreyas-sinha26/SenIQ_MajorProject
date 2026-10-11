@@ -2228,6 +2228,8 @@ function wireIpoRows(box) {
   });
 }
 const IPO_ROW_ATTRS = 'class="ipo-row-click" tabindex="0" role="button" aria-expanded="false" title="Show the news on this issue"';
+// Every row opens, with stories or without: "none found yet" is an answer too.
+const ipoStoryCount = (i) => (i.stories ? `${i.stories} ${i.stories === 1 ? 'story' : 'stories'}` : 'No stories yet');
 
 // "Calendar last refreshed 3h ago" — and a plain warning once it is more than a day old.
 function renderIpoAge(data) {
@@ -2292,9 +2294,9 @@ async function loadIpoCalendar() {
       <table class="holdings-tbl ipo-tbl">
         <thead><tr><th>Company</th><th>Stage</th><th>Opens</th><th>Closes</th><th>Lists</th><th>Price band</th><th title="Grey market premium: unofficial, per share over the issue price">GMP</th><th title="Times the shares on offer were bid for: QIB = institutions, NII = non-institutional (HNI), Retail = individuals">Subscribed</th><th>Issue size</th></tr></thead>
         <tbody>${issues.map(i => `
-          <tr ${i.stories ? `${IPO_ROW_ATTRS} data-ipo="${i.id}"` : ''}>
+          <tr ${IPO_ROW_ATTRS} data-ipo="${i.id}">
             <td><span class="ipo-name">${escapeHtml(i.name)}</span>
-                <span class="ipo-meta">${i.board === 'sme' ? 'SME' : 'Mainboard'}${i.exchange ? ` · ${escapeHtml(i.exchange)}` : ''}${i.symbol ? ` · ${escapeHtml(i.symbol)}` : ''}${i.stories ? ` · ${i.stories} ${i.stories === 1 ? 'story' : 'stories'}` : ''}${ipoAddButton(i)}</span></td>
+                <span class="ipo-meta">${i.board === 'sme' ? 'SME' : 'Mainboard'}${i.exchange ? ` · ${escapeHtml(i.exchange)}` : ''}${i.symbol ? ` · ${escapeHtml(i.symbol)}` : ''} · ${ipoStoryCount(i)}${ipoAddButton(i)}</span></td>
             <td><span class="ipo-stage ${i.stage}">${IPO_STAGE_LABEL[i.stage] || escapeHtml(i.stage)}</span></td>
             <td class="mono">${ipoDay(i.open_date)}</td>
             <td class="mono">${ipoDay(i.close_date)}</td>
@@ -2330,9 +2332,9 @@ function renderUsIpoTable(issues) {
         <tbody>${issues.map(i => {
           const day = i.first_trade_date || i.listing_date || i.status_date;
           return `
-          <tr ${i.stories ? `${IPO_ROW_ATTRS} data-ipo="${i.id}"` : ''}>
+          <tr ${IPO_ROW_ATTRS} data-ipo="${i.id}">
             <td><span class="ipo-name">${escapeHtml(i.name)}</span>
-                <span class="ipo-meta">${[i.exchange, i.symbol, i.is_spac ? 'SPAC' : '', i.stories ? `${i.stories} ${i.stories === 1 ? 'story' : 'stories'}` : ''].filter(Boolean).map(escapeHtml).join(' · ') || '—'}${ipoAddButton(i)}</span></td>
+                <span class="ipo-meta">${[i.exchange, i.symbol, i.is_spac ? 'SPAC' : '', ipoStoryCount(i)].filter(Boolean).map(escapeHtml).join(' · ')}${ipoAddButton(i)}</span></td>
             <td><span class="ipo-stage ${i.stage}">${IPO_US_STAGE_LABEL[i.stage] || escapeHtml(i.stage)}</span></td>
             <td class="mono">${ipoDay(day)}${day && IPO_US_DATE_LABEL[i.stage] ? `<span class="ipo-meta ipo-lot">${IPO_US_DATE_LABEL[i.stage]}</span>` : ''}${ipoListingNote(i, '$')}</td>
             <td class="mono">${ipoUsPrice(i)}</td>
@@ -2400,9 +2402,11 @@ function ipoArcChart(issue, arc) {
 }
 
 function renderIpoStories(issue, { stories, arc, tone }) {
+  // Three different answers: none found; found and none read yet; read.
+  if (!stories.length) return '<div class="ipo-stories"><p class="ipo-stories-head">No story on this issue has been found yet. Each news run looks for stories that name it.</p></div>';
   const head = tone
     ? `Tone of the news: <span class="ht-senti-label ${tone.label}">${tone.label}</span> <span class="mono">${Math.round(tone.score * 100)}</span> of 100, from ${tone.stories} ${tone.stories === 1 ? 'story' : 'stories'} read`
-    : 'No story on this issue has been read for tone yet.';
+    : `${stories.length} ${stories.length === 1 ? 'story' : 'stories'} found; none has been read for tone yet.`;
   return `
     <div class="ipo-stories">
       <p class="ipo-stories-head">${head}</p>

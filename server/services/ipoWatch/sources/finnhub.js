@@ -9,7 +9,7 @@
  */
 
 const { IPO_WATCH } = require('../../../config');
-const { fetchWithTimeout } = require('../../ingest/util');
+const finnhubGate = require('../../finnhubGate');
 
 const shift = (date, days) => new Date(Date.parse(date) + days * 86400e3).toISOString().slice(0, 10);
 
@@ -59,10 +59,13 @@ function parseCalendar(json) {
 async function fetchIssues({ today }) {
   const key = process.env.FINNHUB_API_KEY;
   if (!key) throw new Error('FINNHUB_API_KEY is not set');
-  const url = `${IPO_WATCH.FINNHUB_IPO_URL}?from=${shift(today, -IPO_WATCH.US_LOOKBACK_DAYS)}&to=${shift(today, IPO_WATCH.US_LOOKAHEAD_DAYS)}`;
-  const res = await fetchWithTimeout(url, { headers: { 'X-Finnhub-Token': key } }, IPO_WATCH.TIMEOUT_MS);
-  if (!res.ok) throw new Error(`Finnhub replied ${res.status}`);
-  return parseCalendar(await res.json());
+  const { ok, status, data, held } = await finnhubGate.get(
+    '/calendar/ipo',
+    { from: shift(today, -IPO_WATCH.US_LOOKBACK_DAYS), to: shift(today, IPO_WATCH.US_LOOKAHEAD_DAYS) },
+    { purpose: 'ipo calendar', timeoutMs: IPO_WATCH.TIMEOUT_MS }
+  );
+  if (!ok) throw new Error(held ? 'the Finnhub gate did not send the request' : status ? `Finnhub replied ${status}` : 'Finnhub could not be reached');
+  return parseCalendar(data);
 }
 
 module.exports = { calendar: { name: 'finnhub', fetchIssues }, parseCalendar, priceRange, isSpac };

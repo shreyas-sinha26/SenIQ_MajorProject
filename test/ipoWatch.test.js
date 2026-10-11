@@ -8,7 +8,7 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://offline:offli
 const assert = require('node:assert');
 const { IPO_WATCH } = require('../server/config');
 const { calendarAge, nameKey, normalizeIssue, mergeIssues, stageOf, marketDate, pollCalendar, gmpReadings, gmpView, cleanSubscription, cleanHistory, outcomesOf, listingGain, priceFromGain } = require('../server/services/ipoWatch');
-const { buildMatcher, joinInitials, pickSymbol, looseKey, priceConfirms, referenceExchange } = require('../server/services/ipoWatch/registry');
+const { buildMatcher, joinInitials, pickSymbol, looseKey, priceConfirms, referenceExchange, monitorShare } = require('../server/services/ipoWatch/registry');
 const { namesHolding, coreName, setIpoTier } = require('../server/services/entityResolver');
 const { parseBars, barOnOrAfter, returnsFrom, firstTradeDay, usDate } = require('../server/services/ipoWatch/returns');
 const { arcOf, toneOf, inHeadline, subscriptionFigure, isFinalFigure, subscriptionTone, ruleReading } = require('../server/services/ipoWatch/arc');
@@ -671,6 +671,45 @@ check('the button opens the rest and closes them again', () => {
   assert.deepStrictEqual([attrs['aria-expanded'], btn.textContent, extras.some((e) => e.classList.has('hidden'))], ['true', 'Show the latest 5', false]);
   page.ipoToggleAllStories(btn);
   assert.deepStrictEqual([attrs['aria-expanded'], btn.textContent, extras.every((e) => e.classList.has('hidden'))], ['false', 'Show all 13 stories', true]);
+});
+
+check('an issue with no stories says so when opened: none found is not the same as found and not read', () => {
+  const none = page.renderIpoStories({ name: 'Jio Platforms' }, { stories: [], arc: [], tone: null });
+  assert.match(none, /No story on this issue has been found yet\./);
+  assert.strictEqual(items(none).length, 0);
+  const unread = page.renderIpoStories({ name: 'Jio Platforms' }, { stories: [1, 2].map((n) => ({ ...storyRow(n), sentiment: null })), arc: [], tone: null });
+  assert.match(unread, /2 stories found; none has been read for tone yet\./);
+  assert.strictEqual(items(unread).length, 2);
+  assert.match(drawn(3), /Tone of the news:/);
+});
+check('every row of the calendar opens, and one with no stories says "No stories yet"', () => {
+  const count = new Function(`${lift('const ipoStoryCount', '\n')}; return ipoStoryCount;`)();
+  assert.deepStrictEqual([0, 1, 7].map((stories) => count({ stories })), ['No stories yet', '1 story', '7 stories']);
+  const rows = appJs.match(/<tr \$\{[^>]*>/g) || [];
+  assert.deepStrictEqual(rows, Array(2).fill('<tr ${IPO_ROW_ATTRS} data-ipo="${i.id}">'));   // India's table and the US one
+});
+
+// The US issues whose company news the pipeline fetches.
+check('news is fetched for every US issue with a ticker that is not a SPAC or withdrawn, a third each run', () => {
+  assert.strictEqual(IPO_WATCH.MONITOR_RUNS, 3);
+  assert.deepStrictEqual([0, 1, 3, 27, 28].map((n) => monitorShare(n)), [0, 1, 1, 9, 10]);
+  const fs = require('node:fs'), path = require('node:path');
+  const code = fs.readFileSync(path.join(__dirname, '../server/services/ipoWatch/registry.js'), 'utf8');
+  const sql = code.slice(code.indexOf('async function monitoredTickers'), code.indexOf('async function markNewsChecked'));
+  assert.match(sql, /market = 'US' AND symbol IS NOT NULL AND NOT is_spac AND NOT withdrawn/);
+  assert.match(sql, /ORDER BY min\(news_checked_at\) NULLS FIRST/);      // the ones asked for longest ago first
+  assert.doesNotMatch(sql, /LIMIT/);                                       // no fixed newest-N any more
+  assert.match(sql, /rows\.slice\(0, monitorShare\(rows\.length\)\)/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../server/migrations/0045_ipo_news.sql'), 'utf8'), /ALTER TABLE ipos ADD COLUMN IF NOT EXISTS news_checked_at TIMESTAMPTZ;/);
+});
+check('at start the US calendar alone is caught up, and only when it is over a day old', () => {
+  const code = require('node:fs').readFileSync(require('node:path').join(__dirname, '../server/scheduler.js'), 'utf8');
+  const fn = code.slice(code.indexOf('async function runIpoCatchUp'), code.indexOf('// Ask thread retention'));
+  assert.strictEqual(IPO_WATCH.CATCH_UP_AFTER_HOURS, 24);
+  assert.match(fn, /calendarAge\('US'\)/);
+  assert.match(fn, /Date\.now\(\) - updatedAt < IPO_WATCH\.CATCH_UP_AFTER_HOURS \* 3600e3\) return;/);
+  assert.match(fn, /pollCalendar\(\{ sources: \[usIpoCalendar\] \}\)/);   // Finnhub only: India's pages are not asked on boot
+  assert.match(code, /setTimeout\(job\(runIpoCatchUp\), 5000\)/);
 });
 
 (async () => {
