@@ -1,6 +1,6 @@
 # SenIQ — Handoff
 
-Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). On 2026-10-10 and -11 a six-step plan was agreed and carried out: Ask reads IPO Watch, news retention, the listed names that matched wrongly, Ask on any stock and on the app's other pages, two whole runs of the Ask eval, news for the listed names nobody holds in India and the US, and one model for every Claude call, Claude Haiku 5.5. All of it was merged on 2026-10-11 as pull request #17 and tagged `v1.15` / `v2.16` (§3, §5, §8, §10, §11). This file describes the project **as it stands now**. The previous
+Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). On 2026-10-10 and -11 a six-step plan was agreed and carried out: Ask reads IPO Watch, news retention, the listed names that matched wrongly, Ask on any stock and on the app's other pages, two whole runs of the Ask eval, news for the listed names nobody holds in India and the US, and one model for every Claude call, Claude Haiku 5.5. All of it was merged on 2026-10-11 as pull request #17 and tagged `v1.15` / `v2.16` (§3, §5, §8, §10, §11). Later the same day pull request #18, `v1.16` / `v2.17`, added three small pieces: Ask's code-written answer kept to what was asked, the timing of each model call with an effort setting, and two queues in the US rotation (§3, §8, §10). This file describes the project **as it stands now**. The previous
 handoff was a session-by-session log (1,658 lines); it is still in git history
 (`git show 6ee98d9:handoff.md`) if a detail of how something was built is needed.
 
@@ -62,10 +62,11 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 ## 3. Current state
 
 - **Git** *(checked 2026-10-11)*: everything is on `main` and pushed. Latest tags
-  **`v1.15`** and **`v2.16`**, both on `75fcb2f`, the merge of pull request #17. The one
-  commit after it on `main` puts that hash into this file. Before it: `v1.14` / `v2.15` on `d0aa0ca` (pull request #16, IPO
-  Watch's "Show all" button, §5) and `v1.13` / `v2.14` on `71230ec` (pull request #15, the
-  QA pass, §8). The two numbers differ because `v2.13` was strategies-only work (§11). No
+  **`v1.16`** and **`v2.17`**, both on `@@MERGE@@`, the merge of pull request #18. The
+  one commit after it on `main` puts that hash into this file. Before it: `v1.15` /
+  `v2.16` on `75fcb2f` (pull request #17, the plan of 2026-10-10), `v1.14` / `v2.15` on
+  `d0aa0ca` (pull request #16, IPO Watch's "Show all" button, §5) and `v1.13` / `v2.14`
+  on `71230ec` (pull request #15, the QA pass, §8). The two numbers differ because `v2.13` was strategies-only work (§11). No
   pull request is open. Untracked and never pushed: `samples/` and `.github/` (§11).
 - **Where the work of 2026-10-10 and -11 was done.** On five local branches, each cut
   from the one before: `ipo-ask`, `listed-news`, `ask-tools`, `us-news`, and `haiku-5-5`
@@ -73,8 +74,21 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   GitHub as one branch, `us-news`, and were merged with a merge commit, so every commit
   named in this file keeps its hash. **A dated note below that names one of those
   branches means that commit, which is now on `main`;** the local branches are deleted.
-  Two worktrees are left under `.claude/worktrees/`: `crypto-kb` (merged as pull request
-  #12) and `haiku-5-5`. Nothing on either is missing from `main`.
+  Pull request #18 was made the same way from two branches, `ask-to-the-point` and
+  `us-curated-rotation` (a second session, in a worktree), pushed as `ask-to-the-point`.
+  Three worktrees are left under `.claude/worktrees/`: `crypto-kb` (merged as pull
+  request #12), `haiku-5-5` and `us-curated-rotation`. Nothing on any of them is missing
+  from `main`.
+- **What `v1.16` / `v2.17` adds** *(pull request #18; 6 commits)*. Three pieces, no
+  migration and no change to a page:
+  - **Ask's code-written answer gives what was asked and stops** (`a4f94c3`; §8, "Stocks
+    nobody holds"). "What was Tesla's high today?" is answered with the high. This one
+    is live for any Ask user with no switch.
+  - **Each model call is timed, and Ask has an effort setting** (`8c52042`; "Next, in
+    order", item 5). `ASK_EFFORT` is unset, so nothing changes until it is set.
+  - **The US rotation has two queues** (`6de3173`; under P6 below, and §10): the curated
+    names nobody holds come round about every 3 hours, the rest about every 9. It
+    matters only with `US_LISTED_NEWS=1`, which is still off.
 - **What `v1.15` / `v2.16` adds** *(pull request #17; 19 commits)*. Seven pieces; the
   section named has each one's detail.
   - **Ask reads IPO Watch** (`1f0e368`; §5, "Daily brief and Ask"):
@@ -115,7 +129,7 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   are in the macOS Trash as `seniq-engine-pre_qa_2026-10-10` (gone once the Trash is
   emptied). The pages on `main` expect this engine: with the old one the signal and
   crypto fixes are absent and the robustness verdict is the old one.
-- **Tests** *(checked 2026-10-11 on the commit that was merged)*: `npm test` passes — 33 files, 808 checks, offline
+- **Tests** *(checked 2026-10-11 on the commit that was merged)*: `npm test` passes — 33 files, 813 checks, offline
   (no database or API calls). The local engine's own tests: 60 pass
   (`cd strategy-service && ./venv/bin/python -m pytest -q`).
 - **Dev database** *(checked 2026-10-11)*: Postgres `seniq`, 43 of the 45 migration files
@@ -146,8 +160,8 @@ Each of the first three needs Annas's word, and so does any paid run.
    in a running pipeline (§7). New stories only: stored ones are not re-tagged.
 2. **Switch on `US_LISTED_NEWS`.** The largest change in volume. Start with
    `node scripts/us_news.js try 30` (nothing stored), then the switch, then
-   `node scripts/us_news.js status` after a day: every name should have been checked
-   about three times. Watch for Finnhub refusing calls (the log line says "stopped:
+   `node scripts/us_news.js status` after a day: a curated name should have been
+   checked about seven times and any other about two or three. Watch for Finnhub refusing calls (the log line says "stopped:
    rate_limit") and for quotes failing while a run is fetching.
 3. **Run the other four callers on Claude Haiku 5.5:** one brief, one alert
    explanation, one set of report cards, one per-company reading. Their output limits
@@ -158,8 +172,9 @@ Each of the first three needs Annas's word, and so does any paid run.
    predates the filings tool); the judge is not shown the tool descriptions or today's
    date, which the model is.
 
-5. **How long an answer takes** *(started 2026-10-11 at Annas's word; branch
-   `ask-to-the-point`, uncommitted; `npm test` passes: 33 files, 811 checks)*. In the two
+5. **How long an answer takes: on hold** *(started 2026-10-11 at Annas's word and put
+   on hold by him the same day; what was built is commit `8c52042`)*. **Decided: stay on
+   the router for now and try lower effort there; later call Anthropic directly.** In the two
    whole runs a round cost about 9 to 10 seconds on Claude Haiku 5.5 and most questions
    took two (20.1 seconds an answer against 13.6 on Haiku 4.5, 877 output tokens against
    249).
@@ -175,7 +190,8 @@ Each of the first three needs Annas's word, and so does any paid run.
      seconds, and the six that did took 19 to 113 seconds, on Haiku 4.5 as well as 5.5
      (a one-word reply took 19 and 36 seconds). Its model list answered in 0.3 seconds,
      so the wait was behind the router. $0.0003 spent.
-   - **Next:** when the router answers normally,
+   - **When it is taken up again:** first one one-word call to see that the router
+     answers in a few seconds, then
      `ASK_EFFORT=low node eval/ask/run.js --run --yes-spend --max-usd 0.2 --only move-01,scope-05,history-02,pages-03,pages-04,ipo-04`
      and the same without `ASK_EFFORT`, then compare `timing`. The other levers, in
      order: one round where two are used now, caching (or calling Anthropic directly,
@@ -472,8 +488,7 @@ way, is in §10 ("Planned on 2026-10-10, and built").
     asks Finnhub for the company news of 30 US shares nobody holds, the ones checked
     longest ago (`companies.news_checked_at`), one call a second. 1,501 names on the dev
     database, so each came round about every 8.3 hours as first built.
-  - **Two queues** *(2026-10-11, at Annas's word; branch `us-curated-rotation`,
-    uncommitted; `npm test` passes)*: 5 of a run's 30 places are for the curated US shares
+  - **Two queues** *(2026-10-11, at Annas's word; commit `6de3173`)*: 5 of a run's 30 places are for the curated US shares
     nobody holds (98 on the dev database, each about every 3.3 hours) and 25 for the rest
     (1,403: the listed tier and 5 graduated IPOs, each about every 9.4 hours). Picked on
     the dev database with the switch set for that one process, reads only, no Finnhub
@@ -1484,8 +1499,8 @@ machine before the date fix that day had lookahead; do not reuse older figures.
   impact are still for holdings only.
 - **The snapshot answer gives what the question asked for and stops** *(2026-10-11, at
   Annas's word after he asked "What was Tesla's high today?" and got the price, the low,
-  the sentiment reading and two lines about his portfolio around it; branch
-  `ask-to-the-point`, uncommitted; `npm test` passes: 33 files, 811 checks)*. The
+  the sentiment reading and two lines about his portfolio around it; commit
+  `a4f94c3`)*. The
   question is read by word lists (`asksFor` in `stockSnapshot.js`) for four things: the
   price, the session's high, its low, the sentiment reading. Asked for one, the answer
   is that one sentence ("Tesla (TSLA): Its latest session's high was $388.56."); asked
@@ -1990,8 +2005,14 @@ that remain, none of them a defect waiting for a fix:
 | `v1.13` / `v2.14` | `71230ec` | #15: the QA pass of 2026-10-10 — no new feature, no migration. v1: bad input is a 400 or 404, logs carry no bodies or failed rows, Ask's holding size is the exposure figure, an executive's other venture is not their company, the brief's writer sees no engine scores and its headline is checked. v2: saves and deployments are checked first, bad ids are 404s, engine refusals in plain words, starting capital bounded, the Builder keeps what was typed, the robustness check counts traded windows, an account off Pro keeps the handle on its deployments |
 | `v1.14` / `v2.15` | `d0aa0ca` | #16: IPO Watch opens an issue's news on its latest 5 stories, with a "Show all N stories" button for the rest; the tone and the chart are still from every story. Page only |
 | `v1.15` / `v2.16` | `75fcb2f` | #17: Ask reads IPO Watch, answers on a stock the user does not hold (price, sentiment, price history, each session's high and low) and reads the app's other pages; news retention (off); the listed names that matched wrongly, and news for the listed names nobody holds in India and the US (two switches, both off; a US listed name is tagged only from its own ticker's feed); one model for every Claude call, Claude Haiku 5.5. Migrations `0043` and `0044` |
+| `v1.16` / `v2.17` | `@@MERGE@@` | #18: Ask's code-written answer on a stock the user does not hold gives what the question asked for and stops; each model call and tool round is timed, and `ASK_EFFORT` sets Ask's effort (unset by default); the US rotation has two queues, curated names about every 3 hours and the rest about every 9. No migration |
 
 Pull request #6 was closed by GitHub when its base branch was deleted; #7 replaced it.
+
+**Pull request #18** (`ask-to-the-point`) was merged on 2026-10-11 as `@@MERGE@@`, at
+Annas's request from a session, and the branch deleted. Tagged `v1.16` / `v2.17`. Six
+commits from two sessions. Nothing in it is switched on, and the work on how long an
+answer takes is on hold (§3, "Next, in order", item 5).
 
 **Pull request #17** (`us-news`) was merged on 2026-10-11 as `75fcb2f`, at Annas's
 request from a session, and the branch deleted. Tagged `v1.15` / `v2.16`. It carries the
@@ -2053,4 +2074,4 @@ commit.
 | `RAG_PLAN.md` | Ask, retrieval and signals plan (agreed 2026-10-07); India filings spike notes | Partly built |
 | `IPO_PLAN.md` | Sentiment for IPOs and small/mid-caps, where 13F and congress data are blind | Change 3 (IPO Watch) and Change 4 (graduation) built, pull request #13; Changes 1, 2 and 5 are plan only |
 | `DEPLOY.md` | Render + Neon + Cloudflare steps | Ready, not executed |
-| `README.md` | Project overview, features, setup (macOS and Windows), known limits | Yes — rewritten 2026-10-08 against this handoff, up to `v1.8` / `v2.8`; later features added section by section, latest `v1.15` / `v2.16` |
+| `README.md` | Project overview, features, setup (macOS and Windows), known limits | Yes — rewritten 2026-10-08 against this handoff, up to `v1.8` / `v2.8`; later features added section by section, latest `v1.16` / `v2.17` |
