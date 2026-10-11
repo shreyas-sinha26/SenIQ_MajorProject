@@ -548,6 +548,7 @@ const EXECUTORS = {
     const tickers = ticker ? [requireHeld(ctx, ticker)] : [...ctx.heldSet, '__MARKET__'];
     const d = clampDays(days ?? QA.NEWS_DAYS_MAX);
     const r = await searchNews({ query: String(q).slice(0, 200), tickers, userId: ctx.userId, includeMarket: !ticker, days: d });
+    if (r.mode === 'none') return { window_days: d, search_mode: 'none', results: [], note: 'That query has no word to search for. Ask the user what to look for; do not list other stories as matches.' };
     return { window_days: d, search_mode: r.mode, results: r.results.map((x) => ({ ...x, first_seen: day(x.first_seen), last_seen: day(x.last_seen) })) };
   },
 

@@ -1,7 +1,7 @@
 const { asyncRouter } = require('../middleware/asyncRouter');
 const { query, queryOne, execute, tx } = require('../db');
 const { getCompanyName } = require('../services/tickerMatcher');
-const { resolveAsset, isLaunchAssetClass, isValidTicker } = require('../services/assetRegistry');
+const { resolveAsset, isLaunchAssetClass, isValidTicker, ASSET_CLASSES } = require('../services/assetRegistry');
 const { getWeightedHoldings } = require('../services/portfolioService');
 const { getQuotes } = require('../services/priceService');
 const { onboardHolding, buildCompanyBrief } = require('../services/onboarding');
@@ -23,12 +23,30 @@ const ADD_QUOTE_WAIT_MS = 4000;
 // Parse an optional non-negative number; '' / null / undefined → null.
 // Returns the sentinel `INVALID` for anything that isn't a valid number.
 const INVALID = Symbol('invalid');
+// A number typed as text must be plain decimal digits: Number() also reads "0x10" as 16 and
+// "1e3" as 1000, which is not what someone typing a quantity means.
+const DECIMAL = /^\d+(\.\d+)?$|^\.\d+$/;
 function parseOptionalNumber(v) {
   if (v === undefined || v === null || v === '') return null;
   if (typeof v !== 'number' && typeof v !== 'string') return INVALID;
+  if (typeof v === 'string' && !DECIMAL.test(v.trim())) return INVALID;
   const n = Number(v);
   if (!Number.isFinite(n) || n < 0 || n > MAX_AMOUNT) return INVALID;
   return n;
+}
+
+// The exchanges a holding may be filed under, by the country they price in.
+const EXCHANGE_COUNTRY = { US: 'US', NASDAQ: 'US', NYSE: 'US', AMEX: 'US', NSE: 'IN', BSE: 'IN' };
+// Why a named exchange cannot be used for this holding, or null when it can. `ref` is the
+// company reference's row for the ticker, when it has one. Pure.
+function exchangeProblem(exchange, assetClass, ref, ticker) {
+  if (!exchange) return null;
+  if (assetClass !== 'equity') return 'An exchange applies to stocks only; leave it out for crypto and commodities.';
+  if (!Object.hasOwn(EXCHANGE_COUNTRY, exchange)) return `Unknown exchange "${String(exchange).slice(0, 20)}". Use US, NASDAQ, NYSE, AMEX, NSE or BSE.`;
+  if (ref && ['US', 'IN'].includes(ref.country) && ref.country !== EXCHANGE_COUNTRY[exchange]) {
+    return `${ticker} is listed in ${ref.country === 'IN' ? 'India' : 'the US'}, not on ${exchange}.`;
+  }
+  return null;
 }
 
 // The new holding's price, with a time limit: an add must not hang on a slow price source.
@@ -89,6 +107,10 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'That does not look like a ticker symbol — use letters and digits, e.g. AAPL or RELIANCE.' });
     }
 
+    // A class that is named must be one there is: "bond" used to be filed as an equity.
+    if (rawClass != null && rawClass !== '' && !ASSET_CLASSES.includes(rawClass)) {
+      return res.status(400).json({ error: `Unsupported asset class "${String(rawClass).slice(0, 20)}". Supported: equity, crypto, commodity.` });
+    }
     const { ticker, assetClass, name } = resolveAsset(rawTicker, rawClass);
     if (!isValidTicker(ticker)) {
       return res.status(400).json({ error: 'That does not look like a ticker symbol — use letters and digits, e.g. AAPL or RELIANCE.' });
@@ -98,7 +120,10 @@ router.post('/', async (req, res) => {
     const ref = assetClass === 'equity' ? await queryOne('SELECT name, exchange, country FROM companies WHERE ticker = $1 AND is_active', [ticker]) : null;
     const exchange = req.body.exchange == null || req.body.exchange === ''
       ? (ref && ref.country === 'IN' ? ref.exchange : null) : String(req.body.exchange).trim().toUpperCase();
-    if (exchange && !/^[A-Z]{1,12}$/.test(exchange)) return res.status(400).json({ error: 'Unknown exchange' });
+    // An exchange that is named must be one a stock is priced on, and the right country's
+    // for a company in the reference: IBM filed under NSE was stored and never priced.
+    const problem = exchangeProblem(exchange, assetClass, ref, ticker);
+    if (problem) return res.status(400).json({ error: problem });
 
     if (!isLaunchAssetClass(assetClass)) {
       return res.status(400).json({
@@ -218,3 +243,6 @@ router.delete('/:ticker', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.parseOptionalNumber = parseOptionalNumber;
+module.exports.exchangeProblem = exchangeProblem;
+module.exports.INVALID = INVALID;
