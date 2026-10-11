@@ -60,6 +60,9 @@ async function loadRecentEventsForTicker(ticker) {
 }
 
 // Light smart-money context: big funds holding it + recent congress trades in it.
+// Each fund's latest filing only: an older quarter's row is not what the fund holds now,
+// and reading them all listed one fund three times. Congressional sample rows stand in
+// only while there are no real disclosures, as on the Congress page, and are marked.
 async function loadSmartMoney(ticker) {
   const { query } = require('../db');
   const limit = ONBOARDING.BRIEF_SMART_MONEY;
@@ -69,19 +72,23 @@ async function loadSmartMoney(ticker) {
        JOIN institution_filings f ON f.id = h.filing_id
        JOIN institutions i ON i.id = f.institution_id
       WHERE h.ticker = $1
+        AND f.id = (SELECT l.id FROM institution_filings l WHERE l.institution_id = i.id
+                     ORDER BY l.period_of_report DESC NULLS LAST, l.id DESC LIMIT 1)
       ORDER BY h.value DESC NULLS LAST
       LIMIT $2`,
     [ticker, limit]
   );
+  const real = await query('SELECT count(*)::int AS n FROM congress_trades WHERE is_sample = false');
+  const live = Number(real[0] && real[0].n) > 0;
   const congress = await query(
     `SELECT politician, chamber, party, transaction_type, transaction_date::text AS transaction_date
        FROM congress_trades
-      WHERE ticker = $1
+      WHERE ticker = $1 AND is_sample = $3
       ORDER BY disclosure_date DESC NULLS LAST, transaction_date DESC NULLS LAST
       LIMIT $2`,
-    [ticker, limit]
+    [ticker, limit, !live]
   );
-  return { institutions, congress };
+  return { institutions, congress, congressSample: !live && congress.length > 0 };
 }
 
 // This holding's current per-user impact row (if the backfill produced one).
@@ -157,6 +164,7 @@ async function buildCompanyBrief(userId, ticker, holding = {}) {
     smart_money: {
       institutions: smartMoney.institutions.map((r) => ({ name: r.name, pct_of_portfolio: r.pct_of_portfolio, change_type: r.change_type })),
       congress: smartMoney.congress.map((r) => ({ politician: r.politician, chamber: r.chamber, party: r.party, transaction: r.transaction_type, date: r.transaction_date })),
+      ...(smartMoney.congressSample ? { congress_sample: true } : {}),
     },
     monitoring_since: holding.monitoring_since || null,
     note: 'Now monitoring from here on — older items below are recent context only and were not alerted.',

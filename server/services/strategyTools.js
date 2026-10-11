@@ -17,8 +17,8 @@
  */
 
 const { QA, TIERS } = require('../config');
-const { ScopeError, EXECUTORS: DATA_EXECUTORS } = require('./qaTools');
-const { callService, WARMUP_DAYS, MAX_WATCH_SYMBOLS, iso } = require('./strategyClient');
+const { ScopeError, fitRows, EXECUTORS: DATA_EXECUTORS } = require('./qaTools');
+const { callService, settleEmptyReplay, WARMUP_DAYS, MAX_WATCH_SYMBOLS, iso } = require('./strategyClient');
 const { seniqDataIfNeeded, seniqDataForWatchlist } = require('./signalHistory');
 const { listPresets: listSeniqPresets } = require('./strategySignals');
 const { validateSpec, dataDepthNotes, INDICATORS, SENIQ_METRICS } = require('./strategySpec');
@@ -120,20 +120,34 @@ function replayWindow(row, now = new Date()) {
   return { start, end, deployed };
 }
 
-/** One engine backtest response → the handful of figures Ask may quote. Pure. */
+/**
+ * One engine backtest response → the handful of figures Ask may quote. Pure.
+ *
+ * `days` is whole calendar days from the deploy date to the end date (0 on the day itself).
+ * `closed_trades` counts round trips that have been closed: a deployment that has bought
+ * and still holds has none, which `in_position` says. A replay with no completed trading
+ * day yet carries no figures at all, only the note saying so: its zeros are not results.
+ */
 function summarizeReplay(row, data, now = new Date()) {
   const { end, deployed } = replayWindow(row, now);
   const report = (data && data.report) || {};
   const m = report.metrics || {};
   const b = report.benchmark || {};
-  return {
+  const base = {
     id: row.id, name: row.name, symbol: row.symbol, exchange: row.exchange, status: row.status,
     from: day(deployed), to: day(end),
-    days: Math.max(0, Math.round((end - deployed) / 86_400_000)),
+    days: Math.max(0, Math.round((Date.parse(day(end)) - Date.parse(day(deployed))) / 86_400_000)),
+  };
+  if (data && Number(data.n_bars) === 0) {
+    return { ...base, return_pct: null, initial_cash: num(row.initial_cash, 0), final_equity: num(row.initial_cash, 0), in_position: false,
+      no_result_yet: 'No trading day has completed since this was deployed, so there is no result yet: the cash is untouched. Say that; do not give a return.' };
+  }
+  return {
+    ...base,
     return_pct: pct(m.total_return_pct),
     buy_hold_return_pct: pct(b.benchmark_total_return_pct),
     max_drawdown_pct: pct(m.max_drawdown_pct),
-    trades: Array.isArray(report.trades) ? report.trades.length : null,
+    closed_trades: Array.isArray(report.trades) ? report.trades.length : null,
     initial_cash: num(row.initial_cash, 0),
     final_equity: num(m.final_equity, 0),
     in_position: Array.isArray(data && data.open_positions) ? data.open_positions.length > 0 : null,
@@ -150,7 +164,7 @@ function presetCards(catalog) {
   return ((catalog && catalog.strategies) || []).map((e) => ({
     name: e.name,
     label: e.label || e.name,
-    description: clip(e.description, 180),
+    description: clip(e.description, QA.STRATEGY_PRESET_CHARS),
     style: e.style || e.category || null,
     params: (e.params || []).map((p) => `${p.name}=${p.default}`).join(', '),
   }));
@@ -160,7 +174,7 @@ function presetCards(catalog) {
 // result, so the rule arrives with the data it is for, and only in v2 mode. No figures in
 // them: a tool result is evidence to the grounding check.
 const LIST_SHAPE = 'Answer only what was asked. One sentence with how many strategies are saved and how many are running (an active paper deployment, simulated). Then the saved strategies, one to a line as "name · preset or custom · its rules in a few plain words" (shorter than the rules given, never longer). Then, only if the question asks what is running or deployed, the running deployments, one to a line as "strategy · symbol · deployed date". Leave out, unless asked: stopped deployments, ids, watchlists, factor names and SenIQ signal names.';
-const PERFORMANCE_SHAPE = 'Answer only what was asked. One sentence first: these are paper (simulated) results, each over its own period, so they are not like-for-like. Then the deployments the question is about (all of them for "which did best"; only that symbol or strategy when one is named), best first, one to a line as "strategy on symbol · paper return · buy-and-hold over the same days · from date to date". When asked which did best, name the first line as ahead only with that caution, and say so when none has made a trade. Leave out, unless asked: drawdown, the number of trades, days, cash and equity figures, whether it is in a position, and why a strategy did or did not trade.';
+const PERFORMANCE_SHAPE = 'Answer only what was asked. One sentence first: these are paper (simulated) results, each over its own period, so they are not like-for-like. Then the deployments the question is about (all of them for "which did best"; only that symbol or strategy when one is named), best first, one to a line as "strategy on symbol · paper return · buy-and-hold over the same days · from date to date". When asked which did best, name the first line as ahead only with that caution, and say so when none has made a trade. A deployment with no_result_yet has no return: say it has no completed trading day yet, and leave it out of any ranking. Leave out, unless asked: drawdown, the number of closed trades, days, cash and equity figures, whether it is in a position, and why a strategy did or did not trade.';
 const SIGNAL_SHAPE = 'Answer only about the symbols asked about, in at most three sentences each: whether the strategy is long or flat and as of which date; its last signal (buy or sell) with its date; and the rule behind that in plain words, without factor ids. If seniq_evidence is present, add at most two of its stories or disclosures, one to a line as "outlet, date · headline", and say they are the picture now, not on the signal date. Leave out, unless asked: the last close, whether the signal fired on the latest bar, the other rules, how close an exit is, and what the tool does not show.';
 const PRESETS_SHAPE = 'Name at most three templates that fit what was asked, one to a line as "template name · what its rule does, in plain words" (for a SenIQ template add its data_depth). Then one sentence: test them in Backtest against buy-and-hold; you cannot run, save or deploy one. Leave out the other templates (say how many more there are in a few words), parameter names, and any view on which is better.';
 const DRAFT_SHAPE = 'Lay the draft out as: one line starting "Entry:" and one starting "Exit:", the rules in plain words; one line starting "Assumed:" only for choices the user did not state (leave out sizing left at its default and restatements of the rules); each data_depth_notes line as written, if there are any; then one sentence that the draft is untested and is theirs to review in the Strategy Builder and backtest. If the user asked for a backtest, say first, in a few words, that you cannot run one. Leave out the draft\'s name, who validated it and that there were no notes.';
@@ -174,7 +188,7 @@ const STRATEGY_TOOLS = [
   },
   {
     name: 'get_paper_performance',
-    description: 'Return of each of the user\'s paper deployments since its deploy date, best first, with buy-and-hold over the same days, drawdown and trade count. These are SIMULATED paper results, each over its own period — always say so and give the dates. Use for "which strategy did best", "how is my strategy doing". Saved strategies that were never deployed have no return.',
+    description: 'Return of each of the user\'s paper deployments since its deploy date, best first, with buy-and-hold over the same days, drawdown and the number of closed trades. These are SIMULATED paper results, each over its own period — always say so and give the dates. Use for "which strategy did best", "how is my strategy doing". Saved strategies that were never deployed have no return.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -266,7 +280,7 @@ async function replay(row, ctx) {
     },
   });
   if (out.status !== 200) return { status: out.status };
-  const value = { status: 200, summary: summarizeReplay(row, out.data) };
+  const value = { status: 200, summary: summarizeReplay(row, settleEmptyReplay(row, out.data)) };
   remember(key, value);
   return value;
 }
@@ -453,15 +467,17 @@ const STRATEGY_EXECUTORS = {
       catalog = out.data;
       remember('catalog', catalog);
     }
-    return {
+    // The SenIQ templates and signals come after the built-in ones, so an overrun used to cut
+    // them off mid-JSON. The built-in list gives way instead, and says how many it left out.
+    return fitRows({
       answer_shape: PRESETS_SHAPE,
       presets: presetCards(catalog).slice(0, QA.STRATEGY_PRESETS_MAX),
       // Templates that use SenIQ signals. data_depth is how much history the signal really has
       // — pass it on whenever you mention one.
-      seniq_presets: listSeniqPresets().map((p) => ({ name: p.name, description: clip(p.description, 180), data_depth: clip(p.data_depth, 140) })),
+      seniq_presets: listSeniqPresets().map((p) => ({ name: p.name, description: clip(p.description, QA.STRATEGY_PRESET_CHARS), data_depth: clip(p.data_depth, 140) })),
       seniq_signals_for_custom_strategies: (catalog.builder && catalog.builder.seniq_metrics) || [],
       how_to_test: 'Open Backtest, pick the template and a symbol, and compare it with buy-and-hold. Ask cannot run, save or deploy a strategy.',
-    };
+    }, 'presets');
   },
 };
 

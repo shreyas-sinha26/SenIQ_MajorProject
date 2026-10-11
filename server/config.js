@@ -491,6 +491,7 @@ const QA = {
   STRATEGY_RULES_INLINE: 6,          // spell out rules only when the saved list is this short
   STRATEGY_EVIDENCE_SYMBOLS: 2,      // held symbols that get SenIQ evidence in explain_strategy_signal
   STRATEGY_PRESETS_MAX: 15,
+  STRATEGY_PRESET_CHARS: 150,        // one template's description in list_strategy_presets
   STRATEGY_VALIDATE_TIMEOUT_MS: 5000, // engine check of a drafted spec; on timeout the app's own check stands
   // A stock the user does not hold (services/stockSnapshot.js): price and sentiment only.
   SNAPSHOT_MAX_NAMES: 3,             // names snapshotted in one code-written answer; the rest are named as not shown
@@ -648,7 +649,7 @@ const DISCLOSURES = {
   // Exchanges whose listings file with the SEC. A holding with no exchange is treated as US
   // unless the curated universe says otherwise.
   US_EXCHANGES: ['US', 'NASDAQ', 'NYSE', 'AMEX', 'NYSEARCA'],
-  CARD_EXCERPT_CHARS: 280,       // per filing in a listing
+  CARD_EXCERPT_CHARS: 240,       // per filing in a listing; six with their answer shape must fit QA.MAX_TOOL_RESULT_CHARS
   DETAIL_EXCERPT_CHARS: 3000,    // when one filing is opened
   LIST_LIMIT: 6,
 };

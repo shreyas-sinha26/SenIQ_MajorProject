@@ -61,6 +61,20 @@ check('a politician by surname; an Indian investor by its name or the name NSE p
   assert.strictEqual(P.pickNamed('Buffett', INDIA_INVESTORS, inv).none, true);
 });
 
+check('a surname inside a longer typed name is not that person: the other words must be theirs too', () => {
+  const people = [{ name: 'David Taylor' }, { name: 'Ro Khanna' }, { name: 'Mark Warner' }];
+  const names = (p) => [p.name, ...p.name.split(/\s+/).slice(-1)];
+  // Each of these used to return the one politician whose surname is a word in what was typed.
+  for (const typed of ['Marjorie Taylor Greene', 'Taylor Swift', 'Elizabeth Warren Buffett Khanna', 'Warner Bros'])
+    assert.deepStrictEqual(P.pickNamed(typed, people, names), { none: true }, typed);
+  // A surname alone, the full name, and the name with a title or an initial still find them.
+  for (const [typed, name] of [['Taylor', 'David Taylor'], ['david taylor', 'David Taylor'], ['Rep. Ro Khanna', 'Ro Khanna'], ['Senator Warner', 'Mark Warner'], ['Mark R. Warner', 'Mark Warner']])
+    assert.strictEqual(P.pickNamed(typed, people, names).item.name, name, typed);
+  // A fund's short name beside a company word still finds the fund; beside a stranger's word it does not.
+  assert.strictEqual(P.pickNamed('Scion Capital', FUNDS, fundNames).item.slug, 'scion');
+  assert.deepStrictEqual(P.pickNamed('Scion Therapeutics', FUNDS, fundNames), { none: true });
+});
+
 console.log('the rows Ask is shown:');
 check('a 13F position: its share of the fund, the change as filed, and whether the user holds it', () => {
   assert.deepStrictEqual(P.holdingRow({ ticker: 'NVDA', issuer_name: 'NVIDIA CORPORATION', value: '186580000', change_type: 'new' }, 1381198076, held),

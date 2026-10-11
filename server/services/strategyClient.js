@@ -149,6 +149,25 @@ const iso = (d) => {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 };
 
+/**
+ * A replay with no completed trading day in it (a deployment made today, or on a weekend)
+ * comes back from the engine with every figure at zero, starting and final equity among
+ * them, beside the untouched cash. Read as written that is "everything lost". Here the two
+ * equity figures are set to the cash put in and the reply is marked, so every reader (the
+ * page, /v1, /mcp, Ask) says "no session yet" and not "0". Mutates and returns `data`. Pure.
+ */
+function settleEmptyReplay(row, data) {
+  if (!data || Number(data.n_bars) !== 0) return data;
+  const cash = Number(row.initial_cash);
+  const metrics = (data.report && data.report.metrics) || null;
+  if (metrics && Number.isFinite(cash)) {
+    metrics.initial_equity = cash.toFixed(2);
+    metrics.final_equity = cash.toFixed(2);
+  }
+  data.no_session_yet = true;
+  return data;
+}
+
 // Replay a paper deployment (a paper_deployments row) from its deploy date to now, or to
 // the day it was stopped. Replay-from-inception: indicators warm up on pre-deploy history,
 // but `trade_from` stops any signal trading before the deployment existed.
@@ -159,7 +178,7 @@ async function replayPaper(row) {
   start.setDate(start.getDate() - WARMUP_DAYS);
   const end = row.status === 'stopped' && row.stopped_at ? new Date(row.stopped_at) : new Date();
 
-  return callService('/api/backtest', {
+  const out = await callService('/api/backtest', {
     method: 'POST',
     body: {
       ...(row.kind === 'custom'
@@ -173,10 +192,12 @@ async function replayPaper(row) {
       initial_cash: String(row.initial_cash),
     },
   });
+  if (out.status === 200) settleEmptyReplay(row, out.data);
+  return out;
 }
 
 module.exports = {
   callService, flattenDetail, engineFailure, plainEngineError, ENGINE_OFFLINE, ENGINE_FAILED,
   cleanSymbols, checkSymbols, isExchange, EXCHANGES, EXCHANGES_SHOWN, SYMBOL,
-  parseCapital, CAPITAL, iso, replayPaper, MAX_WATCH_SYMBOLS, WARMUP_DAYS,
+  parseCapital, CAPITAL, iso, replayPaper, settleEmptyReplay, MAX_WATCH_SYMBOLS, WARMUP_DAYS,
 };

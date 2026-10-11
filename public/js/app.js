@@ -110,17 +110,31 @@ async function api(path, opts = {}) {
   return data;
 }
 
-function showSignedOut() {
+// Signing out starts the page again from nothing. Hiding the app was not enough: the next
+// person to sign in on this browser was shown the last user's profile and conversation,
+// and the sign-in form still held the last password typed. The Strategy Builder's draft is
+// kept in this browser's storage, so it goes too. `note` is shown on the fresh page.
+const SIGNED_OUT_NOTE = 'seniq_signed_out_note';
+function showSignedOut(note = null) {
   currentUser = null;
   localStorage.removeItem(SIGNED_IN_HINT);
+  for (const key of ['seniq_builder_ui', 'seniq_custom_strategy']) localStorage.removeItem(key);
   if (refreshInterval) clearInterval(refreshInterval);
+  try { if (note) sessionStorage.setItem(SIGNED_OUT_NOTE, JSON.stringify(note)); } catch { /* the note is a nicety */ }
   document.getElementById('dashboard-view').classList.add('hidden');
-  document.getElementById('auth-view').classList.remove('hidden');
+  location.replace('/app');
 }
 function sessionEnded() {
-  showSignedOut();
+  showSignedOut({ kind: 'error', text: 'Your session has ended — please sign in again.' });
+}
+// The note left by the page that signed out, shown once.
+function showSignedOutNote() {
+  let note = null;
+  try { note = JSON.parse(sessionStorage.getItem(SIGNED_OUT_NOTE)); sessionStorage.removeItem(SIGNED_OUT_NOTE); } catch { /* none */ }
+  if (!note || !note.text) return;
+  if (note.kind !== 'error') return showToast(note.text, 'info');
   const errEl = document.getElementById('auth-error');
-  errEl.textContent = 'Your session has ended — please sign in again.';
+  errEl.textContent = note.text;
   errEl.classList.remove('hidden');
 }
 
@@ -235,6 +249,7 @@ function initAuth() {
       });
       localStorage.setItem(SIGNED_IN_HINT, '1');
       currentUser = data.user;
+      e.target.reset(); // the form does not keep the password once it has worked
       showDashboard();
     } catch (err) {
       errEl.textContent = err.message;
@@ -266,6 +281,7 @@ function initAuth() {
       });
       localStorage.setItem(SIGNED_IN_HINT, '1');
       currentUser = data.user;
+      e.target.reset();
       showDashboard();
       showToast('Welcome to SenIQ! 🚀', 'success');
     } catch (err) {
@@ -355,6 +371,9 @@ function initAuth() {
 async function showDashboard() {
   document.getElementById('auth-view').classList.add('hidden');
   document.getElementById('dashboard-view').classList.remove('hidden');
+  // The sign-in page's "?auth=login" and its scroll position do not belong to the app.
+  if (location.search) history.replaceState({}, '', '/app');
+  window.scrollTo(0, 0);
   requestAnimationFrame(moveNavIndicator); // nav is measurable only once the view is shown
 
   // Set user info
@@ -1438,8 +1457,7 @@ function initUserMenu() {
   document.getElementById('logout-btn').addEventListener('click', async () => {
     // Ends the session on the server; the page signs out here whether or not that call lands.
     try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* signed out locally regardless */ }
-    showSignedOut();
-    showToast('Signed out', 'info');
+    showSignedOut({ kind: 'info', text: 'Signed out' });
   });
 
   document.getElementById('refresh-btn').addEventListener('click', async () => {
@@ -2006,7 +2024,10 @@ function renderInstitutionDetail(data) {
         · ${filing.holdings_count} positions · ${fmtMoney(filing.total_value)}
       </div>
     </div>
-    <div class="holdings-table">${rows || '<p class="empty-state small">No holdings parsed.</p>'}</div>`;
+    <div class="holdings-table">${rows || '<p class="empty-state small">No holdings parsed.</p>'}</div>
+    ${data.teaser ? upgradeNote(`Showing the top ${holdings.length} of ${data.total} positions — unlock the full list on Plus.`) : ''}`;
+  // The panel opens under the grid, often below the fold: bring it into view.
+  detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 async function loadCongress() {
@@ -2014,8 +2035,26 @@ async function loadCongress() {
     const data = await api(`/api/smart-money/congress?scope=${congressScope}&limit=60`);
     cachedCongress = data.trades || [];
     congressTeaser = data.teaser ? { total: data.total } : null;
+    document.getElementById('congress-sample-badge')?.classList.toggle('hidden', !data.sample);
+    renderCongressAsOf(data.newestDisclosure, data.sample);
     renderCongress();
   } catch (err) { console.error('Congress load error:', err); }
+}
+
+// How recent the list is. A source that has stopped looks the same as one with nothing
+// new, so past the legal reporting lag the line says nothing newer has come in.
+const CONGRESS_STALE_DAYS = 45;
+function renderCongressAsOf(newest, sample) {
+  const el = document.getElementById('congress-asof');
+  if (!el) return;
+  if (!newest || sample) { el.classList.add('hidden'); return; }
+  const age = lagDays(newest, new Date().toISOString().slice(0, 10));
+  const stale = age != null && age > CONGRESS_STALE_DAYS;
+  el.textContent = stale
+    ? `Newest disclosure on record: ${fmtDate(newest)}. Nothing newer has come in for ${age} days, so recent trades are missing from this list.`
+    : `Newest disclosure on record: ${fmtDate(newest)}.`;
+  el.classList.toggle('stale', stale);
+  el.classList.remove('hidden');
 }
 
 function renderCongress() {
@@ -3920,7 +3959,7 @@ function briefScoreClass(score) {
 
 function renderBrief(b) {
   const c = b.company || {};
-  const meta = [c.sector, c.exchange, c.country].filter(Boolean).join(' · ');
+  const meta = [...new Set([c.sector, c.exchange, c.country].filter(Boolean))].join(' · ');
   const execs = (c.executives || []).map(e => {
     const role = [e.former ? 'former' : '', e.role || ''].filter(Boolean).join(' ');
     return `${escapeHtml(e.name)}${role ? ` (${escapeHtml(role)})` : ''}`;
@@ -3938,7 +3977,7 @@ function renderBrief(b) {
   };
   const sentimentBlock = s ? `
     <div class="brief-stats">
-      <div class="brief-stat" data-tip="${escapeHtml(TT.sentiment)}" aria-label="${escapeHtml(TT.sentiment)}"><span class="brief-stat-label">Sentiment</span><span class="brief-stat-val ${briefScoreClass(s.acute)}">${escapeHtml(s.label)}</span></div>
+      <div class="brief-stat" data-tip="${escapeHtml(TT.sentiment)}" aria-label="${escapeHtml(TT.sentiment)}"><span class="brief-stat-label">Sentiment</span><span class="brief-stat-val ${['positive', 'negative'].includes(s.label) ? s.label : 'neutral'}">${escapeHtml(s.label)}</span></div>
       <div class="brief-stat" data-tip="${escapeHtml(TT.acute)}" aria-label="${escapeHtml(TT.acute)}"><span class="brief-stat-label">Acute</span><span class="brief-stat-val">${s.acute ?? '—'}</span></div>
       <div class="brief-stat" data-tip="${escapeHtml(TT.momentum)}" aria-label="${escapeHtml(TT.momentum)}"><span class="brief-stat-label">Momentum</span><span class="brief-stat-val">${escapeHtml(s.momentum || 'flat')}</span></div>
       <div class="brief-stat" data-tip="${escapeHtml(TT.z)}" aria-label="${escapeHtml(TT.z)}"><span class="brief-stat-label">90d z-score</span><span class="brief-stat-val">${s.baseline_z != null ? s.baseline_z : 'n/a'}</span></div>
@@ -3965,7 +4004,7 @@ function renderBrief(b) {
   const sm = b.smart_money || { institutions: [], congress: [] };
   const smBits = [];
   if (sm.institutions && sm.institutions.length) smBits.push(`${sm.institutions.length} fund${sm.institutions.length > 1 ? 's' : ''} hold it (${escapeHtml(sm.institutions[0].name)}…)`);
-  if (sm.congress && sm.congress.length) smBits.push(`${sm.congress.length} recent congress trade${sm.congress.length > 1 ? 's' : ''}`);
+  if (sm.congress && sm.congress.length) smBits.push(`${sm.congress.length} ${sm.congress_sample ? 'sample (not real) ' : 'recent '}congress trade${sm.congress.length > 1 ? 's' : ''}`);
   const smBlock = smBits.length ? `<p class="brief-smartmoney">🏛️ ${smBits.join(' · ')}</p>` : '';
 
   return `
@@ -4475,6 +4514,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Mark all alerts as read
   document.getElementById('mark-all-read-btn').addEventListener('click', markAllRead);
+
+  showSignedOutNote();
 
   // ── Phase 5 boot: OAuth return, OAuth errors, reset + verify links ──
   {

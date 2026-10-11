@@ -618,11 +618,29 @@ section('\nstrategy tools (v2 only):');
     // The engine reports returns as fractions: 0.04256 = 4.256%.
     const data = { report: { metrics: { total_return_pct: '0.04256', max_drawdown_pct: '-0.021', final_equity: '104256.4' }, benchmark: { benchmark_total_return_pct: '0.06' }, trades: [{}, {}] }, open_positions: [{}] };
     const s = ST.summarizeReplay(row, data, NOW);
-    assert.deepStrictEqual([s.return_pct, s.buy_hold_return_pct, s.max_drawdown_pct, s.trades, s.final_equity, s.in_position], [4.26, 6, -2.1, 2, 104256, true]);
-    assert.deepStrictEqual([s.from, s.to, s.days], ['2026-09-07', '2026-10-07', 31]);
+    assert.deepStrictEqual([s.return_pct, s.buy_hold_return_pct, s.max_drawdown_pct, s.closed_trades, s.final_equity, s.in_position], [4.26, 6, -2.1, 2, 104256, true]);
+    assert.ok(!('trades' in s)); // "trades: 0" beside in_position: true read as "never traded"; the count is of closed round trips
+    assert.deepStrictEqual([s.from, s.to, s.days], ['2026-09-07', '2026-10-07', 30]); // whole days between the two dates, whatever the hour
     const stopped = ST.summarizeReplay({ ...row, status: 'stopped', stopped_at: new Date('2026-09-17T00:00:00') }, data, NOW);
     assert.deepStrictEqual([stopped.to, stopped.days], ['2026-09-17', 10]);
     assert.strictEqual(ST.summarizeReplay(row, {}, NOW).return_pct, null); // engine gave nothing → no number invented
+  });
+  check('replay summary: a deployment with no completed day has no result, and its equity is the cash put in', () => {
+    const NOW = new Date('2026-10-07T12:00:00');
+    const row = { id: 9, name: 'S', symbol: 'NVDA', exchange: 'US', status: 'active', deployed_at: new Date('2026-10-07T09:00:00'), initial_cash: '50000' };
+    // What the engine sends for an empty trading window: every figure zero beside the cash.
+    const data = { n_bars: 0, final_cash: '50000.00', open_positions: [], report: { metrics: { total_return_pct: '0', initial_equity: '0.00', final_equity: '0.00' }, trades: [] } };
+    const s = ST.summarizeReplay(row, data, NOW);
+    assert.deepStrictEqual([s.days, s.return_pct, s.initial_cash, s.final_equity, s.in_position], [0, null, 50000, 50000, false]);
+    assert.ok(/no result yet/.test(s.no_result_yet) && !('closed_trades' in s) && !('max_drawdown_pct' in s));
+    // Stopped the day it was made: the same, and no negative or one-off day count.
+    assert.strictEqual(ST.summarizeReplay({ ...row, status: 'stopped', stopped_at: new Date('2026-10-07T15:00:00') }, data, NOW).days, 0);
+    // The shared settle step gives every other reader (the page, /v1, /mcp) the same figures.
+    const { settleEmptyReplay } = require('../server/services/strategyClient');
+    const settled = settleEmptyReplay(row, JSON.parse(JSON.stringify(data)));
+    assert.deepStrictEqual([settled.report.metrics.initial_equity, settled.report.metrics.final_equity, settled.no_session_yet], ['50000.00', '50000.00', true]);
+    const traded = { n_bars: 12, report: { metrics: { initial_equity: '50000.00', final_equity: '51200.00' } } };
+    assert.deepStrictEqual(settleEmptyReplay(row, traded), { n_bars: 12, report: { metrics: { initial_equity: '50000.00', final_equity: '51200.00' } } });
   });
   check('ranking: best return first, missing returns last', () => {
     assert.deepStrictEqual(ST.rankPerformance([{ id: 1, return_pct: -3 }, { id: 2, return_pct: null }, { id: 3, return_pct: 8 }]).map((r) => r.id), [3, 1, 2]);
