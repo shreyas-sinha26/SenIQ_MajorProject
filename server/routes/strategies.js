@@ -15,10 +15,11 @@ const { query, queryOne, execute } = require('../db');
 const { authMiddleware } = require('./auth');
 const { attachTier, requireTier } = require('../middleware/tier');
 const { STRATEGY_SERVICE } = require('../config');
-const { seniqDataIfNeeded, seniqDataForWatchlist } = require('../services/signalHistory');
+const { seniqDataForWatchlist } = require('../services/signalHistory');
 
 const { saveStrategy, strategyToJson, MAX_SAVED_STRATEGIES } = require('../services/strategyStore');
-const { callService, engineFailure, checkSymbols, parseCapital } = require('../services/strategyClient');
+const { runBacktest, runWalkForward } = require('../services/strategyRuns');
+const { callService, engineFailure, checkSymbols, shapeCatalog } = require('../services/strategyClient');
 const { idParam } = require('../middleware/idParam');
 const { userRateLimit, LIMITS } = require('../middleware/rateLimit');
 const { listPresets, instantiatePreset, compareWithoutSeniq } = require('../services/strategySignals');
@@ -52,11 +53,12 @@ router.post('/compare', requireTier('plus'), engineLimit, async (req, res) => {
   res.status(out.status).json({ error: out.error });
 });
 
-// GET /api/strategies/catalog — strategy list + param schemas (any tier).
+// GET /api/strategies/catalog — the strategy list (any tier). A plan whose strategies
+// level is "list" (Free) gets names and descriptions; the settings come with Plus.
 router.get('/catalog', async (req, res) => {
   const out = await callService('/api/strategies', { timeoutMs: STRATEGY_SERVICE.CATALOG_TIMEOUT_MS });
   if (out.status !== 200) return refuse(res, out);
-  res.json(out.data);
+  res.json(shapeCatalog(out.data, { settings: (req.tierCfg && req.tierCfg.strategies) !== 'list' }));
 });
 
 // POST /api/strategies/validate — check a Builder spec without running it
@@ -74,52 +76,17 @@ router.post('/validate', async (req, res) => {
 // POST /api/strategies/backtest — run one backtest (Plus+). Either a registry
 // strategy (`strategy` + `params`) or a Builder spec (`custom`).
 router.post('/backtest', requireTier('plus'), engineLimit, async (req, res) => {
-  const { strategy, custom, params, symbol, exchange, start_date, end_date, initial_cash } = req.body || {};
-  if ((!strategy && !custom) || !symbol || !start_date || !end_date) {
-    return res.status(400).json({ error: 'strategy (or custom), symbol, start_date and end_date are required' });
-  }
-  const capital = parseCapital(initial_cash);
-  if (!capital.ok) return res.status(400).json({ error: capital.error });
-  // Builder specs with SenIQ factors get that ticker's raw signal history
-  // pushed along; the service derives + aligns the series.
-  const seniqData = custom ? await seniqDataIfNeeded(custom, symbol) : null;
-
-  const out = await callService('/api/backtest', {
-    method: 'POST',
-    body: {
-      strategy: strategy || null,
-      custom: custom || null,
-      params: params || {},
-      symbol,
-      exchange: exchange || 'US',
-      start_date,
-      end_date,
-      initial_cash: capital.value,
-      seniq_data: seniqData,
-    },
-  });
-  if (out.status === 200) return res.json(out.data);
-  return refuse(res, out, 'invalid backtest request');
+  const out = await runBacktest(req.body || {});
+  if (out.ok) return res.json(out.data);
+  res.status(out.status).json({ error: out.error });
 });
 
 // POST /api/strategies/walk-forward — out-of-sample robustness check (Plus).
 // Same body as /backtest plus n_splits (2–12) and scheme (anchored | rolling).
 router.post('/walk-forward', requireTier('plus'), engineLimit, async (req, res) => {
-  const { strategy, custom, params, symbol, exchange, start_date, end_date, n_splits, scheme } = req.body || {};
-  if ((!strategy && !custom) || !symbol || !start_date || !end_date) {
-    return res.status(400).json({ error: 'strategy (or custom), symbol, start_date and end_date are required' });
-  }
-  const out = await callService('/api/walk-forward', {
-    method: 'POST',
-    body: {
-      strategy: strategy || null, custom: custom || null, params: params || {},
-      symbol, exchange: exchange || 'US', start_date, end_date,
-      n_splits: Number(n_splits) || 4, scheme: scheme || 'anchored',
-      seniq_data: custom ? await seniqDataIfNeeded(custom, symbol) : null,
-    },
-  });
-  if (out.status === 200) return res.json(out.data);
-  return refuse(res, out);
+  const out = await runWalkForward(req.body || {});
+  if (out.ok) return res.json(out.data);
+  res.status(out.status).json({ error: out.error });
 });
 
 // ─── Saved strategies (Your Strategies) — all Plus+ ─────────
@@ -144,7 +111,9 @@ router.put('/saved/:id', requireTier('plus'), async (req, res) => {
   const row = await queryOne(
     'SELECT * FROM user_strategies WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
   if (!row) return res.status(404).json({ error: 'strategy not found' });
-  const newName = name != null ? String(name).trim().slice(0, 80) : row.name;
+  // Text only: a number or an object used to be stored as "12345" or "[object Object]".
+  if (name != null && typeof name !== 'string') return res.status(400).json({ error: 'name must be text' });
+  const newName = name != null ? name.trim().slice(0, 80) : row.name;
   if (!newName) return res.status(400).json({ error: 'name cannot be empty' });
   const watch = symbols != null ? checkSymbols(symbols) : { ok: true, symbols: row.symbols };
   if (!watch.ok) return res.status(400).json({ error: watch.error });

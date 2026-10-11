@@ -8,7 +8,7 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://offline:offli
 const assert = require('node:assert');
 
 // ── Stand-in database: just the statements the store issues ──
-const db = { strategies: [], deployments: [], statements: 0 };
+const db = { strategies: [], deployments: [], statements: 0, lockKeys: [] };
 let nextId = 0;
 async function queryOne(sql, params = []) {
   db.statements++;
@@ -29,6 +29,10 @@ async function queryOne(sql, params = []) {
     db.deployments.push(row);
     return row;
   }
+  if (q.startsWith('SELECT id FROM paper_deployments WHERE user_id = $1 AND status = \'active\' AND name = $2')) {
+    const [user_id, name, symbol, exchange, cash] = params;
+    return db.deployments.find((r) => r.user_id === user_id && r.status === 'active' && r.name === name && r.symbol === symbol && r.exchange === exchange && r.initial_cash === cash) || null;
+  }
   if (q.startsWith("UPDATE paper_deployments SET status = 'stopped'")) {
     const row = db.deployments.find((r) => r.id === Number(params[0]) && r.user_id === params[1] && r.status === 'active');
     if (row) { row.status = 'stopped'; row.stopped_at = new Date(2026, 9, 10); }
@@ -36,15 +40,25 @@ async function queryOne(sql, params = []) {
   }
   throw new Error(`unexpected statement: ${q.slice(0, 80)}`);
 }
+// db.locked: one caller at a time per key, as the advisory lock gives; the client it hands
+// over answers the same statements. `db.lockKeys` records the keys asked for.
+const queues = new Map();
+async function locked(key, fn) {
+  db.lockKeys.push(key);
+  const turn = (queues.get(key) || Promise.resolve()).then(() => fn({ query: async (sql, params) => { const row = await queryOne(sql, params); return { rows: row ? [row] : [] }; } }));
+  queues.set(key, turn.catch(() => {}));
+  return turn;
+}
 require.cache[require.resolve('../server/db')] = {
   id: require.resolve('../server/db'), filename: require.resolve('../server/db'), loaded: true,
-  exports: { queryOne, query: async () => [], execute: async () => ({ rowCount: 0 }) },
+  exports: { queryOne, locked, query: async () => [], execute: async () => ({ rowCount: 0 }) },
 };
 
 const { saveStrategy, deployPaper, stopPaper, presetProblem } = require('../server/services/strategyStore');
-const { plainEngineError, engineFailure, checkSymbols, ENGINE_OFFLINE } = require('../server/services/strategyClient');
+const { plainEngineError, engineFailure, checkSymbols, checkRun, parseSplits, shapeCatalog, ENGINE_OFFLINE } = require('../server/services/strategyClient');
+const { runBacktest, runWalkForward } = require('../server/services/strategyRuns');
 
-const reset = () => { db.strategies = []; db.deployments = []; db.statements = 0; nextId = 0; };
+const reset = () => { db.strategies = []; db.deployments = []; db.statements = 0; db.lockKeys = []; nextId = 0; };
 
 let passed = 0;
 const pending = [];
@@ -67,15 +81,22 @@ const CATALOG = [
 ];
 const VALID_SPEC = { name: 'Mine', factors: [{ id: 'f1', fn: 'ema', params: { period: 20 } }], entry: { all: [{ gt: ['close', 'f1'] }] }, exit: { any: [{ lt: ['close', 'f1'] }] } };
 // A stand-in engine: answers the catalog and the spec check; counts what it was asked.
-function engineStub({ catalogStatus = 200, valid = true } = {}) {
+// `check`: what the engine's own build of a preset says ({ status, data }); `slowMs` makes
+// every answer take that long, so several saves sent together all pass the first count.
+function engineStub({ catalogStatus = 200, valid = true, check = { status: 200, data: { valid: true, error: null } }, slowMs = 0 } = {}) {
   const calls = [];
-  const fn = async (path) => {
+  const fn = async (path, opts = {}) => {
     calls.push(path);
+    fn.bodies.push(opts.body);
+    if (slowMs) await new Promise((r) => setTimeout(r, slowMs));
     if (path === '/api/strategies') return catalogStatus === 200 ? { status: 200, data: { strategies: CATALOG } } : { status: catalogStatus, data: {} };
     if (path === '/api/strategies/validate') return { status: 200, data: valid ? { valid: true, errors: [] } : { valid: false, errors: ['exit: needs at least one exit condition'] } };
+    if (path === '/api/strategies/check') return check;
+    if (path === '/api/backtest' || path === '/api/walk-forward') return { status: 200, data: { ran: path } };
     throw new Error(`unexpected engine call ${path}`);
   };
   fn.calls = calls;
+  fn.bodies = [];
   return fn;
 }
 
@@ -89,8 +110,14 @@ check('the refusals users met are reworded; an unknown one is passed on as it is
   assert.strictEqual(plainEngineError('"unknown strategy: \'NoSuchStrategy\'"'), 'There is no built-in strategy called "NoSuchStrategy".');
   assert.strictEqual(plainEngineError('OHLC out of [low,high] for CRYPTO:BTC @ 2026-10-10 00:00:00+05:30'), 'The price data for BTC has a faulty bar on 2026-10-10. Try a range that ends before that date.');
   assert.match(plainEngineError('date range 3d too short for 4 splits (need at least 5 days)'), /too short for the robustness check/);
-  assert.strictEqual(plainEngineError('fast must be < slow'), 'fast must be < slow');
+  assert.strictEqual(plainEngineError('some refusal nobody has met yet'), 'some refusal nobody has met yet');
   assert.strictEqual(plainEngineError(undefined), '');
+  // v2 L2 of the QA pass on v2.18: the engine's own wording that still reached the page.
+  assert.strictEqual(plainEngineError("invalid literal for int() with base 10: 'abc'"), 'A setting that must be a whole number was given "abc".');
+  assert.strictEqual(plainEngineError('start_date: Input should be a valid date or datetime, input is too short'), 'start_date must be a date written YYYY-MM-DD.');
+  assert.strictEqual(plainEngineError('fast period must be < slow period'), 'The fast period must be shorter than the slow period.');
+  assert.strictEqual(plainEngineError('MACD fast must be < slow'), 'The fast period must be shorter than the slow period.');
+  assert.strictEqual(plainEngineError('invalid strategy spec: entry.all: must be a non-empty list'), 'This strategy cannot run yet: the entry rule has no conditions');
   for (const text of ['lookback', 'exceeds cap', 'yfinance', 'no bars returned']) {
     assert.ok(!["interval '1d' lookback 7587d exceeds cap 1825d", 'no bars returned for US:ZZZZQQ 2025-10-10..2026-10-10', 'unsupported exchange for yfinance: MARS'].map(plainEngineError).join(' ').includes(text), `engine wording left in: ${text}`);
   }
@@ -100,9 +127,9 @@ check('unreachable is "offline" (503); a failure of the engine\'s own is not (50
   const failed = engineFailure({ status: 500, data: {} });
   assert.strictEqual(failed.status, 502);
   assert.ok(!/offline/i.test(failed.error) && /running/.test(failed.error));
-  assert.deepStrictEqual(engineFailure({ status: 400, data: { detail: 'fast must be < slow' } }), { status: 400, error: 'fast must be < slow' });
+  assert.deepStrictEqual(engineFailure({ status: 400, data: { detail: 'a reason of its own' } }), { status: 400, error: 'a reason of its own' });
   assert.deepStrictEqual(engineFailure({ status: 404, data: { detail: '"unknown strategy: \'X\'"' } }), { status: 404, error: 'There is no built-in strategy called "X".' });
-  assert.deepStrictEqual(engineFailure({ status: 422, data: { detail: [{ loc: ['body', 'start_date'], msg: 'Input should be a valid date' }] } }), { status: 400, error: 'start_date: Input should be a valid date' });
+  assert.deepStrictEqual(engineFailure({ status: 422, data: { detail: [{ loc: ['body', 'start_date'], msg: 'Input should be a valid date' }] } }), { status: 400, error: 'start_date must be a date written YYYY-MM-DD.' });
   assert.deepStrictEqual(engineFailure({ status: 400, data: {} }, 'replay failed'), { status: 400, error: 'replay failed' });
 });
 
@@ -119,6 +146,11 @@ check('a misspelt market, a non-symbol and a sixth entry are refused with the re
   assert.match(checkSymbols([{}]).error, /\(empty\)/);
   assert.match(checkSymbols(Array.from({ length: 6 }, (_, i) => ({ symbol: `S${i}` }))).error, /at most 5 symbols; this one has 6/);
   assert.match(checkSymbols('NVDA').error, /must be a list/);
+});
+check('an entry may be written as the page shows it; the same symbol twice is refused', () => {
+  assert.deepStrictEqual(checkSymbols(['nvda', 'RELIANCE:NSE']), { ok: true, symbols: [{ symbol: 'NVDA', exchange: 'US' }, { symbol: 'RELIANCE', exchange: 'NSE' }] });
+  assert.match(checkSymbols([{ symbol: 'NVDA' }, { symbol: 'nvda', exchange: 'us' }]).error, /NVDA is on the watchlist twice/);
+  assert.strictEqual(checkSymbols([{ symbol: 'TCS', exchange: 'NSE' }, { symbol: 'TCS', exchange: 'BSE' }]).ok, true); // two listings are two entries
 });
 
 section('\na built-in strategy and its settings:');
@@ -178,6 +210,39 @@ check('a Builder spec is still checked by the engine; a duplicate name is a plai
   const dup = await saveStrategy(USER, { custom: VALID_SPEC }, { engine: engineStub() });
   assert.deepStrictEqual([dup.ok, dup.status], [false, 400]);
   assert.match(dup.error, /already have a strategy named “Mine”/);
+});
+
+check('settings that cannot go together are refused by the engine\'s own build, in plain words', async () => {
+  reset();
+  const engine = engineStub({ check: { status: 200, data: { valid: false, error: 'fast period must be < slow period' } } });
+  const out = await saveStrategy(USER, { name: 'EMA 50/10', strategy: 'EMACrossover', params: { fast: 50, slow: 10 } }, { engine });
+  assert.deepStrictEqual([out.ok, out.status, out.error], [false, 400, 'The fast period must be shorter than the slow period.']);
+  assert.deepStrictEqual(engine.bodies[engine.calls.indexOf('/api/strategies/check')], { strategy: 'EMACrossover', params: { fast: 50, slow: 10 } });
+  assert.strictEqual(db.strategies.length, 0);
+  // An engine from before that check answers 404: the save goes ahead on the catalog check alone.
+  const older = await saveStrategy(USER, { name: 'EMA 20/50', strategy: 'EMACrossover', params: { fast: 20, slow: 50 } }, { engine: engineStub({ check: { status: 404, data: {} } }) });
+  assert.strictEqual(older.ok, true);
+});
+check('a spec and a preset together, or a name that is not text, are refused', async () => {
+  reset();
+  const both = await saveStrategy(USER, { name: 'Both', custom: VALID_SPEC, strategy: 'EMACrossover' }, { engine: engineStub() });
+  assert.deepStrictEqual([both.ok, both.status], [false, 400]);
+  assert.match(both.error, /not both/);
+  for (const name of [12345, { a: 1 }, ['x']]) {
+    const out = await saveStrategy(USER, { name, strategy: 'EMACrossover' }, { engine: engineStub() });
+    assert.deepStrictEqual([out.ok, out.status, out.error], [false, 400, 'name must be text'], JSON.stringify(name));
+  }
+  assert.strictEqual(db.strategies.length, 0);
+});
+check('five saves sent together with one place left: one goes in', async () => {
+  reset();
+  for (let i = 0; i < 19; i++) db.strategies.push({ id: 1000 + i, user_id: USER, name: `old ${i}` });
+  const engine = engineStub({ slowMs: 5 }); // all five pass the first count before any insert
+  const outs = await Promise.all([1, 2, 3, 4, 5].map((i) => saveStrategy(USER, { name: `new ${i}`, strategy: 'EMACrossover', params: { fast: 20, slow: 50 } }, { engine })));
+  assert.deepStrictEqual(outs.map((o) => o.ok).filter(Boolean).length, 1);
+  assert.ok(outs.filter((o) => !o.ok).every((o) => o.status === 400 && /Limit reached \(20 saved strategies\)/.test(o.error)));
+  assert.strictEqual(db.strategies.filter((r) => r.user_id === USER).length, 20);
+  assert.ok(db.lockKeys.length === 5 && db.lockKeys.every((k) => k === `strategies:${USER}`));
 });
 
 section('\ndeploying:');
@@ -244,6 +309,97 @@ check('a deployment that replays is stored: symbol and market upper-cased, the t
   assert.strictEqual(db.deployments.length, 1);
   const dflt = await deployPaper(USER, { strategy_id: String(id), symbol: 'AAPL' }, { replay });
   assert.deepStrictEqual([dflt.ok, dflt.data.exchange, dflt.data.initial_cash], [true, 'US', '100000']);
+});
+
+check('four deploys sent together with two places left: two go in', async () => {
+  const id = await withSaved();
+  for (let i = 0; i < 8; i++) db.deployments.push({ id: 2000 + i, user_id: USER, status: 'active', name: 'other', symbol: `S${i}`, exchange: 'US', initial_cash: 100000 });
+  const slow = async () => { await new Promise((r) => setTimeout(r, 5)); return { status: 200, data: {} }; }; // all four pass the first count
+  const outs = await Promise.all(['AAPL', 'MSFT', 'NVDA', 'GOOGL'].map((symbol) => deployPaper(USER, { strategy_id: id, symbol }, { replay: slow })));
+  assert.strictEqual(outs.filter((o) => o.ok).length, 2);
+  assert.ok(outs.filter((o) => !o.ok).every((o) => o.status === 400 && /Limit reached \(10 active deployments\)/.test(o.error)));
+  assert.strictEqual(db.deployments.filter((r) => r.user_id === USER && r.status === 'active').length, 10);
+  assert.ok(db.lockKeys.filter((k) => k === `paper:${USER}`).length === 4);
+});
+check('the same strategy, symbol and cash a second time the same day is refused; a different cash is not', async () => {
+  const id = await withSaved();
+  const replay = okReplay();
+  assert.strictEqual((await deployPaper(USER, { strategy_id: id, symbol: 'AAPL', initial_cash: 50000 }, { replay })).ok, true);
+  const again = await deployPaper(USER, { strategy_id: id, symbol: 'aapl', initial_cash: '50000' }, { replay });
+  assert.deepStrictEqual([again.ok, again.status], [false, 400]);
+  assert.match(again.error, /already deployed on AAPL with that cash today/);
+  assert.strictEqual((await deployPaper(USER, { strategy_id: id, symbol: 'AAPL', initial_cash: 60000 }, { replay })).ok, true);
+  assert.strictEqual(db.deployments.length, 2);
+});
+
+section('\na one-off run, checked before the engine is asked:');
+const RUN = { strategy: 'EMACrossover', params: { fast: 12, slow: 26 }, symbol: 'aapl', start_date: '2025-10-01', end_date: '2026-10-09' };
+const noSeniq = async () => null;
+check('a symbol, a market and two dates', () => {
+  assert.deepStrictEqual(checkRun(RUN), { ok: true, symbol: 'AAPL', exchange: 'US' });
+  assert.match(checkRun({ ...RUN, symbol: '<img src=x>' }).error, /does not look like a symbol/);
+  assert.match(checkRun({ ...RUN, exchange: 'MARS' }).error, /Unknown market "MARS"/);
+  assert.strictEqual(checkRun({ ...RUN, start_date: '2025-02-30' }).error, 'start_date must be a date written YYYY-MM-DD.');
+  assert.strictEqual(checkRun({ ...RUN, end_date: 'abc' }).error, 'end_date must be a date written YYYY-MM-DD.');
+  assert.strictEqual(checkRun({ ...RUN, start_date: '2026-10-10' }).error, 'The end date is before the start date.');
+  assert.deepStrictEqual([undefined, '', '6', 12].map((x) => parseSplits(x).value), [4, 4, 6, 12]);
+  for (const bad of [0, 1, 13, 'abc', 2.5, {}]) assert.strictEqual(parseSplits(bad).ok, false, String(bad));
+});
+check('a backtest with a bad symbol, date, capital or setting never reaches the engine\'s run', async () => {
+  const cases = [
+    [{ ...RUN, symbol: '<img src=x>' }, /does not look like a symbol/],
+    [{ ...RUN, end_date: '2026-13-01' }, /end_date must be a date/],
+    [{ ...RUN, initial_cash: 0 }, /Starting capital/],
+    [{ ...RUN, params: { fast: 12.7 } }, /fast must be a whole number/],
+    [{ ...RUN, params: { turbo: true } }, /has no setting called "turbo"/],
+    [{ ...RUN, strategy: 'NoSuchStrategy' }, /There is no built-in strategy called "NoSuchStrategy"/],
+    [{ ...RUN, strategy: undefined }, /are required/],
+    [{ ...RUN, strategy: undefined, custom: 'spec' }, /custom must be a Builder spec/],
+  ];
+  for (const [body, text] of cases) {
+    const engine = engineStub();
+    const out = await runBacktest(body, { engine, seniqData: noSeniq });
+    assert.deepStrictEqual([out.ok, out.status], [false, 400], JSON.stringify(body));
+    assert.match(out.error, text);
+    assert.ok(!engine.calls.includes('/api/backtest'));
+  }
+});
+check('a good backtest goes to the engine with the symbol and market cleaned; a Builder spec skips the preset check', async () => {
+  const engine = engineStub();
+  const out = await runBacktest({ ...RUN, exchange: 'nasdaq', initial_cash: '50000' }, { engine, seniqData: noSeniq });
+  assert.deepStrictEqual(out, { ok: true, data: { ran: '/api/backtest' } });
+  assert.deepStrictEqual(engine.bodies[engine.calls.indexOf('/api/backtest')],
+    { strategy: 'EMACrossover', custom: null, params: { fast: 12, slow: 26 }, symbol: 'AAPL', exchange: 'NASDAQ', start_date: '2025-10-01', end_date: '2026-10-09', seniq_data: null, initial_cash: '50000' });
+  const custom = engineStub();
+  const asked = [];
+  await runBacktest({ custom: VALID_SPEC, symbol: 'AAPL', start_date: '2025-10-01', end_date: '2026-10-09' }, { engine: custom, seniqData: async (spec, symbol) => { asked.push(symbol); return { sentiment: [] }; } });
+  assert.deepStrictEqual(custom.calls, ['/api/backtest']);
+  assert.deepStrictEqual([asked, custom.bodies[0].seniq_data, custom.bodies[0].strategy], [['AAPL'], { sentiment: [] }, null]);
+});
+check('the robustness check refuses a fold count or a scheme it does not have, instead of using 4', async () => {
+  for (const [extra, text] of [[{ n_splits: 0 }, /n_splits must be a whole number from 2 to 12/], [{ n_splits: 'abc' }, /n_splits/], [{ scheme: 'sideways' }, /scheme must be/]]) {
+    const engine = engineStub();
+    const out = await runWalkForward({ ...RUN, ...extra }, { engine, seniqData: noSeniq });
+    assert.deepStrictEqual([out.ok, out.status, engine.calls.length], [false, 400, 0], JSON.stringify(extra));
+    assert.match(out.error, text);
+  }
+  const engine = engineStub();
+  assert.strictEqual((await runWalkForward({ ...RUN, n_splits: '6' }, { engine, seniqData: noSeniq })).ok, true);
+  const sent = engine.bodies[engine.calls.indexOf('/api/walk-forward')];
+  assert.deepStrictEqual([sent.n_splits, sent.scheme], [6, 'anchored']);
+});
+
+section('\nthe catalog as SenIQ gives it out:');
+check('marketplace fields are left out; a list-only plan gets no settings', () => {
+  const raw = { strategies: [{ name: 'EMACrossover', version: '1', label: 'EMA Crossover', description: 'd', params: [{ name: 'fast' }], category: 'Trend', style: 'Directional', instrument: 'Equity',
+    trading_style: 'Swing Trading', min_capital: 50000, max_capital: 1000000, tags: ['trend'], backtest_defaults: {}, provider: { name: 'SenIQ', deployed_by: 0, algos_in_market: 8, active_since: '2026-01-01' } }], builder: { indicators: ['ema'] } };
+  const full = shapeCatalog(raw);
+  assert.deepStrictEqual(Object.keys(full.strategies[0]).sort(), ['backtest_defaults', 'category', 'description', 'label', 'name', 'params', 'style', 'tags', 'trading_style', 'version']);
+  assert.deepStrictEqual(full.builder, { indicators: ['ema'] });
+  const list = shapeCatalog(raw, { settings: false });
+  assert.ok(!('params' in list.strategies[0]) && !('backtest_defaults' in list.strategies[0]) && list.settings_hidden === true);
+  assert.ok(!/min_capital|algos_in_market|deployed_by|active_since/.test(JSON.stringify([full, list])));
+  assert.deepStrictEqual(shapeCatalog(undefined).strategies, []);
 });
 
 section('\nstopping:');

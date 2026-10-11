@@ -146,6 +146,26 @@ check('list_strategy_presets keeps the SenIQ templates and signals when the buil
   assert.strictEqual(out.presets.length + (out.presets_not_shown || 0), 15);
 });
 
+section('v1 M6 / M7 — the Free plan\'s "top event only":');
+check('a top-only plan gets the engine\'s figures for its one most important story and no other', () => {
+  const { topImpactOnly } = require('../server/routes/news');
+  const { TIERS } = require('../server/config');
+  const story = (id, impact) => ({ id, title: `s${id}`, impact, impact_level: impact == null ? null : 'high', direction: impact == null ? null : 'negative', exposure_pct: impact == null ? null : 12.5, sentiment: { label: 'negative', score: 0.3 } });
+  const stories = [story(1, 0.2), story(2, 0.9), story(3, null), story(4, 0.5)];
+  const free = topImpactOnly(stories, TIERS.free);
+  assert.deepStrictEqual(free.map((s) => s.impact), [null, 0.9, null, null]);
+  assert.deepStrictEqual(free.map((s) => [s.impact_level, s.direction, s.exposure_pct]).filter((x) => x.some((v) => v != null)), [['high', 'negative', 12.5]]);
+  assert.deepStrictEqual(free.map((s) => s.title), ['s1', 's2', 's3', 's4']); // the stories and their order stay
+  assert.ok(free.every((s) => s.sentiment.label === 'negative'));             // and each one's own tone
+  assert.strictEqual(topImpactOnly(stories, TIERS.plus), stories);
+  assert.strictEqual(stories[0].impact, 0.2);                                  // the input is not changed
+});
+check('the leftover live-lookup route is gone', () => {
+  const router = require('../server/routes/news');
+  const paths = router.stack.filter((l) => l.route).map((l) => l.route.path);
+  assert.ok(paths.includes('/sentiment/:ticker/drivers') && !paths.includes('/sentiment/:ticker'), paths.join(' '));
+});
+
 (async () => {
   for (const step of pending) await step();
   console.log(`\n${passed} QA-finding checks passed`);
