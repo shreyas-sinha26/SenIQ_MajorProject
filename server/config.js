@@ -734,19 +734,37 @@ const INDIA_SMART_MONEY = {
   REPORT: { ROWS: 3, DEAL_DAYS: 7, INSIDER_DAYS: 90 },
 };
 
+// ─── Finnhub (services/finnhubGate.js) ───────────────────────
+// Every Finnhub call goes through one gate. Finnhub counts company-news calls and every other
+// call (quotes, the IPO calendar) separately, 60 a minute each (its x-ratelimit-* headers,
+// read 2026-10-11), so the gate keeps two meters and holds each to 50.
+const FINNHUB = {
+  BASE_URL: 'https://finnhub.io/api/v1',
+  PER_MINUTE: 50,              // a meter's calls in any 60 seconds, of Finnhub's 60
+  // The background lane (the pipeline and the other scheduled jobs): one call at a time, this
+  // far apart, so at most 30 a minute.
+  BACKGROUND_GAP_MS: 2000,
+  // The interactive lane (someone's page or click): sent at once, up to this many a minute,
+  // the part of PER_MINUTE the background lane never uses. Past it the call is not sent and
+  // the caller falls back (Yahoo for a price).
+  INTERACTIVE_PER_MINUTE: 20,
+  // Company-news calls one pipeline run may plan: the background lane's 30 a minute over 8
+  // of the 10 minutes between two runs.
+  NEWS_CALLS_PER_RUN: 240,
+  TIMEOUT_MS: 15000,
+};
+
 // ─── US coverage (services/usNews.js) ────────────────────────
-// The US shares nobody holds are taken through Finnhub's company news in turn, 30 a run and
-// a run every 10 minutes, in two queues: about 100 curated names at 5 a run, each visited
-// about every 3 hours, and about 1,400 others at 25 a run, each about every 9 hours. A visit
+// The US shares nobody holds are taken through Finnhub's company news in turn, 90 a run and
+// a run every 10 minutes, in two queues: about 100 curated names at 15 a run, each visited
+// about every hour, and about 1,400 others at 75 a run, each about every 3 hours. A visit
 // asks for 7 days, so nothing is missed between two.
 const US_NEWS = {
-  PER_RUN: 30,
-  CURATED_PER_RUN: 5,      // of those 30, the curated queue's places
-  // Finnhub's free plan allows 60 calls a minute, and US quotes use the same key. A run's
-  // news calls (held tickers, IPO Watch's, the rotation) stay within this many, so the
-  // rotation shrinks as holdings grow and stops when they alone reach it.
-  CALLS_PER_RUN: 50,
-  CALL_GAP_MS: 1000,       // between two rotation calls
+  PER_RUN: 90,
+  CURATED_PER_RUN: 15,     // of those 90, the curated queue's places
+  // A run's news calls go out in a fixed order through the gate's background lane: the held
+  // tickers, IPO Watch's, then the rotation, which takes what FINNHUB.NEWS_CALLS_PER_RUN
+  // leaves (all 90 until about 140 tickers are held).
   STORIES_PER_NAME: 10,    // the newest of a ticker's 7 days, for a held name and a rotated one
 };
 
@@ -779,15 +797,18 @@ const IPO_WATCH = {
   // window runs as long as prices are fetched (RETURN_GIVE_UP_DAYS) — at 90 the issue left
   // the page the day before its last figure could be shown.
   RECENT_LISTED_DAYS: 100,
-  // The poll runs once a day and never on start, so a server that was down at poll time
-  // shows yesterday's calendar. Older than this and the page says so.
+  // The poll runs once a day, so a server that was down at poll time shows yesterday's
+  // calendar. Older than this and the page says so.
   STALE_AFTER_HOURS: 30,
+  // At start the US calendar alone is refreshed if it is older than this (one call to
+  // Finnhub, an official API). India's waits for the daily poll.
+  CATCH_UP_AFTER_HOURS: 24,
   UNLISTED_AFTER_CLOSE_DAYS: 10, // closed this long with no listing date on record → off the calendar
   // Grey market premium is hearsay from one aggregator. A reading older than this is not
   // shown at all — an old number passed off as current is worse than none.
   GMP_STALE_HOURS: 36,           // the poll is daily; this allows one late run
-  // The calendar is polled once a day, never on boot: the sources are unofficial pages, so
-  // a restart loop must not turn into a burst of requests.
+  // The calendar is polled once a day. India's sources are never asked on boot: they are
+  // unofficial pages, so a restart loop must not turn into a burst of requests.
   CRON: '15 9 * * *',            // 09:15, in TIMEZONE — as the market opens
   // Sent on every request. Says who we are; override with IPO_WATCH_USER_AGENT.
   USER_AGENT: process.env.IPO_WATCH_USER_AGENT || 'Mozilla/5.0 (compatible; SenIQ/1.0; admin@xynthis.com)',
@@ -804,7 +825,6 @@ const IPO_WATCH = {
   STORY_READS_PER_RUN: 60,       // linked stories read for tone a run (FinBERT, or the word list)
   YAHOO_SEARCH_URL: 'https://query2.finance.yahoo.com/v1/finance/search',   // unofficial, like the price route
   // US issues come from Finnhub's IPO calendar (FINNHUB_API_KEY), in the same daily poll.
-  FINNHUB_IPO_URL: 'https://finnhub.io/api/v1/calendar/ipo',
   US_LOOKBACK_DAYS: 30,          // how far back each poll asks for US filings, pricings and withdrawals
   US_LOOKAHEAD_DAYS: 60,         // ...and how far ahead (Finnhub rarely dates anything past the week)
   // Returns after listing, read from Yahoo's daily prices for issues that have a ticker.
@@ -816,9 +836,10 @@ const IPO_WATCH = {
   // Graduation into the company reference: the price feed's opening price on the listing day
   // must be this close to the listing price the source gave, or the ticker is not trusted.
   GRADUATE_PRICE_TOLERANCE: 0.02,
-  // US issues with a ticker get their company news fetched in the news pipeline, so stories
-  // exist to link: the newest few, a request each a pass.
-  MONITOR_TICKERS: 10,
+  // US issues with a ticker (not a SPAC, not withdrawn) get their company news fetched in the
+  // news pipeline, so stories exist to link: every one with an event in MONITOR_DAYS, a
+  // request each, all of them once in MONITOR_RUNS runs.
+  MONITOR_RUNS: 3,
   MONITOR_DAYS: 30,
   TIMEOUT_MS: 20000,
 };
@@ -915,4 +936,4 @@ const SESSION = {
   REAUTH_MINUTES: 10,    // how long a password confirmation covers sensitive actions
 };
 
-module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, US_NEWS, RETENTION, STRATEGY_SERVICE, PAPER, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };
+module.exports = { SESSION, DISCLAIMER, TIERS, TIER_ORDER, PRICING, FEATURES, FINBERT, TARGETED, SENTIMENT, SOURCE_WEIGHTS, IMPACT, EVENT_TYPES, NEWS_RELEVANCE, MATERIALITY, ALERT_BUDGET, ALERT_EMAIL, ALERT_NARRATIVE, OUTCOMES, EVENTS, ONBOARDING, REPORTS, QA, NEWS_SEARCH, INGEST, SMART_MONEY, INDIA_SMART_MONEY, IPO_WATCH, FINNHUB, US_NEWS, RETENTION, STRATEGY_SERVICE, PAPER, APP_URL, OAUTH, EMAIL, AUTH_LIMITS, DISCLOSURES, REPORT_EMAIL, LLM };

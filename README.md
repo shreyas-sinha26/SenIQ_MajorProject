@@ -182,7 +182,7 @@ gracefully; `.env.example` documents every variable. The main ones:
 | `CLAUDE_REPORTS=1` + `ANTHROPIC_API_KEY` or `AIROUTER_API_KEY` | Claude writes the brief, Ask answers and alert explanations | Code-written text |
 | `INDIA_SMART_MONEY=1` + `NSE_USER_AGENT` | India deals and insider trades | US smart money only |
 | `INDIA_LISTED_NEWS=1` | News is matched for the Indian listed names nobody holds (nothing more is fetched) | Listed names are matched only while someone holds them |
-| `US_LISTED_NEWS=1` + `FINNHUB_API_KEY` | Company news is fetched for the US shares nobody holds, 30 names a run in rotation: 5 from the curated names (each about every 3 hours) and 25 from the rest (each about every 9) | Only held tickers get a company-news fetch |
+| `US_LISTED_NEWS=1` + `FINNHUB_API_KEY` | Company news is fetched for the US shares nobody holds, 90 names a run in rotation: 15 from the curated names (each about every hour) and 75 from the rest (each about every 3 hours) | Only held tickers get a company-news fetch |
 | `CONGRESS_TRADES_URL` | Live congressional trades | Bundled sample data |
 | `SEC_USER_AGENT` | Contact address for SEC EDGAR requests | Default user agent |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | "Sign in with Google" (callback `<APP_URL>/api/auth/oauth/google/callback`) | Button hidden |

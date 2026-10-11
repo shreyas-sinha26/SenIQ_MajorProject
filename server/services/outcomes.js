@@ -12,11 +12,17 @@
  *                        "materially moved" (the label). Price only resolves where
  *                        priceService has a quote for the ticker.
  *
+ * A price is asked for only when it will be stored: for an event with no starting price
+ * yet, and for one whose 1-day or 3-day mark has come. Every other ticker costs no quote.
+ *
  * Engagement labels (did the user open/dismiss) live on the alerts table (read/dismissed)
  * and are joined at training time.
  */
 
 const { EVENTS, EVENT_TYPES, OUTCOMES } = require('../config');
+
+// The tickers of the events that have no starting price yet. Pure.
+const needsPrice = (rows) => [...new Set(rows.filter((r) => !r.priced).map((r) => r.primary_ticker))];
 
 async function logEventFeatures() {
   const { query, execute } = require('../db');
@@ -28,12 +34,13 @@ async function logEventFeatures() {
     `SELECT e.id, e.primary_ticker, e.event_type, e.relevance_tier, e.source_count, e.first_seen,
             (SELECT avg(s.sentiment_score) FROM articles a JOIN article_sentiments s ON s.article_id = a.id
               WHERE a.event_id = e.id AND s.ticker = e.primary_ticker) AS sentiment_score,
-            (SELECT max(impact_score) FROM event_portfolio_impact i WHERE i.event_id = e.id) AS max_impact
+            (SELECT max(impact_score) FROM event_portfolio_impact i WHERE i.event_id = e.id) AS max_impact,
+            EXISTS (SELECT 1 FROM event_outcomes eo WHERE eo.event_id = e.id AND eo.price_at_event IS NOT NULL) AS priced
        FROM events e
       WHERE e.last_seen > now() - ($1 || ' days')::interval
         AND e.primary_ticker IS NOT NULL
         -- A curated name or someone's holding, as every event was before the listed names
-        -- nobody holds were tagged: each ticker here costs a quote on every run.
+        -- nobody holds were tagged: each ticker here costs a quote when its event is new.
         AND (EXISTS (SELECT 1 FROM companies c WHERE c.ticker = e.primary_ticker AND c.tier = 'curated')
              OR EXISTS (SELECT 1 FROM portfolio p WHERE p.ticker = e.primary_ticker))`,
     [win]
@@ -45,9 +52,12 @@ async function logEventFeatures() {
   for (const t of tickers) {
     try { zByTicker[t] = (await scoreTicker(t)).baseline.z; } catch { zByTicker[t] = null; }
   }
-  const acRows = await query('SELECT ticker, asset_class FROM companies WHERE ticker = ANY($1)', [tickers]);
+  // The starting price is kept once stored (the COALESCE below), so only an event without
+  // one needs a quote.
+  const toPrice = needsPrice(rows);
+  const acRows = toPrice.length ? await query('SELECT ticker, asset_class FROM companies WHERE ticker = ANY($1)', [toPrice]) : [];
   const acByTicker = Object.fromEntries(acRows.map((r) => [r.ticker, r.asset_class]));
-  const quotes = await getQuotes(tickers.map((t) => ({ ticker: t, assetClass: acByTicker[t] || 'equity' })));
+  const quotes = toPrice.length ? await getQuotes(toPrice.map((t) => ({ ticker: t, assetClass: acByTicker[t] || 'equity' }))) : {};
 
   let n = 0;
   for (const r of rows) {
@@ -79,7 +89,10 @@ async function resolveOutcomes() {
             c.asset_class
        FROM event_outcomes eo
        LEFT JOIN companies c ON c.ticker = eo.primary_ticker
-      WHERE eo.price_at_event IS NOT NULL AND (eo.price_1d IS NULL OR eo.price_3d IS NULL)`
+      WHERE eo.price_at_event IS NOT NULL
+        -- Only a mark that has come: a quote for one still a day away would be thrown away.
+        AND ((eo.price_1d IS NULL AND eo.logged_at <= now() - interval '1 day')
+          OR (eo.price_3d IS NULL AND eo.logged_at <= now() - interval '3 days'))`
   );
   if (rows.length === 0) return 0;
 
@@ -117,4 +130,4 @@ async function resolveOutcomes() {
   return n;
 }
 
-module.exports = { logEventFeatures, resolveOutcomes };
+module.exports = { logEventFeatures, resolveOutcomes, needsPrice };
