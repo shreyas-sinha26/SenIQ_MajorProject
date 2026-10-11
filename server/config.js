@@ -453,6 +453,10 @@ const QA = {
   // A model that thinks (Claude Haiku 5.5 and later) spends this limit on its thinking too:
   // at 1,000 two of six answers were cut off before or in the middle of the text.
   MAX_OUTPUT_TOKENS: 3000,
+  // How much the model thinks before it answers: low, medium, high, xhigh or max. Unset, the
+  // model's own default applies (medium on Claude Haiku 5.5). ASK_EFFORT in the environment
+  // sets it, so a level can be tried on the eval before it is made the default here.
+  EFFORT: ['low', 'medium', 'high', 'xhigh', 'max'].includes(process.env.ASK_EFFORT) ? process.env.ASK_EFFORT : null,
   PER_USER_DAILY_QUESTIONS: 10,  // fallback only — the real cap is TIERS[tier].qaPerDay (Plus 10 / Pro 30)
   MAX_QUESTION_CHARS: 500,       // clamp the (untrusted) question before prompting
   TOP_EVENTS: 10,                // extended grounding: fuller impact feed than the daily brief
