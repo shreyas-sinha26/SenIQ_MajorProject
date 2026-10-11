@@ -661,6 +661,12 @@ const INGEST = {
   // Company queries per run for held Indian names. GDELT rate-limits hard (429), so a large
   // set of holdings is covered a slice at a time, rotating each run.
   GDELT_INDIA_MAX_PER_RUN: 12,
+  // GDELT answers one request every 5 seconds per caller and takes 10 to 12 seconds over
+  // each (measured 2026-10-12). The queries of a run used to go out together with a
+  // 6-second limit: every one was refused or timed out, and GDELT gave 0 stories a run.
+  GDELT_GAP_MS: 5500,            // between the starts of two requests
+  GDELT_TIMEOUT_MS: 20000,       // one request
+  GDELT_BUDGET_MS: 150000,       // a run's GDELT step; what is not reached goes first next run
   // Macro/global queries mapped to the __MARKET__ tag (war/budget/rates).
   GDELT_MACRO_QUERIES: [
     'federal reserve interest rate', 'inflation economy', 'stock market',

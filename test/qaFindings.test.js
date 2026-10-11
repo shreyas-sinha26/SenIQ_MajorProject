@@ -280,6 +280,51 @@ check('a headline is matched by the news pipeline\'s resolver: "Plan V is ready"
   assert.ok(/resolveEntities\(articleTitle \|\| inputText/.test(src));
 });
 
+section('v1 L21 — GDELT is asked one query at a time:');
+check('requests never overlap, start at least the gap apart, and a failed one does not stop the run', async () => {
+  const { fetchGdelt, tallyProblems } = require('../server/services/ingest/gdelt');
+  const { INGEST } = require('../server/config');
+  let clock = 0, inFlight = 0, most = 0;
+  const starts = [];
+  const ask = async (q, platform) => {
+    inFlight++; most = Math.max(most, inFlight); starts.push(clock);
+    clock += 12000;                                   // GDELT takes about 12 seconds
+    inFlight--;
+    if (starts.length === 2) return { articles: [], problem: 'HTTP 429' };
+    return { articles: [{ external_id: `${q}-${platform}`, title: q, platform }], problem: null };
+  };
+  const wait = async (ms) => { clock += ms; };
+  const logged = [];
+  const warn = console.warn; console.warn = (line) => logged.push(line);
+  let out;
+  try { out = await fetchGdelt(['TCS', 'INFY', 'RELIANCE', 'AAPL'], { ask, wait, now: () => clock }); } finally { console.warn = warn; }
+  assert.strictEqual(most, 1);
+  for (let i = 1; i < starts.length; i++) assert.ok(starts[i] - starts[i - 1] >= INGEST.GDELT_GAP_MS, `gap ${starts[i] - starts[i - 1]}`);
+  assert.strictEqual(starts.length, INGEST.GDELT_MACRO_QUERIES.length + 3); // the five macro queries, then the three Indian names (not AAPL)
+  assert.strictEqual(out.length, starts.length - 1);
+  assert.ok(logged.length === 1 && /GDELT: 7 stories from 7 of 8 queries \(1 HTTP 429\)/.test(logged[0]), logged[0]);
+  assert.strictEqual(tallyProblems(['HTTP 429', 'timed out', 'HTTP 429']), '2 HTTP 429, 1 timed out');
+});
+check('the step stops at its budget, and the names not reached go first next run', async () => {
+  const { fetchGdelt, indiaTerm } = require('../server/services/ingest/gdelt');
+  const { INGEST } = require('../server/config');
+  const held = ['TCS', 'INFY', 'RELIANCE', 'HDFCBANK', 'ITC', 'SBIN', 'WIPRO', 'LT', 'AXISBANK', 'MARUTI'];
+  const run = async () => {
+    let clock = 0; const asked = [];
+    const ask = async (q, platform) => { if (platform === 'news') asked.push(q); clock += 25000; return { articles: [], problem: 'timed out' }; };
+    const warn = console.warn; console.warn = () => {};
+    try { await fetchGdelt(held, { ask, wait: async (ms) => { clock += ms; }, now: () => clock }); } finally { console.warn = warn; }
+    return asked;
+  };
+  const first = await run();
+  const second = await run();
+  assert.ok(first.length >= 1 && first.length < held.length, String(first.length)); // 150s at 25s a query: the macro five, then one name
+  assert.ok(!second.some((q) => first.includes(q)), `${first} | ${second}`);        // the next run starts after it
+  const sorted = held.slice().sort().map(indiaTerm);
+  assert.strictEqual(second[0], sorted[(sorted.indexOf(first[first.length - 1]) + 1) % sorted.length]);
+  assert.ok(INGEST.GDELT_TIMEOUT_MS > 12000 && INGEST.GDELT_GAP_MS >= 5000);
+});
+
 (async () => {
   for (const step of pending) await step();
   console.log(`\n${passed} QA-finding checks passed`);

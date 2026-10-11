@@ -2087,6 +2087,7 @@ function renderInstitutions() {
     const following = cachedFollows.has(followKey('institution', i.slug));
     const period = i.period_of_report ? `${fmtDate(i.period_of_report)}` : 'no filing yet';
     const filed = i.filed_at ? `filed ${fmtDate(i.filed_at)}` : '';
+    const behind = instBehind(i.period_of_report);
     return `
       <div class="inst-card ${openInstSlug === i.slug ? 'active' : ''}" data-slug="${i.slug}" onclick="openInstitution('${i.slug}')">
         <div class="inst-card-top">
@@ -2102,6 +2103,7 @@ function renderInstitutions() {
         <div class="inst-card-meta">
           <span>${escapeHtml(period)}</span>
           <span>${escapeHtml(filed)}</span>
+          ${behind ? `<span class="inst-old" title="${escapeHtml(behind.why)}">${escapeHtml(behind.label)}</span>` : ''}
           ${i.holdings_count ? `<span><span class="val">${i.holdings_count}</span> holdings</span>` : ''}
           ${i.total_value ? `<span class="val">${fmtMoney(i.total_value)}</span>` : ''}
         </div>
@@ -2110,6 +2112,21 @@ function renderInstitutions() {
   if (instTeaser && !instSearchQuery) {
     grid.insertAdjacentHTML('beforeend', upgradeNote(`Showing ${cachedInstitutions.length} of ${instTeaser.total} funds — unlock all on Plus.`));
   }
+}
+
+// A 13F is due 45 days after each quarter ends. A fund whose newest filing here is for a
+// quarter whose successor is already past that deadline is behind: either it has stopped
+// filing (Scion) or its newer filing has not been read yet. The card used to show the old
+// quarter with nothing to say so. → { label, why } | null
+const INST_BEHIND_DAYS = 140; // a quarter (about 91 days) plus the 45-day deadline, with a few days' grace
+function instBehind(periodOfReport, today = new Date()) {
+  const days = lagDays(periodOfReport, today.toISOString().slice(0, 10));
+  if (days == null || days <= INST_BEHIND_DAYS) return null;
+  const months = Math.round(days / 30.4);
+  return {
+    label: `${months} months old`,
+    why: `The newest filing SenIQ has for this fund is for the quarter that ended ${fmtDate(periodOfReport)}. A later quarter's filing was due by now: the fund may have stopped filing, or its newer filing has not been read yet.`,
+  };
 }
 
 async function openInstitution(slug) {
@@ -2150,7 +2167,7 @@ function renderInstitutionDetail(data) {
     <div class="inst-detail-head">
       <h3>${escapeHtml(institution.name)} · ${escapeHtml(institution.manager || '')}</h3>
       <div class="inst-detail-dates">
-        Quarter end <b>${fmtDate(filing.period_of_report)}</b> · Filed <b>${fmtDate(filing.filed_at)}</b>
+        Quarter end <b>${fmtDate(filing.period_of_report)}</b>${instBehind(filing.period_of_report) ? ` <span class="inst-old" title="${escapeHtml(instBehind(filing.period_of_report).why)}">${escapeHtml(instBehind(filing.period_of_report).label)}</span>` : ''} · Filed <b>${fmtDate(filing.filed_at)}</b>
         · ${filing.holdings_count} positions · ${fmtMoney(filing.total_value)}
       </div>
     </div>

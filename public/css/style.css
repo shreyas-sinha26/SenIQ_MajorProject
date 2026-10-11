@@ -1890,3 +1890,5 @@ body input::placeholder, body textarea::placeholder { color: #94A3B8; }
 .stale-note { color: var(--amber); }
 #bt-notes .bt-coverage { margin-bottom: 10px; }
 #bt-notes .pos { color: var(--positive); } #bt-notes .neg { color: var(--negative); }
+/* A fund whose newest filing is for a quarter already superseded. */
+.inst-old { color: var(--amber); font-weight: 600; cursor: help; }
