@@ -1020,6 +1020,9 @@ tr:hover .ht-info { opacity: 1; }
 .scope-toggle { display: inline-flex; background: rgba(10,37,64,.04); border: 1px solid var(--glass-brd); border-radius: var(--radius-sm); overflow: hidden; }
 .scope-btn { padding: 6px 12px; background: none; border: none; color: var(--muted); font-size: .78rem; font-weight: 600; cursor: pointer; font-family: var(--mono); transition: var(--transition); }
 .scope-btn.active { background: var(--grad); color: #fff; }
+.sm-asof { font-size: .74rem; color: var(--muted); margin: 0 0 10px; }
+.sm-asof.stale { color: var(--amber); }
+.sm-asof.hidden { display: none; }
 .sm-sample-badge { font-size: .68rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: rgba(180,83,9,.1); color: var(--amber); border: 1px solid rgba(180,83,9,.28); font-family: var(--mono); }
 .congress-item { display: flex; align-items: center; gap: 12px; padding: 11px 4px; border-bottom: 1px solid rgba(10,37,64,.04); }
 .congress-item:last-child { border-bottom: none; }

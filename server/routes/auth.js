@@ -16,10 +16,13 @@ const isProd = process.env.NODE_ENV === 'production';
 // counters reset on restart (fine for that job).
 const loginLimiter = makeLimiter(AUTH_LIMITS.LOGIN);
 const resetLimiter = makeLimiter(AUTH_LIMITS.RESET);
-function rateLimit(limiter) {
+// Wrong guesses at the current password from inside a session, counted per account.
+const passwordLimiter = makeLimiter(AUTH_LIMITS.LOGIN);
+const byIp = (req) => req.ip || req.socket?.remoteAddress || 'unknown';
+const byUser = (req) => `user:${req.user.id}`;
+function rateLimit(limiter, keyOf = byIp) {
   return (req, res, next) => {
-    const ip = req.ip || req.socket?.remoteAddress || 'unknown';
-    const r = limiter.allow(ip);
+    const r = limiter.allow(keyOf(req));
     if (!r.allowed) {
       res.set('Retry-After', String(Math.ceil(r.retryAfterMs / 1000)));
       return res.status(429).json({ error: 'Too many attempts — please wait a bit and retry' });
@@ -32,6 +35,17 @@ const PROVIDER_LABEL = { google: 'Google', github: 'GitHub' };
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
+// A display name: no control characters and none of the marks that reorder text on screen
+// (a right-to-left override makes "evil‮nimda" read as "eviladmin"). Pure.
+const cleanName = (raw) => (typeof raw === 'string' ? raw.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '').trim() : '');
+
+// What the page keeps about the signed-in user; the same from sign-up, sign-in and /me.
+const USER_COLUMNS = 'id, email, name, created_at, subscription_tier, is_admin';
+
+// Compared when the address is unknown or has no password, so that answer takes as long
+// as a wrong password does: the timing told a caller which addresses have accounts.
+const DUMMY_HASH = bcrypt.hashSync('no-such-account', 10);
+
 const validPassword = (p) => typeof p === 'string' && p.length >= AUTH_LIMITS.MIN_PASSWORD_CHARS && p.length <= AUTH_LIMITS.MAX_PASSWORD_CHARS;
 const PASSWORD_RULE = `Password must be ${AUTH_LIMITS.MIN_PASSWORD_CHARS}–${AUTH_LIMITS.MAX_PASSWORD_CHARS} characters`;
 
@@ -40,7 +54,7 @@ router.post('/signup', rateLimit(loginLimiter), async (req, res) => {
   try {
     const body = req.body || {};
     const email = typeof body.email === 'string' ? body.email.trim() : '';
-    const name = typeof body.name === 'string' ? body.name.trim().slice(0, 80) : '';
+    const name = cleanName(body.name).slice(0, 80);
     const { password } = body;
     if (!email || !password || !name) {
       return res.status(400).json({ error: 'Email, password, and name are required' });
@@ -57,7 +71,7 @@ router.post('/signup', rateLimit(loginLimiter), async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 10);
     const created = await queryOne(
-      'INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id',
+      `INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING ${USER_COLUMNS}`,
       [email, passwordHash, name]
     );
 
@@ -74,7 +88,7 @@ router.post('/signup', rateLimit(loginLimiter), async (req, res) => {
     }
 
     await sessions.startSession(res, created.id, req);
-    res.status(201).json({ user: { id: created.id, email, name, subscription_tier: 'free', is_admin: false } });
+    res.status(201).json({ user: { id: created.id, email, name, created_at: created.created_at, subscription_tier: created.subscription_tier || 'free', is_admin: !!created.is_admin } });
   } catch (err) {
     console.error('Signup error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -93,11 +107,13 @@ router.post('/login', rateLimit(loginLimiter), async (req, res) => {
 
     const user = await queryOne('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email]);
     if (!user) {
+      await bcrypt.compare(password, DUMMY_HASH);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     // OAuth-born accounts have no password until the user sets one.
     if (!user.password_hash) {
+      await bcrypt.compare(password, DUMMY_HASH);
       const label = PROVIDER_LABEL[user.oauth_provider] || 'social';
       return res.status(401).json({
         error: `This account uses ${label} sign-in — use that button, or reset your password to add one.`,
@@ -110,7 +126,7 @@ router.post('/login', rateLimit(loginLimiter), async (req, res) => {
     }
 
     await sessions.startSession(res, user.id, req);
-    res.json({ user: { id: user.id, email: user.email, name: user.name, subscription_tier: user.subscription_tier || 'free', is_admin: !!user.is_admin } });
+    res.json({ user: { id: user.id, email: user.email, name: user.name, created_at: user.created_at, subscription_tier: user.subscription_tier || 'free', is_admin: !!user.is_admin } });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -153,7 +169,7 @@ router.post('/reauth', authMiddleware, rateLimit(loginLimiter), async (req, res)
 // ─── GET /api/auth/me ────────────────────────────────────────
 router.get('/me', authMiddleware, async (req, res) => {
   try {
-    const user = await queryOne('SELECT id, email, name, created_at, subscription_tier, is_admin FROM users WHERE id = $1', [req.user.id]);
+    const user = await queryOne(`SELECT ${USER_COLUMNS} FROM users WHERE id = $1`, [req.user.id]);
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ user });
   } catch (err) {
@@ -165,12 +181,12 @@ router.get('/me', authMiddleware, async (req, res) => {
 // ─── PATCH /api/auth/me — update display name ────────────────
 router.patch('/me', authMiddleware, async (req, res) => {
   try {
-    const { name } = req.body || {};
-    if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'Name is required' });
-    const trimmed = name.trim();
+    const trimmed = cleanName((req.body || {}).name);
+    if (!trimmed) return res.status(400).json({ error: 'Name is required' });
     if (trimmed.length > 80) return res.status(400).json({ error: 'Name too long' });
+    // The same columns as /me: the page replaces what it knows of the user with this.
     const user = await queryOne(
-      'UPDATE users SET name = $1 WHERE id = $2 RETURNING id, email, name, created_at',
+      `UPDATE users SET name = $1 WHERE id = $2 RETURNING ${USER_COLUMNS}`,
       [trimmed, req.user.id]
     );
     res.json({ user });
@@ -181,7 +197,7 @@ router.patch('/me', authMiddleware, async (req, res) => {
 });
 
 // ─── POST /api/auth/change-password ─────────────────────────
-router.post('/change-password', authMiddleware, async (req, res) => {
+router.post('/change-password', authMiddleware, rateLimit(passwordLimiter, byUser), async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body || {};
     if (!newPassword) return res.status(400).json({ error: 'New password is required' });
@@ -313,4 +329,4 @@ router.get('/verify-email', async (req, res) => {
   }
 });
 
-module.exports = { router, authMiddleware };
+module.exports = { router, authMiddleware, cleanName };

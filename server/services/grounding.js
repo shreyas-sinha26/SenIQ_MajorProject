@@ -119,6 +119,7 @@ async function smartMoneyContext(userId) {
       LIMIT 3`,
     [userId, !live]
   );
+  // Each fund's latest filing only: a change in an older quarter is not what it did last.
   const institutions = await query(
     `SELECT i.name, h.ticker, h.change_type
        FROM institution_holdings h
@@ -126,6 +127,8 @@ async function smartMoneyContext(userId) {
        JOIN institutions i ON i.id = f.institution_id
       WHERE h.ticker IN (SELECT ticker FROM portfolio WHERE user_id = $1)
         AND h.change_type IN ('new','added','reduced')
+        AND f.id = (SELECT l.id FROM institution_filings l WHERE l.institution_id = i.id
+                     ORDER BY l.period_of_report DESC NULLS LAST, l.id DESC LIMIT 1)
       ORDER BY h.value DESC NULLS LAST
       LIMIT 3`,
     [userId]

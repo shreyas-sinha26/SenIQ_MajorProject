@@ -87,10 +87,18 @@ function isPageQuestion(question) {
   return PAGE_WORDS.test(q) || (ACTORS.test(q) && ACTIVITY.test(q));
 }
 
+// Words beside a name that say nothing about whose it is: a title, a company form.
+const NAME_FILLER = new Set(['the', 'of', 'and', 'mr', 'mrs', 'ms', 'dr', 'hon', 'rep', 'representative', 'sen', 'senator',
+  'congressman', 'congresswoman', 'llc', 'lp', 'inc', 'ltd', 'co', 'capital', 'management', 'advisors', 'advisers', 'fund', 'funds']);
+
 /**
  * Which of `items` a typed name means. `namesOf(item)` gives every way it is written. An
  * exact name, then a lone name that contains the typed words or is contained in them;
  * several are handed back. Pure. → { item } | { matches: [...] } | { none: true }
+ *
+ * A one-word name (a surname, a fund's short name) inside a longer typed one counts only
+ * when the other typed words are this item's too: "Marjorie Taylor Greene" is not David
+ * Taylor, and "Taylor Swift" is nobody here.
  */
 function pickNamed(typed, items, namesOf) {
   const q = key(typed);
@@ -98,7 +106,13 @@ function pickNamed(typed, items, namesOf) {
   const names = (it) => namesOf(it).map(key).filter(Boolean);
   const exact = items.filter((it) => names(it).includes(q));
   if (exact.length === 1) return { item: exact[0] };
-  const loose = items.filter((it) => names(it).some((n) => ` ${n} `.includes(` ${q} `) || ` ${q} `.includes(` ${n} `)));
+  const typedWords = q.split(' ').filter((w) => w.length > 1 && !NAME_FILLER.has(w));
+  const inside = (n, own) => ` ${q} `.includes(` ${n} `) && (n.includes(' ') || typedWords.every((w) => own.has(w)));
+  const loose = items.filter((it) => {
+    const all = names(it);
+    const own = new Set(all.flatMap((n) => n.split(' ')));
+    return all.some((n) => ` ${n} `.includes(` ${q} `) || inside(n, own));
+  });
   if (loose.length === 1) return { item: loose[0] };
   return loose.length ? { matches: loose.slice(0, QA.PAGE_MATCHES) } : { none: true };
 }
