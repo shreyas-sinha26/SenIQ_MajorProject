@@ -9,9 +9,10 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://offline:offli
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { FEATURES, US_NEWS } = require('../server/config');
+const { FEATURES, US_NEWS, FINNHUB } = require('../server/config');
 const { buildResolver, universeRows, isUsListed } = require('../server/services/entityResolver');
-const { fetchRotation } = require('../server/services/ingest/finnhub');
+const { fetchRotation, fetchRun } = require('../server/services/ingest/finnhub');
+const { createGate, background } = require('../server/services/finnhubGate');
 const { dedupe } = require('../server/services/ingest');
 const U = require('../server/services/usNews');
 
@@ -71,8 +72,10 @@ console.log('the rotation:');
 
 check('off unless US_LISTED_NEWS=1, and the size of a run', () => {
   assert.strictEqual(FEATURES.US_LISTED_NEWS, process.env.US_LISTED_NEWS === '1');
-  assert.strictEqual(US_NEWS.PER_RUN, 30);
-  assert.ok(US_NEWS.CALLS_PER_RUN < 60, 'Finnhub allows 60 calls a minute and quotes share it');
+  assert.strictEqual(US_NEWS.PER_RUN, 90);
+  // A whole run's news calls go out, at the background lane's pace, before the next run starts.
+  assert.ok(FINNHUB.NEWS_CALLS_PER_RUN * FINNHUB.BACKGROUND_GAP_MS < 10 * 60_000, 'a run every 10 minutes');
+  assert.ok(US_NEWS.PER_RUN < FINNHUB.NEWS_CALLS_PER_RUN);
 });
 check('a run takes what is left of its calls after the held and IPO tickers', () => {
   const limits = { PER_RUN: 30, CALLS_PER_RUN: 50 };
@@ -81,6 +84,10 @@ check('a run takes what is left of its calls after the held and IPO tickers', ()
   assert.strictEqual(U.batchSize(35, limits), 15);
   assert.strictEqual(U.batchSize(50, limits), 0);
   assert.strictEqual(U.batchSize(400, limits), 0);
+  // As configured: all 90 beside today's 8 held and 9 IPO Watch tickers, fewer past about 150.
+  assert.strictEqual(U.batchSize(17), 90);
+  assert.strictEqual(U.batchSize(FINNHUB.NEWS_CALLS_PER_RUN - 40), 40);
+  assert.strictEqual(U.batchSize(FINNHUB.NEWS_CALLS_PER_RUN), 0);
 });
 check('the curated names have a few of a run\'s places to themselves, and keep their share as it shrinks', () => {
   assert.ok(US_NEWS.CURATED_PER_RUN > 0 && US_NEWS.CURATED_PER_RUN < US_NEWS.PER_RUN, 'both queues move');
@@ -96,41 +103,67 @@ check('a run\'s names are picked from the two queues, curated first, spare place
   assert.match(src, /const THE_REST = "tier IS DISTINCT FROM 'curated'"/);   // the listed tier and graduated IPOs
 });
 const story = (id, headline) => ({ id, headline, summary: '', source: 'Yahoo', url: `https://example.com/${id}`, image: '', datetime: 1791000000 });
-const answers = (byTicker) => async (url) => {
+const answers = (byTicker, asked = []) => async (url) => {
   const sym = new URL(url).searchParams.get('symbol');
+  asked.push(sym);
   const a = byTicker[sym];
   if (a === 'throw') throw new Error('network down');
   if (typeof a === 'number') return { ok: false, status: a, json: async () => ({}) };
   return { ok: true, status: 200, json: async () => a };
 };
+// A gate that answers from `byTicker` and never waits (its pacing has its own tests).
+const gateFor = (byTicker, asked, apiKey = 'k') => createGate({ fetchImpl: answers(byTicker, asked), apiKey: () => apiKey, sleep: async () => {}, warn: () => {} });
+const rotate = (tickers, byTicker, apiKey) => background(() => fetchRotation(tickers, { gate: gateFor(byTicker, [], apiKey) }));
 check('each story says whose feed it came from and that the rotation brought it', async () => {
-  const r = await fetchRotation(['DLB', 'CMI'], { gapMs: 0, apiKey: 'k', fetchImpl: answers({ DLB: [story(1, 'Dolby raises dividend')], CMI: [] }) });
+  const r = await rotate(['DLB', 'CMI'], { DLB: [story(1, 'Dolby raises dividend')], CMI: [] });
   assert.deepStrictEqual(r.checked, ['DLB', 'CMI']);
   assert.strictEqual(r.stopped, null);
   assert.deepStrictEqual(r.articles.map((a) => [a.external_id, a.feeds, a.rotationOnly]), [['finnhub_1', ['DLB'], true]]);
 });
 check('a rate-limit refusal ends the run, and the names not reached are not checked', async () => {
-  const r = await fetchRotation(['A', 'AA', 'AAL', 'AAON'], { gapMs: 0, apiKey: 'k', fetchImpl: answers({ A: [story(1, 'x')], AA: [], AAL: 429, AAON: [story(2, 'y')] }) });
+  const r = await rotate(['A', 'AA', 'AAL', 'AAON'], { A: [story(1, 'x')], AA: [], AAL: 429, AAON: [story(2, 'y')] });
   assert.deepStrictEqual(r.checked, ['A', 'AA']);
   assert.strictEqual(r.stopped, 'rate_limit');
   assert.strictEqual(r.articles.length, 1);
 });
 check('a request that fails outright ends the run too; any other refusal counts as checked', async () => {
-  const down = await fetchRotation(['A', 'AA'], { gapMs: 0, apiKey: 'k', fetchImpl: answers({ A: 'throw', AA: [] }) });
+  const down = await rotate(['A', 'AA'], { A: 'throw', AA: [] });
   assert.deepStrictEqual([down.checked, down.stopped], [[], 'unreachable']);
   // A ticker Finnhub refuses for itself (403) must not hold up the queue.
-  const odd = await fetchRotation(['BF.B', 'AA'], { gapMs: 0, apiKey: 'k', fetchImpl: answers({ 'BF.B': 403, AA: [story(3, 'z')] }) });
+  const odd = await rotate(['BF.B', 'AA'], { 'BF.B': 403, AA: [story(3, 'z')] });
   assert.deepStrictEqual([odd.checked, odd.stopped, odd.articles.length], [['BF.B', 'AA'], null, 1]);
 });
 check('no key, no calls', async () => {
-  let calls = 0;
-  const r = await fetchRotation(['A'], { gapMs: 0, apiKey: '', fetchImpl: async () => { calls++; return { ok: true, status: 200, json: async () => [] }; } });
-  assert.deepStrictEqual([r.checked, r.articles, calls], [[], [], 0]);
+  const asked = [];
+  const r = await background(() => fetchRotation(['A'], { gate: gateFor({ A: [] }, asked, '') }));
+  assert.deepStrictEqual([r.checked, r.articles, r.stopped, asked], [[], [], null, []]);
 });
 check('a ticker gives at most its newest ten', async () => {
   const many = Array.from({ length: 25 }, (_, i) => story(100 + i, `story ${i}`));
-  const r = await fetchRotation(['A'], { gapMs: 0, apiKey: 'k', fetchImpl: answers({ A: many }) });
+  const r = await rotate(['A'], { A: many });
   assert.strictEqual(r.articles.length, US_NEWS.STORIES_PER_NAME);
+});
+check('a run asks in a fixed order: held, then IPO Watch, then the rotation, which alone is marked', async () => {
+  const asked = [];
+  const gate = gateFor({ AAPL: [story(1, 'a')], NEWCO: [story(2, 'b')], DLB: [story(3, 'c')], CMI: [] }, asked);
+  const r = await background(() => fetchRun({ held: ['AAPL'], ipo: ['NEWCO'], rotation: ['DLB', 'CMI'] }, { gate }));
+  assert.deepStrictEqual(asked, ['AAPL', 'NEWCO', 'DLB', 'CMI']);
+  assert.deepStrictEqual(r.checked, { held: ['AAPL'], ipo: ['NEWCO'], rotation: ['DLB', 'CMI'] });
+  assert.deepStrictEqual(r.articles.map((a) => [a.feeds[0], !!a.rotationOnly]), [['AAPL', false], ['NEWCO', false], ['DLB', true]]);
+  assert.deepStrictEqual(gate.takeCounts().news.byPurpose, { held: 1, ipo: 1, rotation: 2 });
+});
+check('a refusal stops the whole run: nothing after it is asked for, and nothing is asked twice', async () => {
+  const asked = [];
+  const gate = gateFor({ AAPL: [], MSFT: 429, NEWCO: [], DLB: [] }, asked);
+  const r = await background(() => fetchRun({ held: ['AAPL', 'MSFT', 'NVDA'], ipo: ['NEWCO'], rotation: ['DLB'] }, { gate }));
+  assert.deepStrictEqual(asked, ['AAPL', 'MSFT']);
+  assert.deepStrictEqual([r.checked, r.stopped], [{ held: ['AAPL'], ipo: [], rotation: [] }, 'rate_limit']);
+});
+check('a page\'s call the gate does not send ends its list as not sent', async () => {
+  const asked = [];
+  const gate = createGate({ fetchImpl: answers({ A: [], B: [] }, asked), apiKey: () => 'k', limits: { ...FINNHUB, INTERACTIVE_PER_MINUTE: 1 }, warn: () => {} });
+  const r = await fetchRun({ held: ['A', 'B'], purpose: 'lookup' }, { gate });      // not inside background()
+  assert.deepStrictEqual([asked, r.checked.held, r.stopped], [['A'], ['A'], 'not_sent']);
 });
 
 console.log('the feeds a story carries:');
@@ -190,7 +223,7 @@ check('migration 0044 adds the two columns the pipeline writes', () => {
   assert.match(scheduler, /is_relevant, sectors, feeds\)/);
 });
 check('outcome logging stays on curated names and holdings', () => {
-  // Each ticker logged costs a price quote on every run; the listed names nobody holds would add hundreds.
+  // Each ticker logged costs a price quote when its event is new; the listed names nobody holds would add hundreds.
   const sql = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'outcomes.js'), 'utf8');
   assert.match(sql, /c\.tier = 'curated'/);
   assert.match(sql, /FROM portfolio p WHERE p\.ticker = e\.primary_ticker/);

@@ -203,18 +203,31 @@ async function graduate() {
   return out;
 }
 
-// The US issues whose company news the pipeline should fetch: the newest few with a ticker
-// (Finnhub tags its news by ticker, and a filing or pricing is when it is written about).
+// How many of `total` monitored issues one run asks for, so all come round in
+// IPO_WATCH.MONITOR_RUNS runs. Pure.
+const monitorShare = (total, runs = IPO_WATCH.MONITOR_RUNS) => Math.ceil(total / runs);
+
+// The US issues whose company news this run of the pipeline should fetch (Finnhub tags its
+// news by ticker, and a filing or pricing is when it is written about): every issue with a
+// ticker that is not a SPAC or withdrawn is monitored, and a run takes its share of them, the
+// ones asked for longest ago (ipos.news_checked_at), never-asked first.
 async function monitoredTickers({ today = marketDate() } = {}) {
   const rows = await query(
     `SELECT symbol FROM ipos
       WHERE market = 'US' AND symbol IS NOT NULL AND NOT is_spac AND NOT withdrawn
         AND COALESCE(first_trade_date, listing_date, status_date) >= $1::date - $2::int
-      ORDER BY (source_status IN ('expected', 'priced')) DESC, COALESCE(first_trade_date, listing_date, status_date) DESC
-      LIMIT $3::int`,
-    [today, IPO_WATCH.MONITOR_DAYS, IPO_WATCH.MONITOR_TICKERS]
+      GROUP BY symbol
+      ORDER BY min(news_checked_at) NULLS FIRST, bool_or(source_status IN ('expected', 'priced')) DESC,
+               max(COALESCE(first_trade_date, listing_date, status_date)) DESC, symbol`,
+    [today, IPO_WATCH.MONITOR_DAYS]
   );
-  return rows.map((r) => r.symbol);
+  return rows.slice(0, monitorShare(rows.length)).map((r) => r.symbol);
 }
 
-module.exports = { normText, joinInitials, buildMatcher, linkArticles, setAliases, looseKey, pickSymbol, linkSymbols, monitoredTickers, priceConfirms, referenceExchange, graduate };
+// Record that these issues' company news was asked for, so the next run takes the others.
+async function markNewsChecked(symbols = []) {
+  if (!symbols.length) return;
+  await execute("UPDATE ipos SET news_checked_at = now() WHERE market = 'US' AND symbol = ANY($1)", [symbols]);
+}
+
+module.exports = { normText, joinInitials, buildMatcher, linkArticles, setAliases, looseKey, pickSymbol, linkSymbols, monitorShare, monitoredTickers, markNewsChecked, priceConfirms, referenceExchange, graduate };

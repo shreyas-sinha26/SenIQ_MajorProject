@@ -129,18 +129,20 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   are in the macOS Trash as `seniq-engine-pre_qa_2026-10-10` (gone once the Trash is
   emptied). The pages on `main` expect this engine: with the old one the signal and
   crypto fixes are absent and the robustness verdict is the old one.
-- **Tests** *(checked 2026-10-11 on the commit that was merged)*: `npm test` passes — 33 files, 813 checks, offline
+- **Tests** *(checked 2026-10-11 on the commit that was merged; on branch `finnhub-gate`, uncommitted, it is 34 files and 841 checks)*: `npm test` passes — 33 files, 813 checks, offline
   (no database or API calls). The local engine's own tests: 60 pass
   (`cd strategy-service && ./venv/bin/python -m pytest -q`).
-- **Dev database** *(checked 2026-10-11)*: Postgres `seniq`, 43 of the 45 migration files
-  applied (latest `0042_paper_ledger`). **`0043_retention` and `0044_us_news` are not
-  applied yet**; the next start applies both, and until then `scripts/retention.js` and
-  `scripts/us_news.js status` cannot run there. 2,485 articles, 634 events. No paper
+- **Dev database** *(checked 2026-10-11, late)*: Postgres `seniq`, all 45 migration files
+  applied (latest `0044_us_news`; `0043` and `0044` went in on a start of the server
+  during the day). 2,674 articles after the server ran from 12:56 to 13:25 IST on
+  2026-10-11 with both listed-news switches on (176 stories stored in that half hour).
+  The US rotation has checked 33 of its 1,501 names. No paper
   deployments, so the paper ledger has nothing to record there yet. On 2026-10-10 two
   stored Tesla tags were removed from it (§9). Two copies made for checks (`seniq_qa` on
   2026-10-10, `seniq_p6check` on 2026-10-11) were dropped the day they were made.
-- **Nothing is running** *(checked 2026-10-11)*: no dev server, no strategy engine, no
-  `ollama serve`. Nothing is hosted. **`.env` has `CLAUDE_REPORTS=1`**, so the next plain
+- **Nothing is running** *(checked 2026-10-11, 13:26 IST)*: the dev server was started at
+  Annas's word at 12:56 IST and stopped at his word at 13:25; no other dev server, no
+  strategy engine, no `ollama serve` is listening. Postgres is up. Nothing is hosted. **`.env` has `CLAUDE_REPORTS=1`**, so the next plain
   `npm start` **can make the app's own Claude calls**, now to Claude Haiku 5.5: briefs at
   each Pro account's 05:30, Ask, alert explanations and report cards, inside the quotas
   and the $5/day ceiling. Set it to `0` first if that is not wanted. `.env` also has the
@@ -148,21 +150,121 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   of the database would send them too.
 - **Local `.env` switches that differ from the defaults** *(checked 2026-10-11)*: `IPO_WATCH=1`, `INDIA_SMART_MONEY=1`, `FINBERT_CLASSIFY=1`, `COMPANY_SENTIMENT_LLM=ollama` (the local
   model reads multi-company stories, §8; it needs `ollama serve`, which is **not** running),
-  plus Annas's own `NSE_USER_AGENT`. **Not set, so off:** `INDIA_LISTED_NEWS`,
-  `US_LISTED_NEWS`, `RETENTION`, `AIROUTER_MODEL` (the default, Claude Haiku 5.5, applies).
+  plus Annas's own `NSE_USER_AGENT`, and **since 2026-10-11 `INDIA_LISTED_NEWS=1` and
+  `US_LISTED_NEWS=1`** (set at Annas's word; below). **Not set, so off:** `RETENTION`,
+  `ASK_EFFORT`, `AIROUTER_MODEL` (the default, Claude Haiku 5.5, applies).
 
 ### Next, in order
 
-Each of the first three needs Annas's word, and so does any paid run.
+A paid run needs Annas's word, and so does starting the server. **He also asked, on
+2026-10-11, that a plan be talked through with him before any change is made.** The
+Finnhub work below was started at his word the same day and is built, not yet run.
 
-1. **Switch on `INDIA_LISTED_NEWS`.** Nothing more is fetched; the stories already
-   arrive. It needs days of running before it shows anything, and it has never been on
-   in a running pipeline (§7). New stories only: stored ones are not re-tagged.
-2. **Switch on `US_LISTED_NEWS`.** The largest change in volume. Start with
-   `node scripts/us_news.js try 30` (nothing stored), then the switch, then
-   `node scripts/us_news.js status` after a day: a curated name should have been
-   checked about seven times and any other about two or three. Watch for Finnhub refusing calls (the log line says "stopped:
-   rate_limit") and for quotes failing while a run is fetching.
+1. **`INDIA_LISTED_NEWS` and `US_LISTED_NEWS` are on in the local `.env`, and ran for
+   half an hour** *(2026-10-11, at Annas's word; three pipeline runs, 12:56, 13:00 and
+   13:10 IST, then the server was stopped)*. To switch either off, remove its line from
+   `.env` and restart. New stories only: stored ones are not re-tagged.
+   - **India works.** The first run tagged 5 Indian listed names nobody holds. Three of
+     the five came from one headline ("…Sudeep Shah picks 5 stocks…") and one from "Top
+     5 stocks to buy under ₹100": roundups the phrase list does not know.
+   - **The US rotation works and is cut short by Finnhub every run.** Refused at its
+     first call on the run after start, and at its twelfth on the next two ("11 of 30
+     name(s) checked (stopped: rate_limit)"). In all, 33 names checked, 16 US listed
+     names with a story of their own, 56 tags; 25 and 20 stories dropped as about no
+     company. At 11 names a run the cycle is about three times slower than planned.
+   - **The first run raised 11 alerts, 9 of them real-time,** so alert emails went out.
+     Ask's one model call and one alert explanation in that half hour both timed out at
+     the router and fell back to code-written text.
+2. **Finnhub: what was measured, the plan, and what is built** *(2026-10-11; **built on
+   branch `finnhub-gate` at Annas's word, nothing committed, never run against Finnhub**;
+   "Built" at the end of this item says what the code does)*.
+   - **Measured.** Finnhub counts company-news calls and every other call (prices, the
+     IPO calendar) separately, 60 a minute each, by the `x-ratelimit-*` headers on its
+     replies. So the rotation's `CALLS_PER_RUN: 50`, set "to leave room for quotes",
+     rests on a wrong assumption. The pipeline's news pattern replayed outside the
+     server (18 calls back to back, then one a second, 48 in all) was never refused, and
+     neither were 65 news calls at one a second, nor a news call sent during 47 price
+     calls at once. **Why the same pattern is refused inside the running server is not
+     found.** The on-demand route (`GET /api/news/sentiment/:ticker`) makes one news call
+     a click and the page does not poll it. Also seen: the outcome step
+     (`logEventFeatures`) asks for a price on every ticker with an event in 7 days, about
+     47 Finnhub calls at once on every run, and keeps only the first price per event.
+   - **The plan: one gate for every Finnhub call** (the three callers today are
+     `ingest/finnhub.js`, `priceService.js` and IPO Watch's calendar, none aware of the
+     others). Two meters, news and everything else, each held to 50 a minute of the 60.
+     Two lanes on each: a background lane for the pipeline, one call every 2 seconds
+     (at most 30 a minute) in a fixed order; an interactive lane for a user's page or
+     click, sent at once, with the 20 a minute the background lane never uses kept for
+     it. A user past even that gets the fallback that exists today (Yahoo for a price),
+     not a wait. Every call is counted by purpose and each run logs one line.
+   - **One run's news calls under it:** held tickers (8 today, 16 seconds), then a
+     third of the US IPO issues with a ticker (9 of 27, 18 seconds), then the rotation
+     (5 curated and 25 others, 60 seconds): 47 calls in about 95 seconds, never more
+     than 30 in a minute. Fetching takes about 50 seconds longer than now.
+   - **Prices:** the outcome step asks only for an event with no starting price yet, or
+     whose 1-day or 3-day mark is due, through the background lane. About 47 calls a
+     run become a handful.
+   - **The rotation's size:** the background lane carries about 240 news calls in a
+     run, so held, IPO and 30 rotation names fit until roughly 200 tickers are held;
+     `CALLS_PER_RUN` and "stops at 50 held tickers" go.
+   - **No waiting and no retry** (Annas: plan the calls so each stays inside the limit;
+     no wait-and-continue). If a call is refused all the same, that job stops for the
+     run and its names go first next time, as now.
+   - **Not promised:** that the refusals stop. Either they do, or the log shows Finnhub
+     refusing while the gate's own count is under the limit, which would mean the limit
+     is not what the headers say.
+   - **With it, IPO Watch (his items 2 and 4):** one poll to refresh the calendar (last
+     fetched 2026-10-09; the 09:15 IST poll fires only while the server is up); news
+     fetched for every US issue with a ticker that is not a SPAC or withdrawn (27, a
+     third each run, where it is the newest 10 every run now); and a row with no stories
+     says "No stories yet", opened it says none has been found, which is not the same as
+     found and not yet read. Expect a few more rows with a tone, not most: 10 tickers
+     fetched every run gave stories to 5 of the 29 real US issues (India: 24 of 51).
+   - **Declined by Annas:** a list of expected, not yet filed IPOs (he asked why
+     Anthropic and OpenAI are not on the page: Finnhub's IPO calendar lists neither, a
+     year back and a year ahead, 200 rows; the app has 12 stored stories naming one and
+     15 the other, linked to no issue). Not offered again unless he asks.
+   - **His three answers** *(2026-10-11)*: (a) the rotation goes to 90 names a run, on
+     condition that the calls stay inside the limit and nothing waits because a request
+     was refused; (b) the calendar keeps its daily poll and the US side is also caught up
+     at start when it is over a day old; (c) SPACs stay out of the IPO news fetch.
+   - **Built** *(branch `finnhub-gate`, uncommitted; `npm test` passes, 34 files, 841
+     checks; no call has gone to Finnhub from this code and the server has not been
+     started on it)*:
+     - `services/finnhubGate.js`: the gate, as planned (two meters, 50 a minute each; the
+       background lane one call every 2 seconds; the interactive lane 20 a minute, then
+       the call is not sent). The key now goes in a header, never in the address. A
+       scheduled job is on the background lane because `startScheduler` wraps every job;
+       any other call is interactive. A refusal is logged with the gate's own count for
+       that minute and what Finnhub's header says is left. Nothing is retried.
+     - **Four callers, not three:** the plan missed `GET /api/news/sentiment/:ticker`,
+       which reaches the same news fetch. It is on the interactive lane, logged as
+       `lookup`. A test fails if any file but `config.js` names Finnhub's address.
+     - One run's news calls go out in one order: held, IPO Watch, rotation
+       (`ingest/finnhub.js`, `fetchRun`). A refusal, a failed request or an unsent call
+       stops the run's news fetch there; the names not reached go first next run.
+     - The rotation is 90 a run, 15 curated (each about every hour) and 75 others (each
+       about every 3 hours): `US_NEWS.PER_RUN`, `CURATED_PER_RUN`. `CALLS_PER_RUN` and
+       `CALL_GAP_MS` are gone; the rotation shrinks only past `FINNHUB.NEWS_CALLS_PER_RUN`
+       (240), at about 140 held tickers. Today a run is 8 held + 9 IPO + 90 = 107 calls,
+       about 3.5 minutes of fetching.
+     - The outcome step asks for a price only for an event with no starting price, and
+       for one whose 1-day or 3-day mark has come. On the dev database that is 0 and 8
+       tickers where it was 126 and 111 (reads on 2026-10-11).
+     - IPO Watch: news for every US issue with a ticker that is not a SPAC or withdrawn,
+       a third each run by `ipos.news_checked_at` (**migration `0045_ipo_news`, applied
+       at the next start**; `IPO_WATCH.MONITOR_RUNS`). At start the US calendar is
+       fetched if it is over 24 hours old (`runIpoCatchUp`, Finnhub only, one call), so
+       the next start refreshes the calendar last fetched on 2026-10-09. Every row of the
+       page opens; one with no stories says "No stories yet" and, opened, that none has
+       been found, where one with stories and no reading says how many were found.
+     - Each pipeline run ends with one line, `🚦 Finnhub calls: news N (held, ipo,
+       rotation, lookup); other N (quote, ipo calendar)`, with refusals and unsent calls.
+   - **Not done:** nothing is committed or pushed. The server has not been started, so
+     the migration, the catch-up, the page and the log line are checked by tests only.
+     **Next, at his word:** start the server and read three runs' `🚦` lines. Either no
+     refusal, or a refusal logged with the gate's count under 50, which would mean the
+     limit is not what the headers say.
 3. **Run the other four callers on Claude Haiku 5.5:** one brief, one alert
    explanation, one set of report cards, one per-company reading. Their output limits
    were raised by reasoning from Ask's figures, not by a run.
@@ -606,7 +708,7 @@ the ticker's own 90-day normal. Sources are weighted by credibility.
 |---|---|---|
 | US smart money (13F + congress) + 8-K filings | every 15 min | First contact is silent; only newly disclosed records alert |
 | India smart money | weekdays 19:30 IST | Only when `INDIA_SMART_MONEY=1`; never on boot |
-| IPO Watch poll | daily 09:15 IST | Only when `IPO_WATCH=1`; never on boot. Calendar, GMP, subscription, outcomes, tickers, returns, graduation |
+| IPO Watch poll | daily 09:15 IST | Only when `IPO_WATCH=1`; never on boot. Calendar, GMP, subscription, outcomes, tickers, returns, graduation. *On branch `finnhub-gate`:* at start the US calendar alone is fetched when over 24 hours old |
 | Daily brief | checked every 15 min | Written when each user's clock passes 05:30 |
 | Report emails | checked every 15 min | Schedule below |
 | Ask thread purge | 04:15 daily | Threads older than 30 days |
@@ -850,7 +952,7 @@ All the write scripts are dry runs without their flag.
 | `INDIA_SMART_MONEY`, `NSE_USER_AGENT` | **`1`**, set | India deals and insider trades. Default is off |
 | `IPO_WATCH` | **`1`** (since 2026-10-09) | `1` shows the IPO Watch tab and runs its daily poll. The US side also needs `FINNHUB_API_KEY`. Default is off |
 | `INDIA_LISTED_NEWS` | unset | `1` matches the 439 Indian listed names in the news, held or not. Default is off |
-| `US_LISTED_NEWS` | unset | `1` fetches company news for the US shares nobody holds, 30 a run. Needs `FINNHUB_API_KEY`. Default is off |
+| `US_LISTED_NEWS` | unset | `1` fetches company news for the US shares nobody holds, 30 a run (90 on branch `finnhub-gate`). Needs `FINNHUB_API_KEY`. Default is off |
 | `RETENTION` | unset | `1` starts the daily job that archives and **removes** old stories. Default is off. Once it has removed anything, leave it on |
 | `RETENTION_ARCHIVE_DIR` | unset | Where archive files go; default `data/archive` (gitignored) |
 | `SMTP_HOST/PORT/USER/PASS`, `EMAIL_FROM` | set (Gmail app password) | All email while there is no domain |
