@@ -230,6 +230,35 @@ check('explain_strategy_signal refuses an id no saved strategy can have, before 
   assert.strictEqual(db.calls.length, 0);
 });
 
+section('v1 L6 / L9 / L27 — the page\'s own wording (public/js/app.js):');
+const appJs = require('node:fs').readFileSync(require('node:path').join(__dirname, '../public/js/app.js'), 'utf8');
+const lift = (from, to) => { const a = appJs.indexOf(from), b = appJs.indexOf(to, a); assert.ok(a >= 0 && b > a, `not found: ${from}`); return appJs.slice(a, b); };
+const page = new Function(`
+  const fmtPrice = (n, currency) => (currency === 'INR' ? '₹' : '$') + Number(n).toFixed(2);
+  ${lift('function sentiWord', '// ─── Filter Logic')}
+  ${lift('function ipoUsDate', 'function ipoUsPrice')}
+  return { sentiWord, holdingPosition, ipoUsDate };
+`)();
+check('one word for a reading on every page', () => {
+  assert.deepStrictEqual(['positive', 'negative', 'neutral', undefined].map(page.sentiWord), ['Positive', 'Negative', 'Neutral', 'Neutral']);
+  assert.ok(!/'Bullish'|'Bearish'|'Mixed'|>Mixed[, ]/.test(appJs)); // no page writes the old words
+});
+check('a holding shows the quantity and cost that were typed, and the price against that cost', () => {
+  assert.match(page.holdingPosition({ quantity: null }), /No quantity set/);
+  assert.strictEqual(page.holdingPosition({ quantity: 10, cost_basis: null }), '10 held');
+  const up = page.holdingPosition({ quantity: 10, cost_basis: 150, price: 165, currency: 'USD' });
+  assert.ok(up.startsWith('10 held · cost $150.00') && /class="ht-chg up"[^>]*>\+10\.0%/.test(up), up);
+  assert.ok(/class="ht-chg down"[^>]*>−20\.0%/.test(page.holdingPosition({ quantity: 2, cost_basis: 100, price: 80, currency: 'INR' })));
+  assert.strictEqual(page.holdingPosition({ quantity: 0.5, cost_basis: 100, price: null, currency: 'USD' }), '0.5 held · cost $100.00');
+});
+check('a filed US issue with only an expected listing day shows it as expected, not as filed', () => {
+  assert.deepStrictEqual(page.ipoUsDate({ stage: 'announced', status_date: null, listing_date: '2026-10-09' }), ['2026-10-09', 'expected']);
+  assert.deepStrictEqual(page.ipoUsDate({ stage: 'announced', status_date: '2026-09-18', listing_date: null }), ['2026-09-18', 'filed']);
+  assert.deepStrictEqual(page.ipoUsDate({ stage: 'upcoming', listing_date: '2026-10-15' }), ['2026-10-15', 'expected']);
+  assert.deepStrictEqual(page.ipoUsDate({ stage: 'withdrawn', status_date: '2026-10-01' }), ['2026-10-01', 'withdrawn']);
+  assert.deepStrictEqual(page.ipoUsDate({ stage: 'listed', first_trade_date: '2026-10-02', listing_date: '2026-10-01' }), ['2026-10-02', '']);
+});
+
 (async () => {
   for (const step of pending) await step();
   console.log(`\n${passed} QA-finding checks passed`);

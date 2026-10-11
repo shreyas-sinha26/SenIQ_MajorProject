@@ -166,6 +166,21 @@ router.post('/reauth', authMiddleware, rateLimit(loginLimiter), async (req, res)
   }
 });
 
+// ─── GET /api/auth/session ───────────────────────────────────
+// "Is anyone signed in?", asked by the page each time it loads. Always a 200: { user } or
+// { user: null }. Asking /me for this made every signed-out page load log a 401.
+router.get('/session', async (req, res) => {
+  try {
+    const s = await sessions.findSession(sessions.readCookie(req, SESSION.COOKIE));
+    if (!s) return res.json({ user: null });
+    const user = await queryOne(`SELECT ${USER_COLUMNS} FROM users WHERE id = $1`, [s.user_id]);
+    res.json({ user: user || null });
+  } catch (err) {
+    console.error('Session check error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ─── GET /api/auth/me ────────────────────────────────────────
 router.get('/me', authMiddleware, async (req, res) => {
   try {
