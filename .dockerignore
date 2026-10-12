@@ -11,7 +11,9 @@ test
 !README.md
 .DS_Store
 scripts
-# Local-only workspaces and tooling — never part of the image.
+# Local-only workspaces — never part of the image.
 strategy-service
 eval
-.claude
+# Every other hidden file or folder at the top level (editor and tool settings, virtualenvs).
+.*
+!.env.example

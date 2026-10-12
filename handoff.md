@@ -2,7 +2,7 @@
 
 Rewritten 2026-10-08; §3 re-checked 2026-10-09 (evening); a QA pass and its fixes added 2026-10-10 (§3, §7, §8), then a second and a third round the same day that closed its open findings and re-checked `v2.13` (§8, §10); all of it merged that day as pull request #15 and tagged `v1.13` / `v2.14`, followed by pull request #16 (`v1.14` / `v2.15`) (§3, §11). On 2026-10-10 and -11 a six-step plan was agreed and carried out: Ask reads IPO Watch, news retention, the listed names that matched wrongly, Ask on any stock and on the app's other pages, two whole runs of the Ask eval, news for the listed names nobody holds in India and the US, and one model for every Claude call, Claude Haiku 5.5. All of it was merged on 2026-10-11 as pull request #17 and tagged `v1.15` / `v2.16` (§3, §5, §8, §10, §11). Later the same day pull request #18, `v1.16` / `v2.17`, added three small pieces: Ask's code-written answer kept to what was asked, the timing of each model call with an effort setting, and two queues in the US rotation (§3, §8, §10). This file describes the project **as it stands now**. The previous
 handoff was a session-by-session log (1,658 lines); it is still in git history
-(`git show 6ee98d9:handoff.md`) if a detail of how something was built is needed.
+(`git show 8ae3be8:handoff.md`) if a detail of how something was built is needed.
 
 Facts marked *(checked)* were re-checked against the code, the dev database or a test run while
 writing this. Everything else is carried over from the previous handoff.
@@ -62,7 +62,7 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 ## 3. Current state
 
 - **Merged 2026-10-12: pull request #20 (`qa-fixes-v1.17`), tagged `v1.18` / `v2.19` on
-  `3dae799`.** Nine commits: the fixes for the QA pass of 2026-10-11 and then the items
+  `f8503a8`.** Nine commits: the fixes for the QA pass of 2026-10-11 and then the items
   that pass left open ("Next, in order", item 6). Two migrations (`0046`, `0047`), no new
   switch. **With an email provider set up, a new account must open the link sent to it
   before it can sign in.** What it changes:
@@ -95,20 +95,20 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
     moderate `npm audit` advisories remain in `@sentry/node` 8. The two QA reports are
     still untracked: whether they go to GitHub is his to say.
 - **Git** *(checked 2026-10-12)*: everything is on `main` and pushed. Latest tags
-  **`v1.18`** and **`v2.19`**, both on `3dae799`, the merge of pull request #20. The
+  **`v1.18`** and **`v2.19`**, both on `f8503a8`, the merge of pull request #20. The
   one commit after it on `main` puts that hash into this file. Before it: `v1.17` /
-  `v2.18` on `13c70bf` (pull request #19), `v1.16` /
-  `v2.17` on `91f53fb` (pull request #18), `v1.15` /
-  `v2.16` on `75fcb2f` (pull request #17, the plan of 2026-10-10), `v1.14` / `v2.15` on
-  `d0aa0ca` (pull request #16, IPO Watch's "Show all" button, §5) and `v1.13` / `v2.14`
-  on `71230ec` (pull request #15, the QA pass, §8). The two numbers differ because `v2.13` was strategies-only work (§11). No
+  `v2.18` on `2e4f6fb` (pull request #19), `v1.16` /
+  `v2.17` on `6a4309f` (pull request #18), `v1.15` /
+  `v2.16` on `5f23f70` (pull request #17, the plan of 2026-10-10), `v1.14` / `v2.15` on
+  `5a39595` (pull request #16, IPO Watch's "Show all" button, §5) and `v1.13` / `v2.14`
+  on `f360019` (pull request #15, the QA pass, §8). The two numbers differ because `v2.13` was strategies-only work (§11). No
   pull request is open. Untracked and never pushed: `samples/` and `.github/` (§11), and
   the two QA reports of 2026-10-11, `QA_REPORT_v1.md` and `QA_REPORT_v2.md`, which were
   left out of pull request #19 for Annas to decide on ("Next, in order", items 6 and 7).
 - **What `v1.17` / `v2.18` adds** *(pull request #19; five commits and the merge of two
   local branches, `ask-shapes` and `finnhub-gate`)*. One migration, `0045`. Nothing in it
   is switched on. The section named has each one's detail.
-  - **Ask's answers shaped tool by tool** (`fd7e3db`; "Ask's answers shaped tool by
+  - **Ask's answers shaped tool by tool** (`a8d6943`; "Ask's answers shaped tool by
     tool", below): a list is one item to a line, each tool sends the shape of its answer
     with its result, and tools send only the rows an answer shows with their dates and
     money written out. Live for any Ask user with no switch. With it: IPO Watch gives
@@ -116,14 +116,14 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
     pledges, buys or sells; **`get_smart_money` no longer mixes sample congressional rows
     with real ones**; the closing line is put on by code; the grounding check reads a
     written-out date.
-  - **The same for the strategy tools, v2 only** (`c718ff0`): in `strategyTools.js` and
+  - **The same for the strategy tools, v2 only** (`37059fd`): in `strategyTools.js` and
     the strategy part of the prompt, nowhere else.
-  - **The Ask eval grades shape** (`d959500`): 81 cases, 29 named shapes, `--tag` and a
+  - **The Ask eval grades shape** (`c497bb1`): 81 cases, 29 named shapes, `--tag` and a
     free `--report`.
-  - **One gate for every Finnhub call** (`247f8ed`; "Next, in order", item 2): built and
+  - **One gate for every Finnhub call** (`ac8f17e`; "Next, in order", item 2): built and
     tested offline, **never run against Finnhub**. With it IPO Watch's news rotation and
     migration `0045`.
-  - **The daily brief's congressional rows** (`4d19d5d`): sample rows stand in only while
+  - **The daily brief's congressional rows** (`fb0f74e`): sample rows stand in only while
     there are no real disclosures, in `smartMoneyContext` (`grounding.js`), as in Ask.
 - **Where the work of the evening of 2026-10-11 was done.** `ask-shapes`, in a worktree
   of its own, and `finnhub-gate`, in the main checkout (the Finnhub session's work and,
@@ -139,41 +139,41 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   branches means that commit, which is now on `main`;** the local branches are deleted.
   Pull request #18 was made the same way from two branches, `ask-to-the-point` and
   `us-curated-rotation` (a second session, in a worktree), pushed as `ask-to-the-point`.
-  Three worktrees are left under `.claude/worktrees/`: `crypto-kb` (merged as pull
-  request #12), `haiku-5-5` and `us-curated-rotation`. Nothing on any of them is missing
-  from `main`.
+  Three git worktrees are left on Annas's machine (`git worktree list`): `crypto-kb`
+  (merged as pull request #12), `haiku-5-5` and `us-curated-rotation`. Nothing on any of
+  them is missing from `main`.
 - **What `v1.16` / `v2.17` adds** *(pull request #18; 6 commits)*. Three pieces, no
   migration and no change to a page:
-  - **Ask's code-written answer gives what was asked and stops** (`a4f94c3`; §8, "Stocks
+  - **Ask's code-written answer gives what was asked and stops** (`ddf59c0`; §8, "Stocks
     nobody holds"). "What was Tesla's high today?" is answered with the high. This one
     is live for any Ask user with no switch.
-  - **Each model call is timed, and Ask has an effort setting** (`8c52042`; "Next, in
+  - **Each model call is timed, and Ask has an effort setting** (`3a83d57`; "Next, in
     order", item 5). `ASK_EFFORT` is unset, so nothing changes until it is set.
-  - **The US rotation has two queues** (`6de3173`; under P6 below, and §10): the curated
+  - **The US rotation has two queues** (`a60348a`; under P6 below, and §10): the curated
     names nobody holds come round about every 3 hours, the rest about every 9. It
     matters only with `US_LISTED_NEWS=1`, which is still off.
 - **What `v1.15` / `v2.16` adds** *(pull request #17; 19 commits)*. Seven pieces; the
   section named has each one's detail.
-  - **Ask reads IPO Watch** (`1f0e368`; §5, "Daily brief and Ask"):
+  - **Ask reads IPO Watch** (`ee593d2`; §5, "Daily brief and Ask"):
     `server/services/ipoTools.js`. It compares issues on recorded figures and never picks
     one.
-  - **News retention** (`acc3204`; §5 and §8, "News retention"): migration `0043`,
+  - **News retention** (`357cfde`; §5 and §8, "News retention"): migration `0043`,
     `server/services/retention.js`, `scripts/retention.js`. **Off (`RETENTION` unset);
     nothing has been removed from the dev database.**
-  - **Listed names that matched wrongly** (`9937b1b`, `dd7a32c`; §8, "Stocks nobody
+  - **Listed names that matched wrongly** (`e9a7376`, `8fae27b`; §8, "Stocks nobody
     holds", and §10): rules in `entityResolver.js` for 18 names a headline uses for
     something else, for a name that is another company's, and for a company named for a
     part in someone else's story. With them the switch **`INDIA_LISTED_NEWS`, off**.
-  - **Ask on a stock the user does not hold, and on the app's other pages** (`ee7b582`,
-    `2587de8`, `5d7097f`; §8, §10): `stockSnapshot.js`, `priceHistory.js`, `pageTools.js`
+  - **Ask on a stock the user does not hold, and on the app's other pages** (`46ac0e8`,
+    `f9a8ff8`, `4bce912`; §8, §10): `stockSnapshot.js`, `priceHistory.js`, `pageTools.js`
     and six tools, all Ask only (`get_stock_snapshot`, `get_price_history`,
     `get_fund_holdings`, `get_politician_trades`, `get_india_deals`,
     `get_alerts_and_brief`). Ask sends 17 tool definitions with every question.
-  - **The fixes after the eval, and each session's high and low** (`0f674f3`, `14eba58`;
+  - **The fixes after the eval, and each session's high and low** (`b92d397`, `7d5f15b`;
     under the plan below).
-  - **US coverage** (`8217423`; §8 and §10): `server/services/usNews.js`, migration
+  - **US coverage** (`22b80b2`; §8 and §10): `server/services/usNews.js`, migration
     `0044`, `scripts/us_news.js`. The switch **`US_LISTED_NEWS`, off**.
-  - **One model, Claude Haiku 5.5** (`2d41f98`; under the plan below): the brief, Ask,
+  - **One model, Claude Haiku 5.5** (`9518f76`; under the plan below): the brief, Ask,
     the alert explanation, the report cards and the per-company reading.
   One example chip in Ask is the only change to a page. Nothing new is on `/mcp` or `/v1`.
 - **What is different for a running server with every new switch off:**
@@ -244,7 +244,7 @@ Finnhub work below was started at his word the same day and is built, not yet ru
      Ask's one model call and one alert explanation in that half hour both timed out at
      the router and fell back to code-written text.
 2. **Finnhub: what was measured, the plan, and what is built** *(2026-10-11; **built on
-   branch `finnhub-gate` at Annas's word, committed as `247f8ed` and merged in pull request
+   branch `finnhub-gate` at Annas's word, committed as `ac8f17e` and merged in pull request
    #19 the same evening at his word, never run against Finnhub**;
    "Built" at the end of this item says what the code does)*.
    - **Measured.** Finnhub counts company-news calls and every other call (prices, the
@@ -297,7 +297,7 @@ Finnhub work below was started at his word the same day and is built, not yet ru
      condition that the calls stay inside the limit and nothing waits because a request
      was refused; (b) the calendar keeps its daily poll and the US side is also caught up
      at start when it is over a day old; (c) SPACs stay out of the IPO news fetch.
-   - **Built** *(commit `247f8ed`, on `main` since pull request #19; `npm test` passed
+   - **Built** *(commit `ac8f17e`, on `main` since pull request #19; `npm test` passed
      on its branch, 34 files, 841 checks; no call has gone to Finnhub from this code and
      the server has not been started on it)*:
      - `services/finnhubGate.js`: the gate, as planned (two meters, 50 a minute each; the
@@ -347,7 +347,7 @@ Finnhub work below was started at his word the same day and is built, not yet ru
    judge is shown stand as written; the judge was not run again.)*
 
 5. **How long an answer takes: on hold** *(started 2026-10-11 at Annas's word and put
-   on hold by him the same day; what was built is commit `8c52042`)*. **Decided: stay on
+   on hold by him the same day; what was built is commit `3a83d57`)*. **Decided: stay on
    the router for now and try lower effort there; later call Anthropic directly.** In the two
    whole runs a round cost about 9 to 10 seconds on Claude Haiku 5.5 and most questions
    took two (20.1 seconds an answer against 13.6 on Haiku 4.5, 877 output tokens against
@@ -454,8 +454,8 @@ Other work:
    OAuth callback (`server/routes/oauth.js`) was rewritten and everyone must sign in again.
    Since then `v1.8` / `v2.8` added per-company sentiment: nothing for him to change, and the
    new `COMPANY_SENTIMENT_LLM` switch is off unless set.
-   `README.md` was garbled by his commit `ffa4fde` (316 bytes of random characters) and was
-   restored on 2026-10-08 from the last good version (`9121338`), then brought up to date;
+   `README.md` was garbled by his commit `640a1f4` (316 bytes of random characters) and was
+   restored on 2026-10-08 from the last good version (`4cba5e7`), then brought up to date;
    ask him not to re-apply that commit.
 2. **India smart money:** keep running `node scripts/india_smart_money.js poll` (60 insider
    filings per run) to drain the backlog and catch each evening's deal file. Before any
@@ -474,7 +474,7 @@ Asked for by Annas on 2026-10-11: the news and sentiment answers were as he want
 answers from the other tools (IPO Watch, funds, Congress, Indian deals, price history)
 ran long and were hard to read. His terms: every tool gets questions of its own, the
 answer is correct, precise and organised, and the whole exercise costs at most $0.50.
-Commits `fd7e3db` (v1), `c718ff0` (v2) and `d959500` (the eval).
+Commits `a8d6943` (v1), `37059fd` (v2) and `c497bb1` (the eval).
 
 - **How an answer is shaped.**
   - A list is rows: one item to a line, its fields set apart by " · ". The page shows
@@ -584,7 +584,7 @@ Six steps agreed late on 2026-10-10, each its own piece of work with tests. All 
 built or run on 2026-10-11. What each step was meant to be, and what was decided on the
 way, is in §10 ("Planned on 2026-10-10, and built").
 
-- **P1. Done 2026-10-11.** Two commits: `1f0e368` (Ask reads IPO Watch), then `acc3204`
+- **P1. Done 2026-10-11.** Two commits: `ee593d2` (Ask reads IPO Watch), then `357cfde`
   (news retention).
 - **P2. Run 2026-10-11; three of four cases answered, $0.086 spent** (run
   `eval/ask/runs/2026-10-10T18-26-32`; Haiku 4.5 answers and a Sonnet 5.5 judge, both
@@ -663,7 +663,7 @@ way, is in §10 ("Planned on 2026-10-10, and built").
     Every caller that reaches Claude — Ask, the daily brief, the alert explanation, the
     report cards, the per-company reading — uses it. The eval's judge stays Claude Sonnet
     5.5: it is there to be a different model from the one it grades.
-  - **The switch is made** *(commit `2d41f98`)*: `config.js`, `services/qa.js` (a
+  - **The switch is made** *(commit `9518f76`)*: `config.js`, `services/qa.js` (a
     comment), `.env.example`, `test/llmClient.test.js`.
     - The four `MODEL` settings are `claude-haiku-5-5` and the router's default is
       `anthropic/claude-haiku-5.5`. The local `.env` sets no `AIROUTER_MODEL`, so the
@@ -682,7 +682,7 @@ way, is in §10 ("Planned on 2026-10-10, and built").
       Reaching Anthropic directly, without the router, has not been run on it either.
     - Still open: nothing is cached through the router, and answers run long.
 - **Each session's high and low in Ask** *(2026-10-11, at Annas's word; commit
-  `0f674f3`; the eval has 46 cases with it)*. Asked
+  `b92d397`; the eval has 46 cases with it)*. Asked
   "what was Apple's high today", Ask had only closes. Now:
   - `get_price_history` reads each session's high and low for shares and commodities and
     gives `latest_session` (its date, high, low and close), `highest_price` and
@@ -707,19 +707,19 @@ way, is in §10 ("Planned on 2026-10-10, and built").
 - **P3. Fix the listed names that match wrongly, then switch on news matching for the 439
   Indian listed names.** Small, and it repairs a fault that exists today (§8, "Stocks nobody
   holds"). Early, because coverage needs days of running before it shows anything.
-  **Built 2026-10-11, commit `9937b1b` on `listed-news`:** the rule for the four names of
+  **Built 2026-10-11, commit `e9a7376` on `listed-news`:** the rule for the four names of
   §8 and for 14 more the sweep found and Annas chose (§10), and the switch
   `INDIA_LISTED_NEWS` (off unless `1`). **Not done:** the switch has not been set in `.env`,
   so coverage has not started. The names that are another company's (§10) were fixed
   later the same day, and so were the three one-story mentions (a bank as the source of
   an analysis, a fund house as a speaker's employer, an IPO's registrar): commit
-  `dd7a32c`. The last three, all US names in an Indian outlet's story (`DLB`, `CMI`, and
+  `8fae27b`. The last three, all US names in an Indian outlet's story (`DLB`, `CMI`, and
   "Colgate-Palmolive shares" with no "India" after it), are closed by P6's own-feed rule.
 - **P4. Ask features on the data that exists:** the price-and-sentiment snapshot for a stock
   the user does not hold; price history; then the fund, politician, Indian investor, alerts
-  and brief tools. **Slice 1, the snapshot, is built** (2026-10-11, commit `ee7b582` on
-  `ask-tools`; §10), **so is slice 2, price history** (commit `2587de8`), **and so is
-  slice 3, the page tools** (commit `5d7097f`). Annas asked to check in after each slice, said
+  and brief tools. **Slice 1, the snapshot, is built** (2026-10-11, commit `46ac0e8` on
+  `ask-tools`; §10), **so is slice 2, price history** (commit `f9a8ff8`), **and so is
+  slice 3, the page tools** (commit `4bce912`). Annas asked to check in after each slice, said
   each slice may be committed locally once its tests pass, and said no paid run before P5.
   **P4 is built; nothing in it has been run with a real model.**
 - **P5. The whole Ask eval on Haiku 4.5.** It shows whether the extra tools confuse the
@@ -772,8 +772,8 @@ way, is in §10 ("Planned on 2026-10-10, and built").
   - Not done at the time: any fix, and a second run of any case. The fixes and a pilot on
     Claude Haiku 5.5 followed the same day (next item).
 - **After P5: the fixes, and a six-case pilot on Claude Haiku 5.5** *(2026-10-11, at
-  Annas's word; commit `0f674f3`, and the output limit raised to 3,000 tokens in
-  `14eba58`)*.
+  Annas's word; commit `b92d397`, and the output limit raised to 3,000 tokens in
+  `7d5f15b`)*.
   - **Fixes made** (`npm test` passes: 32 files, 778 checks):
     - Money is given in the unit a reader uses, worked out in code: "₹107.54 crore",
       "₹32.94 lakh", "$299.25 billion" (`moneyText` in `pageTools.js`; the `value` and
@@ -825,7 +825,7 @@ way, is in §10 ("Planned on 2026-10-10, and built").
       anything about the other 38 cases. One run of each case.
 - **P6. US coverage,** last: the largest change in volume, and by then P3 will have shown
   how well the name matching holds.
-  **Built 2026-10-11, commit `8217423` on `us-news`** (§10 has the detail). Annas's four
+  **Built 2026-10-11, commit `22b80b2` on `us-news`** (§10 has the detail). Annas's four
   answers at the start: the own-feed rule is for every US listed name, held or not; a
   story the rotation brings in that names no company is dropped; the rotation takes the
   US listed names and the curated US shares nobody holds; a new stacked branch, committed
@@ -834,7 +834,7 @@ way, is in §10 ("Planned on 2026-10-10, and built").
     asks Finnhub for the company news of 30 US shares nobody holds, the ones checked
     longest ago (`companies.news_checked_at`), one call a second. 1,501 names on the dev
     database, so each came round about every 8.3 hours as first built.
-  - **Two queues** *(2026-10-11, at Annas's word; commit `6de3173`)*: 5 of a run's 30 places are for the curated US shares
+  - **Two queues** *(2026-10-11, at Annas's word; commit `a60348a`)*: 5 of a run's 30 places are for the curated US shares
     nobody holds (98 on the dev database, each about every 3.3 hours) and 25 for the rest
     (1,403: the listed tier and 5 graduated IPOs, each about every 9.4 hours). Picked on
     the dev database with the switch set for that one process, reads only, no Finnhub
@@ -879,7 +879,7 @@ cd ~/Downloads/SenIQ_MajorProject && FEATURES_STRATEGIES=1 PORT=3030 npm start  
 - Every boot runs the news pipeline. Several restarts in a row hit Finnhub/CoinGecko rate
   limits and prices come back empty until they clear. Start about 5 minutes before a demo.
 - Port busy: `lsof -ti :3010 | xargs kill`. Health: `curl -s localhost:3010/api/health`.
-- Preview-pane launch names (in `~/.claude/launch.json`) *(checked)*: `seniq-main` (:3010),
+- Preview-pane launch names (in the user-level `launch.json`) *(checked)*: `seniq-main` (:3010),
   `seniq-v2` (:3030), `seniq-strategy` (:8100). The pane cannot start the engine (macOS blocks
   it from reading the venv in Downloads); start the engine from a shell.
 - The first FinBERT run downloads the model (~110 MB) into
@@ -984,7 +984,7 @@ and its stories: the latest 5, with "Show all N stories" for the rest (`IPO_STOR
 status, limits. Before any hosting, InvestorGain's reuse terms must be settled (the same open
 item as NSE's); BSE and NSE refuse automated requests and are not worked around.
 
-**News retention** (`server/services/retention.js`, opt-in with `RETENTION=1`; commit `acc3204`,
+**News retention** (`server/services/retention.js`, opt-in with `RETENTION=1`; commit `357cfde`,
 branch `ipo-ask`). Until this, every story was kept for good and `articles` was the one
 table that grew without limit. A story's age is counted from the later of the day it was
 published and the day it was fetched. Two ages (`RETENTION` in `config.js`): **30 days**
@@ -1632,8 +1632,8 @@ Seen in the first pass and **still not changed** (v1):
 - The pipeline's log line says "read by the word list" when a run stored no new story.
 
 **Front end.**
-- Do not use the browser's `confirm()`, `alert()` or `prompt()`. Embedded browsers (the
-  Claude desktop pane among them) suppress them and answer "no", so the button looks dead.
+- Do not use the browser's `confirm()`, `alert()` or `prompt()`. Embedded browser panes
+  suppress them and answer "no", so the button looks dead.
   Use `confirmAction(message, label)` in `public/js/app.js`, which returns a promise.
 
 **Company reference: two tiers (2026-10-09, pull request #11).**
@@ -1834,7 +1834,7 @@ machine before the date fix that day had lookahead; do not reuse older figures.
   changed)*: `QTWO` (Q2 Holdings) on every "Q2 results" headline, 76 stories; `BSE` (BSE
   Ltd) on every mention of the exchange, 80; `NDAQ` (Nasdaq Inc) on the index, 25; `JEF`
   (Jefferies) wherever it is the broker rating another company, 27. Nobody holds one today,
-  so no wrong tag is stored. **Fixed on the branch `listed-news` (2026-10-11, commit `9937b1b`):**
+  so no wrong tag is stored. **Fixed on the branch `listed-news` (2026-10-11, commit `e9a7376`):**
   each of the four now counts only beside a company word ("Q2 Holdings", "BSE shares",
   "Nasdaq Inc", "shares of Jefferies"), and a possessive is not one ("BSE's Sensex"). On
   the stored stories that leaves 0, 1, 0 and 0 matches; the one is "Should investors dump
@@ -1848,7 +1848,7 @@ machine before the date fix that day had lookahead; do not reuse older figures.
 - **The snapshot answer gives what the question asked for and stops** *(2026-10-11, at
   Annas's word after he asked "What was Tesla's high today?" and got the price, the low,
   the sentiment reading and two lines about his portfolio around it; commit
-  `a4f94c3`)*. The
+  `ddf59c0`)*. The
   question is read by word lists (`asksFor` in `stockSnapshot.js`) for four things: the
   price, the session's high, its low, the sentiment reading. Asked for one, the answer
   is that one sentence ("Tesla (TSLA): Its latest session's high was $388.56."); asked
@@ -2004,7 +2004,7 @@ hand-labelled sheets of (story, company) pairs (§8).
 - **Bars stay out of sight.** No price bars on a page, on `/mcp` or on `/v1`. Backtests,
   signals and paper trading stay on daily bars (§5). Price history reaches the user only
   through Ask (P4).
-- **P3, name fixes: built for 18 names** *(2026-10-11, commit `9937b1b` on
+- **P3, name fixes: built for 18 names** *(2026-10-11, commit `e9a7376` on
   `listed-news`)*. `LISTED_NEEDS_CUE` in `entityResolver.js` holds them;
   `test/listedUniverse.test.js` keeps their cases fixed. A name in the set counts only
   beside a company word (Inc, Corp, Co, Ltd, Holding, Group, shares, stock) or after
@@ -2030,7 +2030,7 @@ hand-labelled sheets of (story, company) pairs (§8).
     `COLPAL`; `PTC` (the US software company) on "PTC India"; `VEDL` on "Vedanta Iron
     Steel" and "Vedanta Aluminium", its demerged siblings, 3 of 10. `GOOG` matches
     "Alphabet's", the right company, whose curated row is `GOOGL`. **Fixed 2026-10-11, at
-    Annas's word (commit `dd7a32c` on `ask-tools`),**
+    Annas's word (commit `8fae27b` on `ask-tools`),**
     by five rules in `entityResolver.js`, each with its cases in
     `test/listedUniverse.test.js`:
     - A listed name a curated company already answers to is matched by its symbol only
@@ -2049,7 +2049,7 @@ hand-labelled sheets of (story, company) pairs (§8).
     A US name written exactly as its Indian namesake is ("Colgate-Palmolive shares" in an
     Indian outlet, with no "India" after it) was left for plan step P6's rule, that a US
     name is tagged only on a story from its own ticker's feed. **That rule is built**
-    *(2026-10-11, commit `8217423` on `us-news`)* and a test holds the case.
+    *(2026-10-11, commit `22b80b2` on `us-news`)* and a test holds the case.
   - *A broker or rating agency giving its view of another company* (what `JEF` was): of the
     Indian names `JMFINANCIL` 5 of 7, `CRISIL` 5 of 6 ("Crisil Ratings affirms…"),
     `NUVAMA` 3 of 3, `ANGELONE` 2 of 4; of the US names `MCO` (Moody's) 2 of 2 and `EVR`
@@ -2057,7 +2057,7 @@ hand-labelled sheets of (story, company) pairs (§8).
     `ABSLAMC` (an interview with its CIO), `KFINTECH` ("… is the IPO registrar", a line that
     returns with every Indian IPO). **The six named first are fixed by the cue rule. The
     three with one story each are fixed by a rule of their own** *(2026-10-11, commit
-    `dd7a32c` on `ask-tools`; `npm test` passes: 32 files, 787 checks)*: the cue rule
+    `8fae27b` on `ask-tools`; `npm test` passes: 32 files, 787 checks)*: the cue rule
     would have cost Bank of Baroda its four right stories. `playsAPart` in
     `entityResolver.js` leaves out a mention of a listed name when the words around it
     give it one of three parts in someone else's story:
@@ -2097,7 +2097,7 @@ hand-labelled sheets of (story, company) pairs (§8).
   fetch: the stories already arrive from the three Indian outlets. On the stored stories
   that gives 203 of the 439 names at least one. A story that gains a tag moves from
   retention's 30-day class to its 180-day one. **The switch is built** *(2026-10-11,
-  commit `9937b1b` on `listed-news`)*: `INDIA_LISTED_NEWS=1` passes the Indian listed names to
+  commit `e9a7376` on `listed-news`)*: `INDIA_LISTED_NEWS=1` passes the Indian listed names to
   the resolver in `runNewsPipeline`, and to nothing else, so the per-company fetches still
   run for held tickers only. **Measured on the 2,485 stored stories, after the 18 name
   fixes, reads only:** 368 stories would gain 419 tags across 198 names; the roundup
@@ -2107,7 +2107,7 @@ hand-labelled sheets of (story, company) pairs (§8).
   and `INFY`; an Acutaas and Mankind story loses `DRREDDY` and `CIPLA`). Those 368 are the
   stories that would move to the 180-day class. Not done: the switch has never been on in
   a running pipeline, and stored stories are not re-tagged by it (new stories only).
-- **P4, snapshot: built 2026-10-11** (commit `ee7b582` on `ask-tools`;
+- **P4, snapshot: built 2026-10-11** (commit `46ac0e8` on `ask-tools`;
   `services/stockSnapshot.js`). Both parts as decided below. The tool is
   `get_stock_snapshot`, takes a name or a ticker, and is Ask only (`ASK_ONLY` in
   `dataTools.js`; a test fails if an Ask tool is neither in the public catalog nor named
@@ -2136,7 +2136,7 @@ hand-labelled sheets of (story, company) pairs (§8).
   when several match. The code-written snapshot of part 1 stays on the 218, the only names
   safe to pick out of free text. A listed name's sentiment reads "not tracked yet" until
   P3 and P6 land.
-- **P4, price history: built 2026-10-11** (commit `2587de8` on `ask-tools`;
+- **P4, price history: built 2026-10-11** (commit `f9a8ff8` on `ask-tools`;
   `services/priceHistory.js`). As decided below, with these choices made while building:
   coins come from CoinGecko by their id, because a Yahoo symbol for a coin can belong to
   another token; six months and the calendar year to date are given beside the four
@@ -2151,7 +2151,7 @@ hand-labelled sheets of (story, company) pairs (§8).
   high and the low with their dates, average volume) and a short run of closes: a year of
   daily bars does not fit a 4,000-character tool result. It describes what the price did;
   no trend calls.
-- **P4, the pages' other data: built 2026-10-11** (commit `5d7097f` on `ask-tools`;
+- **P4, the pages' other data: built 2026-10-11** (commit `4bce912` on `ask-tools`;
   `services/pageTools.js`). Four tools, as planned: `get_fund_holdings` (the tracked
   funds, or one fund's ten largest positions with its share of the fund, the counts of new,
   added, reduced and unchanged positions, and the three largest of each),
@@ -2172,7 +2172,7 @@ hand-labelled sheets of (story, company) pairs (§8).
   The pages' plan limits carry over. The cost is that every tool's definition is sent with
   every question.
 - **P5, the model: Claude Haiku 5.5 for every caller** *(settled by Annas on 2026-10-11,
-  after the whole eval on it; commit `2d41f98`; the figures are in §3)*. How it got there:
+  after the whole eval on it; commit `9518f76`; the figures are in §3)*. How it got there:
   - *As decided on 2026-10-10:* Ask was to stay on `claude-haiku-4-5`, then taken for the
     newest Haiku, with Sonnet 5.5 ($2 and $10 a million tokens) the step up only if the
     eval showed wrong tool picks that rewording the tool descriptions did not cure. The
@@ -2193,7 +2193,7 @@ hand-labelled sheets of (story, company) pairs (§8).
     `/chat/completions` (`llmClient.js`), which sends no cache marker (why no call reads
     from the cache), no effort setting, and does not carry thinking blocks between the
     rounds of a question.
-- **P6, US: built 2026-10-11** (commit `8217423` on `us-news`; `services/usNews.js`).
+- **P6, US: built 2026-10-11** (commit `22b80b2` on `us-news`; `services/usNews.js`).
   As planned below, with these choices made at the start and while building:
   - *The switch.* `US_LISTED_NEWS=1`, off by default and not set in `.env`. It needs
     `FINNHUB_API_KEY`.
@@ -2332,35 +2332,42 @@ that remain, none of them a defect waiting for a fix:
 - **`.github/workflows/ci.yml` is uncommitted on purpose.** A push that contains a workflow
   file is rejected until the token has the `workflow` scope
   (`gh auth refresh -h github.com -s workflow`, interactive).
-- `strategy-service/`, `.env`, `eval/ask/runs/` and `.claude/` are gitignored.
+- `strategy-service/`, `.env` and `eval/ask/runs/` are gitignored.
+- **The history of `main` was rewritten on 2026-10-12**: six commit messages from June and
+  July were edited and no file was changed, so **every commit after the first two has a
+  new hash** and all 38 tags were moved to the matching new commits. The hashes in this
+  file, `IPO_PLAN.md` and `RAG_PLAN.md` are the new ones; a hash from before that date
+  (in a chat, a note, an old clone) no longer exists on GitHub. The repository as it was
+  is kept in `~/Downloads/SenIQ_backup_2026-10-12_before-history-edit.bundle`. An old
+  clone must be re-cloned, or reset to `origin/main`, never merged or pushed.
 
 ### Tags
 
 | Tags | Commit | Adds |
 |---|---|---|
-| `v1.0` | `24148b2` | v1 on the old dark theme (presentation fallback) |
-| `v1.1` / `v2.1` | `673791a` | Light theme, sliding nav |
-| `v1.2` / `v2.2` | `537612d` | Google/GitHub sign-in, password reset, alert emails (Shreyas) |
-| `v1.3` / `v2.3` | `cbf1115` | Pull requests #1 and #2: knowledge base, Ask grounding and retrieval, alert quality, hardening, server-side sessions, report emails, INR prices, Analytics page, feed ranking, India smart money |
-| `v1.4` / `v2.4` | `308b1bc` | #3: user time zones, Pro end-of-day report |
-| `v1.5` / `v2.5` | `f5d2605` | #4: India deals and insider trades in the reports and the brief |
-| `v1.6` / `v2.6` | `7af294a` | #5: local FinBERT, re-score script |
-| `v1.7` / `v2.7` | `898314c` | #7: commodity word inside a company name; commodity re-tag script |
-| `v1.8` / `v2.8` | `d13a560` | #8: per-company sentiment (FinBERT per company, optional local or hosted language model), roundups as market stories, re-read and labelling scripts |
-| `v1.9` / `v2.9` | `55c5fe3` | #9: in-page confirm dialog for the delete and stop buttons; README restored and brought up to date, with the hand-label sentiment results |
-| `v1.10` / `v2.10` | `839df81` | #10: the local model reads every story and its agreement with FinBERT is the confidence; optional fine-tuned FinBERT (off); two-sheet scoring; README results corrected |
-| `v1.11` / `v2.11` | `68ef315` | #11: two-tier company reference (1,839 listed companies: S&P 1500 and Nifty 500), strict matching for held listed names, listed names shielding curated ones, 15 commodities |
-| `v1.12` / `v2.12` | `d9ec9df` | #13: IPO Watch (opt-in) — Indian and US IPO calendar, grey market premium and subscription, stories linked and read for tone, outcomes to the three-month close, graduation into the company reference as an `ipo` tier. Also #12: the curated coins and crypto news feeds |
-| `v2.13` (no `v1.13`) | `f3638fb` | #14: the paper ledger — a daily job stores each paper deployment's fills and closing value from completed days, emails a new fill, and the record is read on the Paper Trade page, at `/v1/paper/:id/ledger` and through `get_paper_ledger` |
-| `v1.13` / `v2.14` | `71230ec` | #15: the QA pass of 2026-10-10 — no new feature, no migration. v1: bad input is a 400 or 404, logs carry no bodies or failed rows, Ask's holding size is the exposure figure, an executive's other venture is not their company, the brief's writer sees no engine scores and its headline is checked. v2: saves and deployments are checked first, bad ids are 404s, engine refusals in plain words, starting capital bounded, the Builder keeps what was typed, the robustness check counts traded windows, an account off Pro keeps the handle on its deployments |
-| `v1.14` / `v2.15` | `d0aa0ca` | #16: IPO Watch opens an issue's news on its latest 5 stories, with a "Show all N stories" button for the rest; the tone and the chart are still from every story. Page only |
-| `v1.15` / `v2.16` | `75fcb2f` | #17: Ask reads IPO Watch, answers on a stock the user does not hold (price, sentiment, price history, each session's high and low) and reads the app's other pages; news retention (off); the listed names that matched wrongly, and news for the listed names nobody holds in India and the US (two switches, both off; a US listed name is tagged only from its own ticker's feed); one model for every Claude call, Claude Haiku 5.5. Migrations `0043` and `0044` |
-| `v1.16` / `v2.17` | `91f53fb` | #18: Ask's code-written answer on a stock the user does not hold gives what the question asked for and stops; each model call and tool round is timed, and `ASK_EFFORT` sets Ask's effort (unset by default); the US rotation has two queues, curated names about every 3 hours and the rest about every 9. No migration |
-| `v1.17` / `v2.18` | `13c70bf` | #19: Ask's answers shaped tool by tool (rows, an `answer_shape` with each tool's result, only the rows an answer shows, dates and money written out, the closing line put on by code), on the strategies side too; IPO Watch's calendar gives what is open and coming up; Indian deals read for promoters, pledges, buys or sells; sample congressional rows never mixed with real ones, in Ask and in the daily brief; the Ask eval grades shape (81 cases); one gate for every Finnhub call and IPO Watch's news rotation, **not yet run against Finnhub**. Migration `0045` |
+| `v1.0` | `bf6468a` | v1 on the old dark theme (presentation fallback) |
+| `v1.1` / `v2.1` | `2eda8d0` | Light theme, sliding nav |
+| `v1.2` / `v2.2` | `f64ba8a` | Google/GitHub sign-in, password reset, alert emails (Shreyas) |
+| `v1.3` / `v2.3` | `e46f0b1` | Pull requests #1 and #2: knowledge base, Ask grounding and retrieval, alert quality, hardening, server-side sessions, report emails, INR prices, Analytics page, feed ranking, India smart money |
+| `v1.4` / `v2.4` | `dd84e55` | #3: user time zones, Pro end-of-day report |
+| `v1.5` / `v2.5` | `f211c12` | #4: India deals and insider trades in the reports and the brief |
+| `v1.6` / `v2.6` | `1c4473f` | #5: local FinBERT, re-score script |
+| `v1.7` / `v2.7` | `f0c9fa1` | #7: commodity word inside a company name; commodity re-tag script |
+| `v1.8` / `v2.8` | `deef40a` | #8: per-company sentiment (FinBERT per company, optional local or hosted language model), roundups as market stories, re-read and labelling scripts |
+| `v1.9` / `v2.9` | `018d85c` | #9: in-page confirm dialog for the delete and stop buttons; README restored and brought up to date, with the hand-label sentiment results |
+| `v1.10` / `v2.10` | `fc43e05` | #10: the local model reads every story and its agreement with FinBERT is the confidence; optional fine-tuned FinBERT (off); two-sheet scoring; README results corrected |
+| `v1.11` / `v2.11` | `e80116a` | #11: two-tier company reference (1,839 listed companies: S&P 1500 and Nifty 500), strict matching for held listed names, listed names shielding curated ones, 15 commodities |
+| `v1.12` / `v2.12` | `5b819ab` | #13: IPO Watch (opt-in) — Indian and US IPO calendar, grey market premium and subscription, stories linked and read for tone, outcomes to the three-month close, graduation into the company reference as an `ipo` tier. Also #12: the curated coins and crypto news feeds |
+| `v2.13` (no `v1.13`) | `afa0d46` | #14: the paper ledger — a daily job stores each paper deployment's fills and closing value from completed days, emails a new fill, and the record is read on the Paper Trade page, at `/v1/paper/:id/ledger` and through `get_paper_ledger` |
+| `v1.13` / `v2.14` | `f360019` | #15: the QA pass of 2026-10-10 — no new feature, no migration. v1: bad input is a 400 or 404, logs carry no bodies or failed rows, Ask's holding size is the exposure figure, an executive's other venture is not their company, the brief's writer sees no engine scores and its headline is checked. v2: saves and deployments are checked first, bad ids are 404s, engine refusals in plain words, starting capital bounded, the Builder keeps what was typed, the robustness check counts traded windows, an account off Pro keeps the handle on its deployments |
+| `v1.14` / `v2.15` | `5a39595` | #16: IPO Watch opens an issue's news on its latest 5 stories, with a "Show all N stories" button for the rest; the tone and the chart are still from every story. Page only |
+| `v1.15` / `v2.16` | `5f23f70` | #17: Ask reads IPO Watch, answers on a stock the user does not hold (price, sentiment, price history, each session's high and low) and reads the app's other pages; news retention (off); the listed names that matched wrongly, and news for the listed names nobody holds in India and the US (two switches, both off; a US listed name is tagged only from its own ticker's feed); one model for every Claude call, Claude Haiku 5.5. Migrations `0043` and `0044` |
+| `v1.16` / `v2.17` | `6a4309f` | #18: Ask's code-written answer on a stock the user does not hold gives what the question asked for and stops; each model call and tool round is timed, and `ASK_EFFORT` sets Ask's effort (unset by default); the US rotation has two queues, curated names about every 3 hours and the rest about every 9. No migration |
+| `v1.17` / `v2.18` | `2e4f6fb` | #19: Ask's answers shaped tool by tool (rows, an `answer_shape` with each tool's result, only the rows an answer shows, dates and money written out, the closing line put on by code), on the strategies side too; IPO Watch's calendar gives what is open and coming up; Indian deals read for promoters, pledges, buys or sells; sample congressional rows never mixed with real ones, in Ask and in the daily brief; the Ask eval grades shape (81 cases); one gate for every Finnhub call and IPO Watch's news rotation, **not yet run against Finnhub**. Migration `0045` |
 
 Pull request #6 was closed by GitHub when its base branch was deleted; #7 replaced it.
 
-**Pull request #19** (`ask-shapes`) was merged on 2026-10-11 as `13c70bf`, at Annas's
+**Pull request #19** (`ask-shapes`) was merged on 2026-10-11 as `2e4f6fb`, at Annas's
 request from a session ("commit push merge everything done today across all sessions"),
 and the branch deleted. Tagged `v1.17` / `v2.18`. Five commits from three sessions, the
 merge of `finnhub-gate` into `ask-shapes`, and one handoff commit. Nothing in it is
@@ -2368,55 +2375,55 @@ switched on. **The Finnhub gate went in without a run against Finnhub** (§3, "N
 order", item 2); the next start of the server applies migration `0045` and is the first
 time that code calls Finnhub.
 
-**Pull request #18** (`ask-to-the-point`) was merged on 2026-10-11 as `91f53fb`, at
+**Pull request #18** (`ask-to-the-point`) was merged on 2026-10-11 as `6a4309f`, at
 Annas's request from a session, and the branch deleted. Tagged `v1.16` / `v2.17`. Six
 commits from two sessions. Nothing in it is switched on, and the work on how long an
 answer takes is on hold (§3, "Next, in order", item 5).
 
-**Pull request #17** (`us-news`) was merged on 2026-10-11 as `75fcb2f`, at Annas's
+**Pull request #17** (`us-news`) was merged on 2026-10-11 as `5f23f70`, at Annas's
 request from a session, and the branch deleted. Tagged `v1.15` / `v2.16`. It carries the
 whole plan of 2026-10-10 (§3): 19 commits made on five local branches by two sessions,
 pushed as one. Nothing in it is switched on: `RETENTION`, `INDIA_LISTED_NEWS` and
 `US_LISTED_NEWS` are off unless set. The first start after it applies migrations `0043`
 and `0044`.
 
-**Pull request #8** (`per-company-sentiment`) was merged on 2026-10-08 as `d13a560`, at
+**Pull request #8** (`per-company-sentiment`) was merged on 2026-10-08 as `deef40a`, at
 Annas's request from a session, and the branch deleted: roundups as market stories,
 per-company sentiment, the local-model step and the labelling scripts. Tagged `v1.8` / `v2.8`.
 
-**Pull request #9** (`in-page-confirm`) was merged on 2026-10-08 as `55c5fe3`, at Annas's
+**Pull request #9** (`in-page-confirm`) was merged on 2026-10-08 as `018d85c`, at Annas's
 request, and the branch deleted. Tagged `v1.9` / `v2.9`. The five buttons that asked "are you sure?"
 with the browser's `confirm()` (delete an Ask conversation, delete a strategy, stop or delete
 a paper deployment, revoke an API key) now use an in-page dialog, `confirmAction()` in
 `public/js/app.js`.
 
-**Pull request #10** (`sentiment-agreement`) was merged on 2026-10-09 as `839df81`, at Annas's
+**Pull request #10** (`sentiment-agreement`) was merged on 2026-10-09 as `fc43e05`, at Annas's
 request, and the branch deleted. Tagged `v1.10` / `v2.10`. The local model reads every new story and
 its agreement with FinBERT is the reading's confidence; an optional fine-tuned FinBERT is
 wired but off; the README's results section now carries both label sheets (§8).
 
-**Pull request #11** (`listed-universe`) was merged on 2026-10-09 as `68ef315`, at Annas's
+**Pull request #11** (`listed-universe`) was merged on 2026-10-09 as `e80116a`, at Annas's
 request, and the branch deleted. Tagged `v1.11` / `v2.11`. The company reference has two tiers (§8):
 1,839 listed companies (S&P 1500 and Nifty 500) can be searched, held and priced, and are
 matched in news strictly and only while held; commodities go from 4 to 15.
 
-**Pull request #13** (`ipo-watch`) was merged by Annas on 2026-10-09 as `d9ec9df`. Tagged
+**Pull request #13** (`ipo-watch`) was merged by Annas on 2026-10-09 as `5b819ab`. Tagged
 `v1.12` / `v2.12`, and the branch deleted. IPO Watch (§5) is behind `IPO_WATCH=1`: eleven
 migrations (`0031`–`0041`), `server/services/ipoWatch/`, a tab with an India / US switch, and
 two touches on the news pipeline (company news for newly filed or priced US issues; linking
 and reading IPO stories at the end of each pass). `IPO_PLAN.md` is the full record.
 
-**Pull request #16** (`ipo-show-all`) was merged on 2026-10-10 as `d0aa0ca`, at Annas's
+**Pull request #16** (`ipo-show-all`) was merged on 2026-10-10 as `5a39595`, at Annas's
 request from a session, and the branch deleted. Tagged `v1.14` / `v2.15`. IPO Watch opens an
 issue's news on its latest 5 stories, with a "Show all N stories" button; page only.
 
-**Pull request #15** (`v1-qa-fixes`) was merged on 2026-10-10 as `71230ec`, at Annas's
+**Pull request #15** (`v1-qa-fixes`) was merged on 2026-10-10 as `f360019`, at Annas's
 request from a session, and the branch deleted. Tagged `v1.13` / `v2.14`: both sides
 changed, so each took its next free number. It holds the QA fixes of §8 (all three rounds),
 20 commits. The engine's part of the second round is in `strategy-service/` and in no
 commit.
 
-**Pull request #14** (`paper-ledger`) was merged by Annas on 2026-10-09 as `f3638fb`. Tagged
+**Pull request #14** (`paper-ledger`) was merged by Annas on 2026-10-09 as `afa0d46`. Tagged
 **`v2.13` only**, and the branch deleted. The paper ledger (§5): migration `0042`,
 `server/services/paperLedger.js`, a scheduler job, three read paths and `scripts/paper_mark.js`.
 

@@ -350,7 +350,7 @@ operators. The user runs the backtest and deploys.
 - Event-type factor.
 - Historical analogues: similar past events joined to `outcomes`.
 
-### R9. IPO Watch in Ask — DONE 2026-10-10 (branch `ipo-ask`, commit `1f0e368`)
+### R9. IPO Watch in Ask — DONE 2026-10-10 (branch `ipo-ask`, commit `ee593d2`)
 Kickoff answers: compare, do not pick; Ask only (not MCP or `/v1`); India and the US together
 when the question names no market.
 - **Built** (`server/services/ipoTools.js`, loaded only when `FEATURES.IPO_WATCH` is on):

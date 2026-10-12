@@ -32,7 +32,6 @@ data/archive/
 *.sqlite3
 
 # ─── Local tooling / editor / IDE ────────────────────────────
-.claude/
 .vscode/
 .idea/
 *.swp

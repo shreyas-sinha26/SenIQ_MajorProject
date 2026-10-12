@@ -218,7 +218,7 @@ into their own surface.
   - **Still open for the US:** no forward calendar. Finnhub dates nothing past the week, and
     Nasdaq's IPO calendar did not answer an identified request (nor its robots.txt), so it is
     not used. US issues the news never names in a headline still get no tone.
-- **Ask reads the calendar (built 2026-10-10, branch `ipo-ask`, commit `1f0e368`):**
+- **Ask reads the calendar (built 2026-10-10, branch `ipo-ask`, commit `ee593d2`):**
   `server/services/ipoTools.js`, loaded into Ask only when `IPO_WATCH=1`. Two read-only
   tools: `get_ipo_calendar` (both markets unless one is named; issues not yet listed unless
   a stage is given; filters for market, stage and board) and `get_ipo_detail` (one issue by
