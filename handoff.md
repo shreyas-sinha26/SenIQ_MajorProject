@@ -61,6 +61,19 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ## 3. Current state
 
+- **Hosted since 2026-10-17: v1 on AWS, https://seniq.15-252-175-25.sslip.io/app**
+  (`DEPLOY.md`, `deploy/`). One `t4g.small` server (2 GB, 2 GB swap) in Mumbai, in the AWS
+  account that held the IBS categorizer (`914800440621`, CLI profile `seniq`). That account is
+  on AWS's Free plan: only free-tier instance types, usage paid from its credits ($189 on
+  2026-10-17), and the plan ends on 2027-01-31, when AWS stops the account unless it is
+  upgraded. App, Postgres 15 and Caddy (HTTPS) run in Docker; nightly encrypted backups go to
+  S3; budget `seniq-monthly`, $22. The dev database was copied in at the first deploy (3,081
+  articles, 13 accounts). Switches on the server (`deploy/switches.env`): FinBERT, IPO Watch,
+  India smart money, Claude (`CLAUDE_REPORTS=1`) and email on; listed news off; no Ollama.
+  The local `.env` is unchanged, so a local `npm start` would run a second copy of the
+  scheduled jobs and email the same accounts: stop one before starting the other.
+  First pipeline run on the server: FinBERT read 322 stories; GDELT answered 2 of 8 queries
+  (HTTP 429). Memory after it: the app about 520 MB, about 800 MB still free.
 - **Merged 2026-10-12: pull request #20 (`qa-fixes-v1.17`), tagged `v1.18` / `v2.19` on
   `f8503a8`.** Nine commits: the fixes for the QA pass of 2026-10-11 and then the items
   that pass left open ("Next, in order", item 6). Two migrations (`0046`, `0047`), no new
@@ -210,7 +223,7 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   from the shell at about 18:30 for the Ask eval's strategy cases and stopped at about
   19:25; the dev server was not started)*. Earlier *(13:26 IST)*: the dev server was started at
   Annas's word at 12:56 IST and stopped at his word at 13:25; no other dev server, no
-  strategy engine, no `ollama serve` is listening. Postgres is up. Nothing is hosted. **`.env` has `CLAUDE_REPORTS=1`**, so the next plain
+  strategy engine, no `ollama serve` is listening. Postgres is up. (Since 2026-10-17 v1 is hosted on AWS; see the first item of this section.) **`.env` has `CLAUDE_REPORTS=1`**, so the next plain
   `npm start` **can make the app's own Claude calls**, now to Claude Haiku 5.5: briefs at
   each Pro account's 05:30, Ask, alert explanations and report cards, inside the quotas
   and the $5/day ceiling. Set it to `0` first if that is not wanted. `.env` also has the
@@ -435,7 +448,7 @@ Finnhub work below was started at his word the same day and is built, not yet ru
      `qa-fixes-v1.17`, and the reports say so; the question stands.)*
 
 Unchanged: **retention stays off**; nothing new goes on `/mcp` or `/v1` (every new tool is
-Ask only); hosting choices wait until there is a deployment to make.
+Ask only); hosting is on AWS since 2026-10-17 (`DEPLOY.md`).
 
 Other work:
 
