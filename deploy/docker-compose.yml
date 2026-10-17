@@ -32,6 +32,10 @@ services:
       DATABASE_SSL: disable   # the database is on the same private Docker network
       JWT_SECRET: ${JWT_SECRET}
       APP_URL: https://${SITE_DOMAIN}
+      # The admin account, created on start if missing. It is moved to the Free plan after it
+      # is first made (install.sh), so it never calls Claude unless switched up on purpose.
+      ADMIN_EMAIL: admin@seniq.duckdns.org
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
