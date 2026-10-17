@@ -138,9 +138,11 @@ em { font-style: normal; color: var(--text); }
 }
 .tchip.up b { color: var(--green); }
 .tchip.down b { color: var(--red); }
-/* Only in empty space: above the headline, above the chart, and below both. */
+/* Only in empty space: above the headline, above the chart, and below both. On a screen
+   narrower or shorter than this there is no empty space left for them, so they are hidden. */
 .tchip:nth-child(1){top:9%;left:30%}.tchip:nth-child(2){top:12%;right:6%}
 .tchip:nth-child(3){bottom:8%;left:4%}.tchip:nth-child(4){bottom:8%;right:30%}
+@media (max-width: 1359px), (max-height: 819px) { .ticker-field { display: none; } }
 
 .pill {
   display: inline-flex; align-items: center; gap: .5rem; padding: .4rem .85rem; border-radius: var(--radius);
