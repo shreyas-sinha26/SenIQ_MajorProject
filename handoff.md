@@ -69,7 +69,9 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
   upgraded. App, Postgres 15 and Caddy (HTTPS) run in Docker; nightly encrypted backups go to
   S3; budget `seniq-monthly`, $22. The dev database was copied in at the first deploy (3,081
   articles, 13 accounts). Switches on the server (`deploy/switches.env`): FinBERT, IPO Watch,
-  India smart money, Claude (`CLAUDE_REPORTS=1`) and email on; listed news off; no Ollama.
+  India smart money and Claude (`CLAUDE_REPORTS=1`) on; email off, because Gmail refuses the
+  app password in `.env` (`EAUTH`, from the Mac too) and with email on a new account cannot
+  sign in until it opens a link; listed news off; no Ollama.
   The local `.env` is unchanged, so a local `npm start` would run a second copy of the
   scheduled jobs and email the same accounts: stop one before starting the other.
   First pipeline run on the server: FinBERT read 322 stories; GDELT answered 2 of 8 queries
