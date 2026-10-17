@@ -10,10 +10,14 @@ test
 *.md
 !README.md
 .DS_Store
-scripts
 # Local-only workspaces — never part of the image.
 strategy-service
 eval
+models
+training
+samples
+data/archive
+deploy
 # Every other hidden file or folder at the top level (editor and tool settings, virtualenvs).
 .*
 !.env.example

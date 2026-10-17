@@ -215,8 +215,8 @@ The tests run offline: no database, no API calls, no model downloads.
   "90-day normal" rests on less than that until the store fills.
 - **Sentiment has been checked on two small hand-labelled sheets only** (below), and matches
   the labels on about two pairs in three. Treat the readings as a signal, not a measurement.
-- **Nothing is hosted.** `DEPLOY.md` and `render.yaml` describe a deployment that has not
-  been carried out.
+- **Hosting is v1 only, on one AWS server** (`DEPLOY.md`, `deploy/`). The strategy engine
+  is not deployed, so the v2 pages are off there.
 - **Payments are not wired.** Upgrading a tier works only through the development stub.
 - **macOS ↔ Windows:** native modules don't transfer across platforms. If you copied
   `node_modules` from another OS and hit a `sharp` load error, run a clean `npm install`.
