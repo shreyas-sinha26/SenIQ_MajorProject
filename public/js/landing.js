@@ -12,30 +12,6 @@
   const yearEl = document.getElementById('year');
   if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 
-  // ─── Live UTC clock ──────────────────────────────────────
-  const clockEl = document.getElementById('market-clock');
-  if (clockEl) {
-    const pad = (n) => String(n).padStart(2, '0');
-    const tick = () => {
-      const d = new Date();
-      clockEl.textContent = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
-    };
-    tick();
-    setInterval(tick, 1000);
-  }
-
-  // ─── Market % jitter ─────────────────────────────────────
-  if (!reduceMotion) {
-    const pcts = document.querySelectorAll('.mkt-pct[data-pct]');
-    setInterval(() => {
-      pcts.forEach((el) => {
-        const base = parseFloat(el.dataset.pct);
-        const v = base + (Math.random() - 0.5) * 0.3;
-        el.textContent = (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
-      });
-    }, 2200);
-  }
-
   // Disclaimer from API
   fetch('/api/config')
     .then((r) => r.json())
@@ -77,7 +53,7 @@
     burger.addEventListener('click', () => {
       const open = links.style.display === 'flex';
       if (open) { links.style.cssText = ''; return; }
-      links.style.cssText = 'display:flex;position:absolute;top:100%;left:0;right:0;flex-direction:column;gap:1rem;padding:1.2rem 1.4rem;background:rgba(7,7,13,.96);border-bottom:1px solid rgba(255,255,255,.08);';
+      links.style.cssText = 'display:flex;position:absolute;top:100%;left:0;right:0;flex-direction:column;gap:1rem;padding:1.2rem 1.4rem;background:rgba(255,255,255,.98);border-bottom:1px solid #E2E8F0;box-shadow:0 12px 24px -12px rgba(15,23,42,.15);';
     });
     links.querySelectorAll('a').forEach((a) => a.addEventListener('click', () => { links.style.cssText = ''; }));
   }
@@ -130,7 +106,7 @@
   // ─── Hero intro timeline ──────────────────────────────────
   // The CSS hides [data-hero] until this runs. A from() tween animates towards the value the
   // element has when the timeline is built, so they are made visible first: left at the
-  // CSS's 0, the sub-heading, the button and the trust bar animated from 0 to 0 and vanished.
+  // CSS's 0, the sub-heading and the button animated from 0 to 0 and vanished.
   gsap.set('[data-hero]', { opacity: 1 });
   gsap.timeline({ defaults: { ease: 'power3.out' } })
     .from('.nav', { y: -40, opacity: 0, duration: 0.8 })
@@ -138,7 +114,6 @@
     .from('.hero-title .word', { yPercent: 115, opacity: 0, duration: 0.85, stagger: 0.06 }, '-=0.3')
     .from('.hero-sub', { y: 24, opacity: 0, duration: 0.7 }, '-=0.3')
     .from('.hero-actions', { y: 24, opacity: 0, duration: 0.7 }, '-=0.5')
-    .from('.trust-bar', { y: 20, opacity: 0, duration: 0.6 }, '-=0.5')
     .from('.hero-chart-wrap', { x: 50, opacity: 0, scale: 0.94, duration: 1.1, ease: 'power4.out' }, '-=0.9')
     .from('.chart-chip', { scale: 0, opacity: 0, duration: 0.5, stagger: 0.08, ease: 'back.out(1.7)' }, '-=0.6')
     .from('.dash-badge', { y: 28, opacity: 0, duration: 0.6 }, '-=0.5')
