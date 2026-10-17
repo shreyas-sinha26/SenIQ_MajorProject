@@ -128,11 +128,14 @@
   gsap.registerPlugin(ScrollTrigger);
 
   // ─── Hero intro timeline ──────────────────────────────────
+  // The CSS hides [data-hero] until this runs. A from() tween animates towards the value the
+  // element has when the timeline is built, so they are made visible first: left at the
+  // CSS's 0, the sub-heading, the button and the trust bar animated from 0 to 0 and vanished.
+  gsap.set('[data-hero]', { opacity: 1 });
   gsap.timeline({ defaults: { ease: 'power3.out' } })
     .from('.nav', { y: -40, opacity: 0, duration: 0.8 })
     .from('.pill', { y: 20, opacity: 0, duration: 0.6 }, '-=0.3')
     .from('.hero-title .word', { yPercent: 115, opacity: 0, duration: 0.85, stagger: 0.06 }, '-=0.3')
-    .to('[data-hero]', { opacity: 1, duration: 0.01 }, '-=0.4')
     .from('.hero-sub', { y: 24, opacity: 0, duration: 0.7 }, '-=0.3')
     .from('.hero-actions', { y: 24, opacity: 0, duration: 0.7 }, '-=0.5')
     .from('.trust-bar', { y: 20, opacity: 0, duration: 0.6 }, '-=0.5')
