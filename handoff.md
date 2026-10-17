@@ -61,7 +61,8 @@ pages. With it off, the v2 routes (`/api/strategies`, `/api/paper`, `/api/keys`,
 
 ## 3. Current state
 
-- **Hosted since 2026-10-17: v1 on AWS, https://seniq.15-252-175-25.sslip.io/app**
+- **Hosted since 2026-10-17: v1 on AWS, https://seniq.duckdns.org/** (the app at `/app`;
+  a free DuckDNS name Annas made, pointing at the fixed IP `15.252.175.25`)
   (`DEPLOY.md`, `deploy/`). One `t4g.small` server (2 GB, 2 GB swap) in Mumbai, in the AWS
   account that held the IBS categorizer (`914800440621`, CLI profile `seniq`). That account is
   on AWS's Free plan: only free-tier instance types, usage paid from its credits ($189 on

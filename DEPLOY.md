@@ -44,8 +44,9 @@ AWS_PROFILE=seniq deploy/deploy.sh
 ```
 
 At the end it prints the address: `https://seniq.<ip-with-dashes>.sslip.io/app`, a free name
-that points at the server's fixed IP with no account. A real domain later: point it at the IP and run
-again with `SITE_DOMAIN=<domain>`.
+that points at the server's fixed IP with no account. Since 2026-10-17 the site uses
+**`seniq.duckdns.org`**, a free DuckDNS name set in `deploy/switches.env` (`SITE_DOMAIN`). If
+the server's IP ever changes, update it at duckdns.org.
 
 ## Settings
 
