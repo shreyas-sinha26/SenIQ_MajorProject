@@ -590,7 +590,10 @@ const LLM = {
     API_KEY: process.env.AIROUTER_API_KEY || '',
     BASE_URL: (process.env.AIROUTER_BASE_URL || 'https://api.airouter.in/v1').replace(/\/$/, ''),
     MODEL: process.env.AIROUTER_MODEL || 'anthropic/claude-haiku-5.5',
-    TIMEOUT_MS: 60000,
+    // How long one call through the router may take. 60 s cut off Ask and the brief on
+    // 2026-10-17 when two calls went out together; the router itself was answering in 0.1 s,
+    // the wait was for the model behind it. Ask's effort stays at the model's default (medium).
+    TIMEOUT_MS: 120000,
   },
 };
 
