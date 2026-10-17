@@ -74,8 +74,8 @@ aws cloudformation deploy --stack-name $STACK --template-file deploy/aws/seniq.y
 
 out() { aws cloudformation describe-stacks --stack-name $STACK --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
 INSTANCE=$(out InstanceId); IP=$(out PublicIp); BUCKET=$(out BucketName)
-# A free address that points at the server, with no account: 1-2-3-4.sslip.io → 1.2.3.4.
-: "${SITE_DOMAIN:=${IP//./-}.sslip.io}"
+# A free address that points at the server, with no account: seniq.1-2-3-4.sslip.io → 1.2.3.4.
+: "${SITE_DOMAIN:=seniq.${IP//./-}.sslip.io}"
 
 echo "==> The app's settings → Parameter Store (encrypted)"
 TIER=Standard; [ "$(wc -c < "$APP_ENV_FILE")" -gt 4000 ] && TIER=Advanced

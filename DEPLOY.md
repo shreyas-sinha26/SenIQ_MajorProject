@@ -43,8 +43,8 @@ Every update after that (ships the last commit, not uncommitted edits):
 AWS_PROFILE=seniq deploy/deploy.sh
 ```
 
-At the end it prints the address: `https://<ip-with-dashes>.sslip.io/app`, a free name that
-points at the server's fixed IP with no account. A real domain later: point it at the IP and run
+At the end it prints the address: `https://seniq.<ip-with-dashes>.sslip.io/app`, a free name
+that points at the server's fixed IP with no account. A real domain later: point it at the IP and run
 again with `SITE_DOMAIN=<domain>`.
 
 ## Settings
