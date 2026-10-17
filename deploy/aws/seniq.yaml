@@ -4,11 +4,11 @@ Description: SenIQ v1 - one server for the app, its scheduled jobs and its datab
 Parameters:
   InstanceType:
     Type: String
-    Default: t4g.medium
-    Description: 2 vCPU, 4 GB (ARM). Enough for the app, FinBERT and Postgres together.
+    Default: t4g.small
+    Description: 2 vCPU, 2 GB (ARM), with 2 GB of swap. The account is on AWS's Free plan, which allows only free-tier instance types; t4g.medium (4 GB) needs the Paid plan.
   VolumeSize:
     Type: Number
-    Default: 30
+    Default: 20
     Description: Disk in GB (the system, Docker images, the database).
   LatestAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>

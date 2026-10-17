@@ -4,16 +4,16 @@
 #   cost-alerts.sh <email[,email…]> <monthly budget in USD>
 #
 # The same alerts as KeniClean's account: the budget counts usage before credits and with tax.
-# Expected spend for SenIQ is about $27 a month with GST (t4g.medium $16.35, 30 GB disk $2.74,
-# fixed IP $3.65, S3 and the rest under $0.20, then 18% GST); the $35 budget is that with the
-# same headroom KeniClean has ($15 expected, $20 budget), so the 80% email means a month
-# running above the estimate, not an ordinary one.
+# Expected spend for SenIQ is about $16 a month with GST (t4g.small $8.18, 20 GB disk $1.82,
+# fixed IP $3.65, S3 and the rest under $0.20, then 18% GST), paid from the Free plan's
+# credits; the $22 budget is that with the same headroom KeniClean has ($15 expected, $20
+# budget), so the 80% email means a month running above the estimate, not an ordinary one.
 #
 # 1. A monthly budget: emails at 80% and 100% of the limit, and when AWS forecasts the month
 #    will end above it. It counts usage BEFORE credits, so it still warns while credits are paying.
 # 2. Cost Anomaly Detection: a daily email when any AWS service's spending looks unusual.
 set -euo pipefail
-EMAILS=$1 LIMIT=${2:-35}
+EMAILS=$1 LIMIT=${2:-22}
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 NAME=seniq-monthly
 # One subscriber entry per address, for the budget and for the anomaly alert.

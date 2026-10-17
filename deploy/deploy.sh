@@ -15,11 +15,11 @@ cd "$(dirname "$0")/.."
 
 : "${AWS_REGION:=ap-south-1}"                    # Mumbai
 : "${EXPECTED_ACCOUNT:=914800440621}"             # the account that held the IBS categorizer
-: "${INSTANCE_TYPE:=t4g.medium}"
+: "${INSTANCE_TYPE:=t4g.small}"                 # the account is on AWS's Free plan: only free-tier types
 : "${REF:=HEAD}"
 : "${COPY_DB:=0}"
 : "${ALERT_EMAIL:=}"                              # cost alerts, comma-separated; empty = none
-: "${MONTHLY_BUDGET_USD:=35}"                     # expected about $27 a month with GST (see deploy/aws/cost-alerts.sh)
+: "${MONTHLY_BUDGET_USD:=22}"                     # expected about $16 a month with GST (see deploy/aws/cost-alerts.sh)
 STACK=seniq
 export AWS_REGION AWS_DEFAULT_REGION=$AWS_REGION
 
