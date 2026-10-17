@@ -44,8 +44,9 @@ AWS_PROFILE=seniq deploy/deploy.sh
 ```
 
 At the end it prints the address: `https://seniq.<ip-with-dashes>.sslip.io/app`, a free name
-that points at the server's fixed IP with no account. A real domain later: point it at the IP and run
-again with `SITE_DOMAIN=<domain>`.
+that points at the server's fixed IP with no account. Since 2026-10-17 the site uses
+**`seniq.duckdns.org`**, a free DuckDNS name set in `deploy/switches.env` (`SITE_DOMAIN`). If
+the server's IP ever changes, update it at duckdns.org.
 
 ## Settings
 
@@ -57,6 +58,16 @@ again with `SITE_DOMAIN=<domain>`.
 - `deploy/deploy.sh --settings` lists the names it would send, without calling AWS.
 - The database password, the session secret (`JWT_SECRET`) and the backup passphrase are made
   on the server at the first run (`/opt/seniq/.env`); the passphrase is also in Parameter Store.
+
+## The admin account
+
+`admin@seniq.duckdns.org`, created by the app on start, then moved to the Free plan so it never
+calls Claude (the admin tier switcher can preview Plus and Pro). Its password is made at the
+first deploy and kept encrypted in Parameter Store:
+
+```bash
+aws ssm get-parameter --profile seniq --region ap-south-1 --name /seniq/admin_password --with-decryption --query Parameter.Value --output text
+```
 
 ## Look at it
 

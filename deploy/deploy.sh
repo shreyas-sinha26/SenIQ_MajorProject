@@ -44,7 +44,7 @@ KEYS=$CARRY; [ "$(switch ENABLE_EMAIL)" = 1 ] && KEYS="$KEYS $EMAIL_KEYS"
 for k in $KEYS; do emit "$k" "$(local_value "$k")"; done
 # SEC asks every caller for a contact address.
 grep -q '^SEC_USER_AGENT=' "$APP_ENV_FILE" || emit SEC_USER_AGENT "SenIQ $(local_value CONTACT_EMAIL)"
-grep -vE '^\s*(#|$)' deploy/switches.env | grep -vE '^(ENABLE_EMAIL|OLLAMA_URL)=' | while IFS='=' read -r k v; do emit "$k" "$v"; done
+grep -vE '^\s*(#|$)' deploy/switches.env | grep -vE '^(ENABLE_EMAIL|OLLAMA_URL|SITE_DOMAIN)=' | while IFS='=' read -r k v; do emit "$k" "$v"; done
 if [ -n "$(switch OLLAMA_URL)" ]; then
   emit OLLAMA_URL "$(switch OLLAMA_URL)"
   emit COMPANY_SENTIMENT_LLM ollama
@@ -75,6 +75,7 @@ aws cloudformation deploy --stack-name $STACK --template-file deploy/aws/seniq.y
 out() { aws cloudformation describe-stacks --stack-name $STACK --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
 INSTANCE=$(out InstanceId); IP=$(out PublicIp); BUCKET=$(out BucketName)
 # A free address that points at the server, with no account: seniq.1-2-3-4.sslip.io → 1.2.3.4.
+: "${SITE_DOMAIN:=$(switch SITE_DOMAIN)}"
 : "${SITE_DOMAIN:=seniq.${IP//./-}.sslip.io}"
 
 echo "==> The app's settings → Parameter Store (encrypted)"

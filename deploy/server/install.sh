@@ -30,6 +30,15 @@ ENV
 fi
 
 set_env() { grep -v "^$1=" "$ENV_FILE" > "$ENV_FILE.tmp" || true; echo "$1=$2" >> "$ENV_FILE.tmp"; mv "$ENV_FILE.tmp" "$ENV_FILE"; }
+
+# The admin account's password: made once, kept in Parameter Store so it can be read without
+# logging in to the server. The app creates the account on start (services/seedAdmin.js).
+if ! grep -q '^ADMIN_PASSWORD=' "$ENV_FILE"; then
+  ADMIN_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)
+  echo "ADMIN_PASSWORD=$ADMIN_PASSWORD" >> "$ENV_FILE"
+  put admin_password "$ADMIN_PASSWORD"
+  echo "admin password created: /seniq/admin_password in Parameter Store"
+fi
 set_env SITE_DOMAIN "$SITE_DOMAIN"
 set_env AWS_REGION "$REGION"
 set_env BACKUP_BUCKET "$BUCKET"
@@ -60,6 +69,21 @@ fi
 
 compose up -d --build --remove-orphans
 docker image prune -f >/dev/null
+
+# The admin account is created as Pro by the app; Free keeps it from calling Claude. Only
+# once, so a plan the admin picks later with the tier switcher is left alone.
+if [ ! -f /opt/seniq/.admin-free ]; then
+  for _ in $(seq 1 30); do
+    ID=$(compose exec -T postgres psql -U seniq -d seniq -tAc "SELECT id FROM users WHERE email = 'admin@seniq.duckdns.org'")
+    [ -n "$ID" ] && break; sleep 5
+  done
+  if [ -n "$ID" ]; then
+    compose exec -T postgres psql -U seniq -d seniq -c "UPDATE users SET subscription_tier = 'free' WHERE id = $ID" >/dev/null
+    touch /opt/seniq/.admin-free; echo "admin account $ID on the Free plan"
+  else
+    echo "!! the admin account did not appear; it stays as the app made it"
+  fi
+fi
 
 # Nightly encrypted backup at 02:00 India time (20:30 UTC).
 cat > /etc/cron.d/seniq-backup <<CRON
