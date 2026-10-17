@@ -74,8 +74,20 @@ Every night at 02:00 IST: `pg_dump`, encrypted with the passphrase, to
 
 ## Cost
 
-`t4g.medium` + 30 GB disk + the fixed IP: about $23 a month in Mumbai. `ALERT_EMAIL` sets up a
-$30 monthly budget alert and a daily unusual-spending alert.
+| Item | A month |
+|---|---|
+| `t4g.medium` server | $16.35 |
+| 30 GB gp3 disk | $2.74 |
+| Fixed public IP | $3.65 |
+| S3 backups and releases, Parameter Store, data out (first 100 GB free) | under $0.20 |
+| **Before tax** | **about $23** |
+| **With 18% GST** | **about $27** |
+
+`ALERT_EMAIL` (one address or several, comma-separated) sets up the same alerts as KeniClean's
+account: a monthly budget of $35 counting usage before credits and with tax, with emails at 80%,
+at 100% and when AWS forecasts the month above it, and a daily email when any service's
+spending looks unusual by $2 or more. A burst of CPU above the server's baseline is billed
+extra (a few cents an hour at most); the alerts would show it.
 
 ## Taking it down
 

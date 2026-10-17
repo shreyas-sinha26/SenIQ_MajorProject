@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Put SenIQ v1 online on AWS, or update it. Run from the project folder on your computer:
 #
-#   AWS_PROFILE=seniq COPY_DB=1 ALERT_EMAIL=you@example.com deploy/deploy.sh    # first time
+#   AWS_PROFILE=seniq COPY_DB=1 ALERT_EMAIL=a@x.com,b@y.com deploy/deploy.sh     # first time
 #   AWS_PROFILE=seniq deploy/deploy.sh                                          # every update
 #   deploy/deploy.sh --settings        # only list the setting names it would send; no AWS call
 #
@@ -18,8 +18,8 @@ cd "$(dirname "$0")/.."
 : "${INSTANCE_TYPE:=t4g.medium}"
 : "${REF:=HEAD}"
 : "${COPY_DB:=0}"
-: "${ALERT_EMAIL:=}"                              # cost alerts; empty = none
-: "${MONTHLY_BUDGET_USD:=30}"                     # expected spend is about $23
+: "${ALERT_EMAIL:=}"                              # cost alerts, comma-separated; empty = none
+: "${MONTHLY_BUDGET_USD:=35}"                     # expected about $27 a month with GST (see deploy/aws/cost-alerts.sh)
 STACK=seniq
 export AWS_REGION AWS_DEFAULT_REGION=$AWS_REGION
 
