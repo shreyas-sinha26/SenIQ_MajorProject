@@ -121,6 +121,7 @@ em { font-style: normal; color: var(--text); }
 .nav-cta { display: flex; align-items: center; gap: .6rem; }
 .nav-cta .btn-ghost { font-size: .85rem; letter-spacing: .03em; }
 .nav-burger { display: none; flex-direction: column; gap: 5px; background: none; border: 0; cursor: pointer; padding: 6px; }
+.nav-links .nav-signin-m { display: none; }
 .nav-burger span { width: 22px; height: 2px; background: var(--text); border-radius: 2px; transition: .3s; }
 
 /* ─── Hero ─── */
@@ -373,6 +374,9 @@ em { font-style: normal; color: var(--text); }
   .nav.scrolled { padding: .6rem 1.1rem; }
   .nav-links { display: none; }
   .nav-cta .btn-ghost { display: none; }
+  /* The links and Sign In move into the menu behind this button. */
+  .nav-burger { display: flex; }
+  .nav-links .nav-signin-m { display: block; color: var(--text); font-weight: 600; }
   .hero { padding: 6.5rem 1.1rem 2.5rem; }
   .section { padding: 3.4rem 1.1rem; }
   .problem-grid, .sm-cards, .market-grid { grid-template-columns: 1fr; }
