@@ -1,0 +1,57 @@
+# SenIQ v1 on one server:
+#   caddy (HTTPS) -> app (site, API, scheduled jobs, FinBERT) -> postgres
+# Settings come from /opt/seniq/.env, which deploy/server/install.sh writes on the server.
+# Exactly one app container: the scheduled jobs run inside it, and a second copy would run
+# every job twice.
+name: seniq
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # HTTPS certificates
+      - caddy_config:/config
+    depends_on: [app]
+
+  app:
+    build: ..
+    restart: unless-stopped
+    env_file: /opt/seniq/app.env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      TZ: Asia/Kolkata
+      DATABASE_URL: postgres://seniq:${POSTGRES_PASSWORD}@postgres:5432/seniq
+      DATABASE_SSL: disable   # the database is on the same private Docker network
+      JWT_SECRET: ${JWT_SECRET}
+      APP_URL: https://${SITE_DOMAIN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: seniq
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: seniq
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seniq -d seniq"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pgdata:

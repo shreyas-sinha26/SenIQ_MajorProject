@@ -1,0 +1,7 @@
+# HTTPS front door. Caddy gets and renews the certificate by itself once the address
+# points at this server.
+
+{$SITE_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3000
+}
