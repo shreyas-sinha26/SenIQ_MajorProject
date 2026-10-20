@@ -328,6 +328,22 @@ check('the step stops at its budget, and the names not reached go first next run
   assert.ok(INGEST.GDELT_TIMEOUT_MS > 12000 && INGEST.GDELT_GAP_MS >= 5000);
 });
 
+section('GDELT news is English only:');
+check('every query asks for English sources, and a story in another language is dropped', () => {
+  const { gdeltUrl, toArticles } = require('../server/services/ingest/gdelt');
+  const query = decodeURIComponent(/query=([^&]+)/.exec(gdeltUrl('"Asian Paints"'))[1]);
+  assert.strictEqual(query, '"Asian Paints" sourcelang:english');
+  const story = (title, language) => ({ url: `https://x.test/${title}`, title, language, seendate: '20261020T080000Z' });
+  const out = toArticles({ articles: [
+    story('Fed holds rates', 'English'),
+    story('骨质疏松不再是老年病', 'Chinese'),
+    story('Günümüz dünyasında şeriat', 'Turkish'),
+    story('No language given', undefined),
+  ] }, 'macro');
+  assert.deepStrictEqual(out.map((a) => a.title), ['Fed holds rates', 'No language given']);
+  assert.ok(out.every((a) => a.platform === 'macro'));
+});
+
 (async () => {
   for (const step of pending) await step();
   console.log(`\n${passed} QA-finding checks passed`);
