@@ -343,6 +343,11 @@ check('every query asks for English sources, and a story in another language is 
   assert.deepStrictEqual(out.map((a) => a.title), ['Fed holds rates', 'No language given']);
   assert.ok(out.every((a) => a.platform === 'macro'));
 });
+check('a dismissed alert is left off the Alerts page', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '../server/routes/news.js'), 'utf8');
+  const route = src.slice(src.indexOf("router.get('/alerts'"), src.indexOf("router.put('/alerts/read-all'"));
+  assert.ok(/WHERE al\.user_id = \$1 AND NOT al\.dismissed/.test(route), route);
+});
 
 (async () => {
   for (const step of pending) await step();
