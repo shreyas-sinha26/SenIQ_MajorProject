@@ -221,7 +221,7 @@ router.get('/alerts', async (req, res) => {
       `SELECT al.*, e.url AS article_url
          FROM alerts al
          LEFT JOIN events e ON e.id = al.event_id
-        WHERE al.user_id = $1
+        WHERE al.user_id = $1 AND NOT al.dismissed
         ORDER BY al.created_at DESC LIMIT 50`,
       [req.user.id]
     );

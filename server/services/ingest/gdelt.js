@@ -63,34 +63,42 @@ function parseSeenDate(s) {
   return new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi, +se)).toISOString();
 }
 
+// GDELT searches news in every language, and about a third of what a plain query returns is
+// not English (2026-10-20: 9 of 25 for "recession" were Chinese, Turkish, Russian, Arabic or
+// Greek). FinBERT and the alert text read English only, so every query asks for English
+// sources, and each story's own `language` is checked as well. Pure.
+function gdeltUrl(queryStr) {
+  return `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(`${queryStr} sourcelang:english`)}` +
+    `&mode=ArtList&format=json&sort=DateDesc` +
+    `&maxrecords=${INGEST.GDELT_MAX_RECORDS}&timespan=${INGEST.GDELT_TIMESPAN}`;
+}
+
+// GDELT's answer → our article shape, English stories only. Pure.
+function toArticles(data, platform) {
+  return (data.articles || [])
+    .filter((a) => a.url && a.title)
+    .filter((a) => !a.language || /^english$/i.test(a.language))
+    .map((a) => ({
+      external_id: hashId('gdelt', a.url),
+      title: clampText(a.title, 300),
+      summary: '',
+      source: a.domain || 'GDELT',
+      url: a.url,
+      image_url: a.socialimage || '',
+      published_at: parseSeenDate(a.seendate),
+      platform,
+    }));
+}
+
 // One query. → { articles, problem }: problem is null, or why nothing came back
 // ('HTTP 429', 'timed out', 'no connection', 'not JSON'), so a run can say what happened.
 async function runQuery(queryStr, platform) {
-  const url =
-    `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(queryStr)}` +
-    `&mode=ArtList&format=json&sort=DateDesc` +
-    `&maxrecords=${INGEST.GDELT_MAX_RECORDS}&timespan=${INGEST.GDELT_TIMESPAN}`;
   try {
-    const res = await fetchWithTimeout(url, { headers: { 'User-Agent': 'seniq/0.1' } }, INGEST.GDELT_TIMEOUT_MS);
+    const res = await fetchWithTimeout(gdeltUrl(queryStr), { headers: { 'User-Agent': 'seniq/0.1' } }, INGEST.GDELT_TIMEOUT_MS);
     if (!res.ok) return { articles: [], problem: `HTTP ${res.status}` };
     const data = await res.json().catch(() => null);
     if (!data) return { articles: [], problem: 'not JSON' };
-    const arts = data.articles || [];
-    return {
-      problem: null,
-      articles: arts
-        .filter((a) => a.url && a.title)
-        .map((a) => ({
-          external_id: hashId('gdelt', a.url),
-          title: clampText(a.title, 300),
-          summary: '',
-          source: a.domain || 'GDELT',
-          url: a.url,
-          image_url: a.socialimage || '',
-          published_at: parseSeenDate(a.seendate),
-          platform,
-        })),
-    };
+    return { problem: null, articles: toArticles(data, platform) };
   } catch (err) {
     return { articles: [], problem: err && err.name === 'AbortError' ? 'timed out' : 'no connection' };
   }
@@ -156,4 +164,4 @@ async function fetchGdelt(tickers = [], { ask = runQuery, wait = sleep, now = Da
   return articles;
 }
 
-module.exports = { fetchGdelt, runQuery, tallyProblems, INDIA_TICKERS, indiaTerm, indiaBatch };
+module.exports = { fetchGdelt, runQuery, tallyProblems, INDIA_TICKERS, indiaTerm, indiaBatch, gdeltUrl, toArticles };

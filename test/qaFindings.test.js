@@ -328,6 +328,27 @@ check('the step stops at its budget, and the names not reached go first next run
   assert.ok(INGEST.GDELT_TIMEOUT_MS > 12000 && INGEST.GDELT_GAP_MS >= 5000);
 });
 
+section('GDELT news is English only:');
+check('every query asks for English sources, and a story in another language is dropped', () => {
+  const { gdeltUrl, toArticles } = require('../server/services/ingest/gdelt');
+  const query = decodeURIComponent(/query=([^&]+)/.exec(gdeltUrl('"Asian Paints"'))[1]);
+  assert.strictEqual(query, '"Asian Paints" sourcelang:english');
+  const story = (title, language) => ({ url: `https://x.test/${title}`, title, language, seendate: '20261020T080000Z' });
+  const out = toArticles({ articles: [
+    story('Fed holds rates', 'English'),
+    story('骨质疏松不再是老年病', 'Chinese'),
+    story('Günümüz dünyasında şeriat', 'Turkish'),
+    story('No language given', undefined),
+  ] }, 'macro');
+  assert.deepStrictEqual(out.map((a) => a.title), ['Fed holds rates', 'No language given']);
+  assert.ok(out.every((a) => a.platform === 'macro'));
+});
+check('a dismissed alert is left off the Alerts page', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '../server/routes/news.js'), 'utf8');
+  const route = src.slice(src.indexOf("router.get('/alerts'"), src.indexOf("router.put('/alerts/read-all'"));
+  assert.ok(/WHERE al\.user_id = \$1 AND NOT al\.dismissed/.test(route), route);
+});
+
 (async () => {
   for (const step of pending) await step();
   console.log(`\n${passed} QA-finding checks passed`);
