@@ -68,9 +68,22 @@ if [ -n "$ALERT_EMAIL" ]; then
 fi
 
 echo "==> Creating / updating the server (a few minutes the first time)"
+# The server keeps the system image it was built from; only a new server takes the newest.
+RUNNING=$(aws cloudformation describe-stacks --stack-name $STACK --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue" --output text 2>/dev/null || true)
+if [ -n "$RUNNING" ] && [ "$RUNNING" != None ]; then
+  IMAGE_ID=$(aws ec2 describe-instances --instance-ids "$RUNNING" --query 'Reservations[0].Instances[0].ImageId' --output text)
+else
+  IMAGE_ID=$(aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --query Parameter.Value --output text)
+fi
+echo "    system image $IMAGE_ID"
 aws cloudformation deploy --stack-name $STACK --template-file deploy/aws/seniq.yaml \
   --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset \
-  --parameter-overrides InstanceType="$INSTANCE_TYPE"
+  --parameter-overrides InstanceType="$INSTANCE_TYPE" ImageId="$IMAGE_ID"
+# A second guard: CloudFormation may never replace or delete the server, its fixed IP or the
+# bucket. An update that would is refused and rolled back instead of carried out.
+aws cloudformation set-stack-policy --stack-name $STACK --stack-policy-body '{"Statement":[
+  {"Effect":"Deny","Principal":"*","Action":["Update:Replace","Update:Delete"],"Resource":["LogicalResourceId/Server","LogicalResourceId/Address","LogicalResourceId/Bucket"]},
+  {"Effect":"Allow","Principal":"*","Action":"Update:*","Resource":"*"}]}'
 
 out() { aws cloudformation describe-stacks --stack-name $STACK --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
 INSTANCE=$(out InstanceId); IP=$(out PublicIp); BUCKET=$(out BucketName)

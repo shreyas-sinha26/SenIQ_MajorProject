@@ -14,11 +14,14 @@ SEEDED=/opt/seniq/.db-seeded
 
 secret() { openssl rand -hex 32; }
 put() { aws ssm put-parameter --region "$REGION" --name "/seniq/$1" --type SecureString --value "$2" --overwrite >/dev/null; }
+# A value already in Parameter Store, or nothing. A new server reuses these instead of
+# making new ones over them: on 2026-10-26 a replaced server overwrote the backup passphrase.
+saved() { aws ssm get-parameter --region "$REGION" --name "/seniq/$1" --with-decryption --query Parameter.Value --output text 2>/dev/null || true; }
 compose() { docker compose --env-file "$ENV_FILE" "$@"; }
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "first run: creating secrets"
-  BACKUP_PASSPHRASE=$(secret)
+  BACKUP_PASSPHRASE=$(saved backup_passphrase); BACKUP_PASSPHRASE=${BACKUP_PASSPHRASE:-$(secret)}
   umask 077
   cat > "$ENV_FILE" <<ENV
 POSTGRES_PASSWORD=$(secret)
@@ -34,7 +37,7 @@ set_env() { grep -v "^$1=" "$ENV_FILE" > "$ENV_FILE.tmp" || true; echo "$1=$2" >
 # The admin account's password: made once, kept in Parameter Store so it can be read without
 # logging in to the server. The app creates the account on start (services/seedAdmin.js).
 if ! grep -q '^ADMIN_PASSWORD=' "$ENV_FILE"; then
-  ADMIN_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)
+  ADMIN_PASSWORD=$(saved admin_password); ADMIN_PASSWORD=${ADMIN_PASSWORD:-$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)}
   echo "ADMIN_PASSWORD=$ADMIN_PASSWORD" >> "$ENV_FILE"
   put admin_password "$ADMIN_PASSWORD"
   echo "admin password created: /seniq/admin_password in Parameter Store"
@@ -74,7 +77,8 @@ docker image prune -f >/dev/null
 # once, so a plan the admin picks later with the tier switcher is left alone.
 if [ ! -f /opt/seniq/.admin-free ]; then
   for _ in $(seq 1 30); do
-    ID=$(compose exec -T postgres psql -U seniq -d seniq -tAc "SELECT id FROM users WHERE email = 'admin@seniq.duckdns.org'")
+    # The table may not exist yet while the app is still running its first migrations.
+    ID=$(compose exec -T postgres psql -U seniq -d seniq -tAc "SELECT id FROM users WHERE email = 'admin@seniq.duckdns.org'" 2>/dev/null || true)
     [ -n "$ID" ] && break; sleep 5
   done
   if [ -n "$ID" ]; then

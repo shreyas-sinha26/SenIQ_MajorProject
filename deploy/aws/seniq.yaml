@@ -10,9 +10,12 @@ Parameters:
     Type: Number
     Default: 20
     Description: Disk in GB (the system, Docker images, the database).
-  LatestAmi:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+  # The server's system image, passed in by deploy.sh: the image the running server already
+  # has, or the newest Amazon Linux 2023 one for a new server. It was "always the newest"
+  # (an SSM parameter), so on 2026-10-26 a newer image made CloudFormation replace the
+  # server with an empty one. A changed image now means a deliberate decision, not a deploy.
+  ImageId:
+    Type: AWS::EC2::Image::Id
 
 Resources:
   # Backups, release bundles and the one-time database copy. Private, encrypted, never public.
@@ -83,7 +86,7 @@ Resources:
   Server:
     Type: AWS::EC2::Instance
     Properties:
-      ImageId: !Ref LatestAmi
+      ImageId: !Ref ImageId
       InstanceType: !Ref InstanceType
       IamInstanceProfile: !Ref InstanceProfile
       SecurityGroupIds: [!GetAtt SecurityGroup.GroupId]
