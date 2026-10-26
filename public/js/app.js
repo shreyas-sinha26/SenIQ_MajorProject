@@ -1605,16 +1605,8 @@ function initUserMenu() {
     else showToast('Could not refresh. What you see is the last data loaded.', 'error');
   });
 
-  // Password visibility toggles on profile page
-  document.querySelectorAll('.pw-toggle[data-target]').forEach(toggle => {
-    toggle.addEventListener('click', () => {
-      const input = document.getElementById(toggle.dataset.target);
-      if (!input) return;
-      const isHidden = input.type === 'password';
-      input.type = isHidden ? 'text' : 'password';
-      toggle.querySelector('.material-symbols-outlined').textContent = isHidden ? 'visibility_off' : 'visibility';
-    });
-  });
+  // The profile page's password show/hide buttons are wired in initAuth with every other
+  // .pw-toggle. A second handler here made each click flip the field twice: nothing changed.
 
   // Save name
   document.getElementById('profile-save-btn').addEventListener('click', async () => {
