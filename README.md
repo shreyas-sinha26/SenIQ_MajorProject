@@ -277,6 +277,3 @@ scores it.
 - [`IPO_PLAN.md`](IPO_PLAN.md) — sentiment for IPOs and small/mid-caps; IPO Watch (Indian and US IPO calendar, opt-in with `IPO_WATCH=1`) is built, the rest is plan only
 - [`DEPLOY.md`](DEPLOY.md) — deployment steps (not yet executed)
 
-## License
-
-Proprietary — all rights reserved (update as needed).
